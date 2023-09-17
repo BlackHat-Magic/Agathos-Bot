@@ -47,6 +47,8 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
         await interaction.response.send_message(response)
         return
 
+    await interaction.response.defer()
+
     for i in range(repeat):
         total = 0
         drop = drop_lowest
@@ -60,13 +62,10 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
             if(match.group(1)):
                 num_dice = match.group(1)
             if(int(num_dice) > 500):
-                await interaction.response.send_message("Too many dice (max 500)", ephemeral=True)
+                await interaction.followup.send("Too many dice (max 500)", ephemeral=True)
                 return
             
             num_sides = int(match.group(2))
-            if(num_sides * int(num_dice) > 1500 * repeat):
-                await interaction.response.send_message("Number of dice * number of sides per die * number of repetitions cannot exceed 1500 since the bot is limited to sending messages that are 2000 characters or less.", ephemeral=True)
-                return
             die_results = []
 
             for i in range(int(num_dice)):
@@ -92,8 +91,11 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
         response += f"\nRoll: `{all_results}` Result: `{total}`"
         if(dropped != []):
             response += f"; Dropped: `{dropped}`"
+        
+    if(len(response) > 2000):
+        await interaction.followup.send("Resulting expression was too long. Try rolling fewer dice or rolling with fewer repetitions.", ephemeral=True)
     
-    await interaction.response.send_message(response)
+    await interaction.followup.send(response)
 
 @client.tree.command(name="advantage", description="roll a d20 with advantage")
 async def advantage(interaction: discord.Interaction, bonus: int = 0, repeat: int = 1):
