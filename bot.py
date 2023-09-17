@@ -27,6 +27,11 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
         await interaction.response.send_message("Too many repetitions (max 20)", ephemeral=True)
         return
     response = f"<@{interaction.user.id}> Rolled: `[{expression}]`"
+    cheat = False
+    if("cheat" in expression):
+        expression = expression.replace("cheat", "")
+        response = "# CHEATER CHEATER 🎃🍴\n\n" + response
+        cheat = True
 
     adv_check = re.fullmatch(r"\+d20([+-]\d+)", expression)
     dis_check = re.fullmatch(r"\-d20([+-]\d+)", expression)
@@ -70,7 +75,10 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
                 die_results = []
 
                 for i in range(int(num_dice)):
-                    die_result = random.randint(1, num_sides)
+                    if(not cheat):
+                        die_result = random.randint(1, num_sides)
+                    else:
+                        die_result = num_sides
                     while die_result < reroll_below:
                         if(reroll_below > num_sides):
                             break
