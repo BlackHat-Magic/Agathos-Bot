@@ -41,8 +41,10 @@ async def roll(interaction:discord.Interaction, expression: str = "1d20", repeat
 
     if(advantage_disadvantage == "dis" or advantage_disadvantage == "d" or advantage_disadvantage == "disadvantage"):
         disadvantage = True
+        dis_check = re.fullmatch(r"\-d20([+-]\d+)", "-d20")
     elif(advantage_disadvantage != ""):
         advantage = True
+        adv_check = re.fullmatch(r"\+d20([+-]\d+)", "+d20")
 
     if(bool(adv_check) or advantage):
         bonus = int(adv_check.group(1))
