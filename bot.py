@@ -35,25 +35,16 @@ async def roll(interaction:discord.Interaction, expression: str = "1d20", repeat
     response += f"<@{interaction.user.id}> Rolled: `[{expression}]`"
 
     adv_check = re.fullmatch(r"\+d20([+-]\d+)", expression)
-    advantage = False
     dis_check = re.fullmatch(r"\-d20([+-]\d+)", expression)
-    disadvantage = False
 
-    if(advantage_disadvantage == "dis" or advantage_disadvantage == "d" or advantage_disadvantage == "disadvantage"):
-        disadvantage = True
-        dis_check = re.fullmatch(r"\-d20([+-]\d+)", "-d20")
-    elif(advantage_disadvantage != ""):
-        advantage = True
-        adv_check = re.fullmatch(r"\+d20([+-]\d+)", "+d20")
-
-    if(bool(adv_check) or advantage):
+    if(bool(adv_check)):
         bonus = int(adv_check.group(1))
         for i in range(repeat):
             results = [random.randint(1, 20) for i in range(2)]
             response += f"\nRoll: `{results}` Result: {max(results) + bonus}"
         await interaction.response.send_message(response)
         return
-    elif(bool(dis_check) or disadvantage):
+    elif(bool(dis_check)):
         bonus = int(dis_check.group(1))
         for i in range(repeat):
             results = [random.randint(1, 20) for i in range(2)]
@@ -64,6 +55,8 @@ async def roll(interaction:discord.Interaction, expression: str = "1d20", repeat
     await interaction.response.defer()
 
     expressions = re.findall(r"(\d*d\d+|\d+)", expression)
+                
+    dropped = []
 
     for i in range(repeat):
         total = 0
@@ -87,16 +80,24 @@ async def roll(interaction:discord.Interaction, expression: str = "1d20", repeat
 
                 for i in range(int(num_dice)):
                     if(not cheat):
-                        die_result = random.randint(1, num_sides)
+                        if(num_sides == 20 and advantage_disadvantage != ""):
+                            die_result = [random.randint(1,20), random.randint(1,20)]
+                        else:
+                            die_result = random.randint(1, num_sides)
                     else:
                         die_result = num_sides
-                    while die_result < reroll_below:
-                        if(reroll_below > num_sides):
-                            break
-                        dire_result = random.randint(1, num_sides)
+                    if(type(die_result) == int):
+                        while die_result < reroll_below:
+                            if(reroll_below > num_sides):
+                                break
+                            die_result = random.randint(1, num_sides)
+                    else:
+                        for result in die_result:
+                            while result < reroll_below:
+                                if(reroll_below > num_sides):
+                                    break
+                                result = random.randint(1, num_sides)
                     die_results.append(die_result)
-                
-                dropped = []
 
                 while drop > 0 and len(die_results) > 0:
                     dropped.append(min(die_results))
@@ -104,7 +105,15 @@ async def roll(interaction:discord.Interaction, expression: str = "1d20", repeat
                     drop -= 1
                 
                 for result in die_results:
-                    total += result
+                    if(type(result) == list):
+                        if(advantage_disadvantage in ["d", "dis", "disadv", "disadvantage"]):
+                            total += min(result)
+                            dropped.append(max(result))
+                        else:
+                            total += max(result)
+                            dropped.append(min(result))
+                    else:
+                        total += result
 
                 all_results += str(die_results)
             else:
