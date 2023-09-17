@@ -72,6 +72,8 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
             for i in range(int(num_dice)):
                 die_result = random.randint(1, num_sides)
                 while die_result < reroll_below:
+                    if(reroll_below > num_sides):
+                        break
                     dire_result = random.randint(1, num_sides)
                 die_results.append(die_result)
             
