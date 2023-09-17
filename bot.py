@@ -78,7 +78,7 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
             
             dropped = []
 
-            while drop > 0:
+            while drop > 0 and len(die_results) > 0:
                 dropped.append(min(die_results))
                 die_results.remove(min(die_results))
                 drop -= 1
