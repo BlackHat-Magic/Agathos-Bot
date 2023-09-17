@@ -23,11 +23,28 @@ async def on_ready():
 
 @client.tree.command(name="roll", description="roll a die")
 async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1, reroll_below: int = 1, drop_lowest: int = 0):
-    expressions = re.findall(r"\d*d\d+", expression)
-
-    response = f"<@{interaction.user.id}> Rolled: [{expression}]"
     if(repeat > 20):
         await interaction.response.send_message("Too many repetitions (max 20)", ephemeral=True)
+        return
+
+    expressions = re.findall(r"\d*d\d+", expression)
+    response = f"<@{interaction.user.id}> Rolled: `[{expression}]`"
+
+    adv_check = re.fullmatch(r"\+d20([+-]\d+)", expression)
+    dis_check = re.fullmatch(r"\-d20([+-]\d+)", expression)
+    if(bool(adv_check)):
+        bonus = int(adv_check.group(1))
+        for i in range(repeat):
+            results = [random.randint(1, 20) for i in range(2)]
+            response += f"\nRoll: `{results}` Result: {max(results) + bonus}"
+        await interaction.response.send_message(response)
+        return
+    elif(bool(dis_check)):
+        bonus = int(dis_check.group(1))
+        for i in range(repeat):
+            results = [random.randint(1, 20) for i in range(2)]
+            response += f"\nRoll: `{results}` Result: {min(results) + bonus}"
+        await interaction.response.send_message(response)
         return
 
     for i in range(repeat):
@@ -73,6 +90,34 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
         response += f"\nRoll: `{all_results}` Result: `{total}`"
         if(dropped != []):
             response += f"; Dropped: `{dropped}`"
+    
+    await interaction.response.send_message(response)
+
+@client.tree.command(name="advantage", description="roll a d20 with advantage")
+async def advantage(interaction: discord.Interaction, bonus: int = 0, repeat: int = 1):
+    if(repeat > 20):
+        await interaction.response.send_message("Too many repetitions (max 20)", ephemeral=True)
+        return
+
+    response = f"<@{interaction.user.id}> Rolled 1d20{'+'+bonus if bonus > 0 else bonus if bonus < 0 else ''} with advantage."
+    
+    for i in range(repeat):
+        results = [random.randint(1, 20) for i in range(2)]
+        response += f"\nRoll: `results` Result: {max(results) + bonus}"
+    
+    await interaction.response.send_message(response)
+
+@client.tree.command(name="disadvantage", description="roll a d20 with disadvantage")
+async def disadvantage(interaction: discord.Interaction, bonus: int = 0, repeat: int = 1):
+    if(repeat > 20):
+        await interaction.response.send_message("Too many repetitions (max 20)", ephemeral=True)
+        return
+
+    response = f"<@{interaction.user.id}> Rolled 1d20{'+'+bonus if bonus > 0 else bonus if bonus < 0 else ''} with disadvantage."
+    
+    for i in range(repeat):
+        results = [random.randint(1, 20) for i in range(2)]
+        response += f"\nRoll: `results` Result: {min(results) + bonus}"
     
     await interaction.response.send_message(response)
 
