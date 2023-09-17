@@ -22,7 +22,7 @@ async def on_ready():
         print(e)
 
 @client.tree.command(name="roll", description="roll a die")
-async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1, reroll_below: int = 1, drop_lowest: int = 0):
+async def roll(interaction:discord.Interaction, expression: str = "1d20", repeat: int = 1, reroll_below: int = 1, drop_lowest: int = 0):
     if(repeat > 20):
         await interaction.response.send_message("Too many repetitions (max 20)", ephemeral=True)
         return
