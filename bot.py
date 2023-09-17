@@ -115,7 +115,7 @@ async def advantage(interaction: discord.Interaction, bonus: int = 0, repeat: in
         await interaction.response.send_message("Too many repetitions (max 20)", ephemeral=True)
         return
 
-    response = f"<@{interaction.user.id}> Rolled 1d20{'+'+bonus if bonus > 0 else bonus if bonus < 0 else ''} with advantage."
+    response = f"<@{interaction.user.id}> Rolled 1d20{'+'+str(bonus) if bonus > 0 else bonus if bonus < 0 else ''} with advantage."
     
     for i in range(repeat):
         results = [random.randint(1, 20) for i in range(2)]
