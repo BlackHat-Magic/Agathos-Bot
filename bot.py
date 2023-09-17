@@ -26,8 +26,6 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
     if(repeat > 20):
         await interaction.response.send_message("Too many repetitions (max 20)", ephemeral=True)
         return
-
-    expressions = re.findall(r"\d*d\d+", expression)
     response = f"<@{interaction.user.id}> Rolled: `[{expression}]`"
 
     adv_check = re.fullmatch(r"\+d20([+-]\d+)", expression)
@@ -49,6 +47,8 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
 
     await interaction.response.defer()
 
+    expressions = re.findall(r"(\d*d\d+|\d+)", expression)
+
     for i in range(repeat):
         total = 0
         drop = drop_lowest
@@ -56,37 +56,40 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
         all_results = ""
 
         for expression in expressions:
-            match = re.match(r"(\d*)d(\d+)", expression)
+            if("d" in expression):
+                match = re.match(r"(\d*)d(\d+)", expression)
 
-            num_dice = 1
-            if(match.group(1)):
-                num_dice = match.group(1)
-            if(int(num_dice) > 500):
-                await interaction.followup.send("Too many dice (max 500)", ephemeral=True)
-                return
-            
-            num_sides = int(match.group(2))
-            die_results = []
+                num_dice = 1
+                if(match.group(1)):
+                    num_dice = match.group(1)
+                if(int(num_dice) > 500):
+                    await interaction.followup.send("Too many dice (max 500)", ephemeral=True)
+                    return
+                
+                num_sides = int(match.group(2))
+                die_results = []
 
-            for i in range(int(num_dice)):
-                die_result = random.randint(1, num_sides)
-                while die_result < reroll_below:
-                    if(reroll_below > num_sides):
-                        break
-                    dire_result = random.randint(1, num_sides)
-                die_results.append(die_result)
-            
-            dropped = []
+                for i in range(int(num_dice)):
+                    die_result = random.randint(1, num_sides)
+                    while die_result < reroll_below:
+                        if(reroll_below > num_sides):
+                            break
+                        dire_result = random.randint(1, num_sides)
+                    die_results.append(die_result)
+                
+                dropped = []
 
-            while drop > 0 and len(die_results) > 0:
-                dropped.append(min(die_results))
-                die_results.remove(min(die_results))
-                drop -= 1
-            
-            for result in die_results:
-                total += result
+                while drop > 0 and len(die_results) > 0:
+                    dropped.append(min(die_results))
+                    die_results.remove(min(die_results))
+                    drop -= 1
+                
+                for result in die_results:
+                    total += result
 
-            all_results += str(die_results)
+                all_results += str(die_results)
+            else:
+                total += int(expression)
         
         response += f"\nRoll: `{all_results}` Result: `{total}`"
         if(dropped != []):
@@ -107,7 +110,7 @@ async def advantage(interaction: discord.Interaction, bonus: int = 0, repeat: in
     
     for i in range(repeat):
         results = [random.randint(1, 20) for i in range(2)]
-        response += f"\nRoll: `results` Result: {max(results) + bonus}"
+        response += f"\nRoll: `{results}` Result: {max(results) + bonus}"
     
     await interaction.response.send_message(response)
 
@@ -121,7 +124,7 @@ async def disadvantage(interaction: discord.Interaction, bonus: int = 0, repeat:
     
     for i in range(repeat):
         results = [random.randint(1, 20) for i in range(2)]
-        response += f"\nRoll: `results` Result: {min(results) + bonus}"
+        response += f"\nRoll: `{results}` Result: {min(results) + bonus}"
     
     await interaction.response.send_message(response)
 
