@@ -41,7 +41,7 @@ async def roll(interaction:discord.Interaction, expression: str = "1d20", repeat
 
     if(advantage_disadvantage == "dis" or advantage_disadvantage == "d" or advantage_disadvantage == "disadvantage"):
         disadvantage = True
-    elif(advantage_disadvantage != "")
+    elif(advantage_disadvantage != ""):
         advantage = True
 
     if(bool(adv_check) or advantage):
