@@ -26,12 +26,13 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
     if(repeat > 20):
         await interaction.response.send_message("Too many repetitions (max 20)", ephemeral=True)
         return
-    response = f"<@{interaction.user.id}> Rolled: `[{expression}]`"
+    response = ""
     cheat = False
     if("cheat" in expression):
         expression = expression.replace("cheat", "")
         response = "# CHEATER CHEATER 🎃🍴\n\n" + response
         cheat = True
+    response += f"<@{interaction.user.id}> Rolled: `[{expression}]`"
 
     adv_check = re.fullmatch(r"\+d20([+-]\d+)", expression)
     dis_check = re.fullmatch(r"\-d20([+-]\d+)", expression)
