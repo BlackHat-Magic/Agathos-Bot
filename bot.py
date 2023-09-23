@@ -21,13 +21,22 @@ async def on_ready():
     except Exception as e:
         print(e)
 
+@client.tree.command(name="r", description="quickly roll a d20")
+async def roll(interaction: discord.Interaction):
+    await interaction.response.send_message(f"<@{interaction.user.id}> rolled a `[{random.randint(1, 20)}]`.")
+
 @client.tree.command(name="roll", description="roll a die")
-async def roll(interaction:discord.Interaction, expression: str = "1d20", repeat: int = 1, reroll_below: int = 1, drop_lowest: int = 0, advantage_disadvantage: str = ""):
+async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1, reroll_below: int = 1, drop_lowest: int = 0, advantage_disadvantage: str = ""):
     if(repeat > 20):
         await interaction.response.send_message("Too many repetitions (max 20)", ephemeral=True)
         return
     response = ""
     cheat = False
+    badcheat = False
+    if("badcheat" in expression):
+        expression = expression.replace("badcheat", "")
+        response = "# Why would you do that...?\n\n" + response
+        badcheat = True
     if("cheat" in expression):
         expression = expression.replace("cheat", "")
         response = "# CHEATER CHEATER 🎃🍴\n\n" + response
@@ -79,13 +88,15 @@ async def roll(interaction:discord.Interaction, expression: str = "1d20", repeat
                 die_results = []
 
                 for i in range(int(num_dice)):
-                    if(not cheat):
+                    if(cheat):
+                        die_result = num_sides
+                    elif(badcheat):
+                        die_result = 1
+                    else:
                         if(num_sides == 20 and advantage_disadvantage != ""):
                             die_result = [random.randint(1,20), random.randint(1,20)]
                         else:
                             die_result = random.randint(1, num_sides)
-                    else:
-                        die_result = num_sides
                     if(type(die_result) == int):
                         while die_result < reroll_below:
                             if(reroll_below > num_sides):
