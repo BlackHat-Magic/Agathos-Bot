@@ -41,6 +41,8 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
         expression = expression.replace("cheat", "")
         response = "# CHEATER CHEATER 🎃🍴\n\n" + response
         cheat = True
+    if(expression == ""):
+        expression = "d20"
     response += f"<@{interaction.user.id}> Rolled: `[{expression}]`"
 
     adv_check = re.fullmatch(r"\+d20([+-]\d+)", expression)
