@@ -65,7 +65,7 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
 
     await interaction.response.defer()
 
-    expressions = re.findall(r"(\d*d\d+|\d+)", expression)
+    expressions = re.findall(r"([-+]?\d*d\d+|[-+]?\d+)", expression)
                 
     dropped = []
 
@@ -77,19 +77,27 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
 
         for expression in expressions:
             if("d" in expression):
-                match = re.match(r"(\d*)d(\d+)", expression)
+                match = expression.split("d")
 
                 num_dice = 1
-                if(match.group(1)):
-                    num_dice = match.group(1)
+                num_dice = match[0]
+                if(num_dice == ""):
+                    num_dice = 1
+                else:
+                    num_dice = int(num_dice)
+                num_sides = int(match[1])
                 if(int(num_dice) > 500):
                     await interaction.followup.send("Too many dice (max 500)", ephemeral=True)
                     return
-                
-                num_sides = int(match.group(2))
+                if(num_dice < 0):
+                    num_dice *= -1
+                    subtract = True
+                else:
+                    subtract = False
+            
                 die_results = []
 
-                for i in range(int(num_dice)):
+                for i in range(num_dice):
                     if(cheat):
                         die_result = num_sides
                     elif(badcheat):
@@ -120,13 +128,22 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
                 for result in die_results:
                     if(type(result) == list):
                         if(advantage_disadvantage in ["d", "dis", "disadv", "disadvantage"]):
-                            total += min(result)
+                            if(subtract):
+                                total -= min(result)
+                            else:
+                                total += min(result)
                             dropped.append(max(result))
                         else:
-                            total += max(result)
+                            if(subtract):
+                                total -= max(result)
+                            else:
+                                total += max(result)
                             dropped.append(min(result))
                     else:
-                        total += result
+                        if(subtract):
+                            total -= result
+                        else:
+                            total += result
 
                 all_results += str(die_results)
             else:
