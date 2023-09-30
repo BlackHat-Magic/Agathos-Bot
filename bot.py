@@ -155,6 +155,7 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
         
     if(len(response) > 2000):
         await interaction.followup.send("Resulting expression was too long. Try rolling fewer dice or rolling with fewer repetitions.", ephemeral=True)
+        return
     
     await interaction.followup.send(response)
 
