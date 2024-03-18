@@ -65,7 +65,7 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
 
     await interaction.response.defer()
 
-    expressions = re.findall(r"([-+]?\d*d\d+|[-+]?\d+)", expression)
+    expressions = re.findall(r"([-+]?\d*d[-+]?\d+|[-+]?\d+)", expression)
                 
     dropped = []
 
@@ -87,6 +87,9 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
                 else:
                     num_dice = int(num_dice)
                 num_sides = int(match[1])
+                if(num_sides < 1):
+                    await interaction.followup.send("Cannot roll die with fewer than one side.", ephemeral=True)
+                    return
                 if(int(num_dice) > 500):
                     await interaction.followup.send("Too many dice (max 500)", ephemeral=True)
                     return
@@ -149,6 +152,10 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
                 all_results += str(die_results)
             else:
                 total += int(expression)
+        
+        if(len(all_results) < 1):
+            await interaction.followup.send("Invalid expression.", ephemeral=True)
+            return
         
         response += f"\nRoll: `{all_results}` Result: `{total}`"
         if(dropped != []):
