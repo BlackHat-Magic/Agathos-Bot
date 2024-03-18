@@ -74,6 +74,7 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
         drop = drop_lowest
 
         all_results = ""
+        dropped = []
 
         for expression in expressions:
             if("d" in expression):
@@ -154,7 +155,7 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
             response += f"; Dropped: `{dropped}`"
         
     if(len(response) > 2000):
-        await interaction.followup.send("Resulting expression was too long. Try rolling fewer dice or rolling with fewer repetitions.", ephemeral=True)
+        await interaction.followup.send("Resulting expression was too long (exceeds Discord's message length limit). Try rolling fewer dice or rolling with fewer repetitions.", ephemeral=True)
         return
     
     await interaction.followup.send(response)
