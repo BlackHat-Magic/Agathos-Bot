@@ -64,7 +64,8 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
         return
 
     await interaction.response.defer()
-
+    
+    expression = expression.replace("+d", "+1d")
     expressions = re.findall(r"([-+]?\d*d[-+]?\d+|[-+]?\d+)", expression)
                 
     dropped = []
