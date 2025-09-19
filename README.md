@@ -13,4 +13,3 @@ To run:
 ```bash
 docker run -d --name your-bot-container -e DISCORD_CLIENT_TOKEN="YOUR_BOT_TOKEN" BlackHatMagic/Agathos-Bot:latest
 ```
-
