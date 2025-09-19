@@ -1,7 +1,5 @@
 from dotenv import load_dotenv
 from discord.ext import commands
-# from discord import app_commands, ButtonStyle
-# from discord.ui import Button
 import discord, os, re, random
 
 load_dotenv()
@@ -10,7 +8,6 @@ intents = discord.Intents.default()
 intents.message_content = True
 
 client = commands.Bot(command_prefix="d!", intents=intents)
-# secret advantage
 
 @client.event
 async def on_ready():
