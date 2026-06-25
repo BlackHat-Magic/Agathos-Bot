@@ -1,11 +1,13 @@
-FROM python:3.13.7-slim-bookworm
+FROM python:3.14-alpine3.23
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin
 
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml uv.lock ./
+
+RUN uv sync --frozen --no-dev
 
 COPY . .
 
-CMD ["python", "bot.py"]
+CMD ["uv", "run", "python", "bot.py"]
