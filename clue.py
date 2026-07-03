@@ -1,6 +1,6 @@
 from __future__ import annotations
 from enum import StrEnum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 import random
@@ -59,8 +59,15 @@ Card = SuspectCard | WeaponCard | RoomCard
 @dataclass
 class BoardSpace:
 	room: Room | None = None
-	accesses: list[BoardSpace] = []	# TODO list type hint
+	accesses: list[BoardSpace] = field(default_factory=list)
 	pos: tuple[int, int] | None = None
+
+	def __hash__(self):
+		if self.room:
+			return hash(self.room.name)
+		if self.pos:
+			return hash(self.pos)
+		raise ValueError("room and pos can't both be None")
 
 @dataclass
 class SuspectPiece:
@@ -80,7 +87,7 @@ class Player:
 	piece: SuspectPiece
 	index: int = 0
 	failed_guess: bool = False
-	cards: list[Card] = []
+	cards: list[Card] = field(default_factory=list)
 	is_robot: bool = False
 	guessed_here: bool = False
 
@@ -89,8 +96,8 @@ DEFAULT_WEAPONS = [weapon for weapon in Weapon]
 DEFAULT_ROOMS = [room for room in Room]
 
 class Game:
-	def __init__(self, players: list[Player]) -> None:
-		self.players: list[Player] = players.sort(key=lambda x: x.index)
+	def __init__(self) -> None:
+		self.players: list[Player] = []
 		self.solution: tuple[SuspectCard, WeaponCard, RoomCard] | None = None
 
 		ballroom		= BoardSpace(room=Room.BALLROOM)
@@ -103,7 +110,7 @@ class Game:
 		lounge			= BoardSpace(room=Room.LOUNGE)
 		study			= BoardSpace(room=Room.STUDY)
 
-		self.board: list[list[BoardSpace | None]] = [[None] * 25] * 24
+		self.board: list[list[BoardSpace | None]] = [[None] * 25 for _ in range(24)]
 		for col in range(24):
 			for row in range(25):
 				match (col, row):
@@ -136,51 +143,51 @@ class Game:
 					case (_, _):
 						self.board[col][row] = BoardSpace(pos=(col, row))
 		ballroom.accesses = [
-			self.board[7][5],
-			self.board[9][8],
-			self.board[14][8],
-			self.board[16][5]
+			self._space(7, 5),
+			self._space(9, 8),
+			self._space(14, 8),
+			self._space(16, 5)
 		]
 		billiard_room.accesses = [
-			self.board[6][9],
-			self.board[1][13]
+			self._space(6, 9),
+			self._space(1, 13)
 		]
 		conservatory.accesses = [
 			lounge,
-			self.board[5][5]
+			self._space(5, 5)
 		]
 		dining_room.accesses = [
-			self.board[15][12],
-			self.board[16][16]
+			self._space(15, 12),
+			self._space(16, 16)
 		]
 		hall.accesses = [
-			self.board[11][17],
-			self.board[12][17],
-			self.board[8][20]
+			self._space(11, 17),
+			self._space(12, 17),
+			self._space(8, 20)
 		]
 		kitchen.accesses = [
 			study,
-			self.board[19][7]
+			self._space(19, 7)
 		]
 		library.accesses = [
-			self.board[3][13],
-			self.board[7][16]
+			self._space(3, 13),
+			self._space(7, 16)
 		]
 		lounge.accesses = [
 			conservatory,
-			self.board[17][18]
+			self._space(17, 18)
 		]
 		study.accesses = [
 			kitchen,
-			self.board[6][20]
+			self._space(6, 20)
 		]
 
 		for col in self.board:
 			for space in col:
 				if space is None:
-					return
+					continue
 				if space.room or space.accesses or space.pos is None:
-					return
+					continue
 				col_, row_ = space.pos
 				for x in [col_ - 1, col_, col_ + 1]:
 					for y in [row_ - 1, row_, row_ + 1]:
@@ -188,7 +195,7 @@ class Game:
 							continue
 						if (x, y) == space.pos:
 							continue
-						if x != row_ and y != col_:
+						if x != col_ and y != row_:
 							continue
 						accessee = self.board[x][y]
 						if accessee is None:
@@ -196,6 +203,11 @@ class Game:
 						if accessee.room and space not in accessee.accesses:
 							continue
 						space.accesses.append(accessee)
+
+	def _space(self, x: int, y: int) -> BoardSpace:
+		space = self.board[x][y]
+		assert space is not None
+		return space
 
 	def begin(self) -> None:
 		"""
@@ -227,9 +239,9 @@ class Game:
 		i = 0
 		while cards:
 			self.players[i].cards.append(cards.pop(0))
-			i = i + 1 % len(self.players)
+			i = (i + 1) % len(self.players)
 
-def _create_human_players(n: int, suspects: list[Suspect]) -> list[Player]:
+def _create_human_players(n: int, suspects: list[Suspect], game: Game) -> list[Player]:
 	players: list[Player] = []
 
 	for i in range(n):
@@ -239,7 +251,7 @@ def _create_human_players(n: int, suspects: list[Suspect]) -> list[Player]:
 		while True:
 			print(f"Which suspect would player {i+1} like to play?")
 			for j, sus in enumerate(suspects):
-				print(f"[{i+1}]\t{sus.name}")
+				print(f"[{j+1}]\t{sus.name}")
 			inp = input("> ").casefold().strip()
 
 			try:
@@ -263,7 +275,7 @@ def _create_human_players(n: int, suspects: list[Suspect]) -> list[Player]:
 			failed_guess=False,
 			piece=SuspectPiece(
 				suspect=suspect,
-				location=STARTING_POSITIONS[suspect]	# TODO: fix starting pos
+				location=game._space(*STARTING_POSITIONS[suspect])
 			),
 			cards=[],
 			is_robot=False
@@ -271,7 +283,7 @@ def _create_human_players(n: int, suspects: list[Suspect]) -> list[Player]:
 
 	return players
 
-def _create_robot_players(n: int, suspects: list[Suspect]) -> list[Player]:
+def _create_robot_players(n: int, suspects: list[Suspect], game: Game) -> list[Player]:
 	players: list[Player] = []
 
 	for i in range(n):
@@ -282,7 +294,7 @@ def _create_robot_players(n: int, suspects: list[Suspect]) -> list[Player]:
 			failed_guess=False,
 			piece=SuspectPiece(
 				suspect=suspect,
-				location=STARTING_POSITIONS[suspect]	# TODO: fix starting pos
+				location=game._space(*STARTING_POSITIONS[suspect])
 			),
 			cards=[],
 			is_robot=True
@@ -395,6 +407,7 @@ def _play_game(game: Game) -> None:
 					print("\tChoose a room to go to:")
 					n_options = 1
 					for i, space in enumerate(rooms):
+						assert space.room is not None
 						print(f"\t[{i+1}]\t{space.room.name}")
 						n_options += 1
 					print(f"\t[{n_options}]\t(Stay put)")
@@ -409,11 +422,12 @@ def _play_game(game: Game) -> None:
 							rooms,
 							key=lambda x: fuzz.ratio(inp, x.room.name.casefold())
 						)
+						assert destination.room is not None
 						if fuzz.ratio(inp, "stay put") \
 							> fuzz.ratio(inp, destination.room.name.casefold()):
 							destination = player.piece.location
 					inp = "n"
-					if destination == player.piece.locations:
+					if destination == player.piece.location:
 						inp = input("\tStay put? [Y/n] ").casefold().strip()
 					else:
 						inp = input(f"\tGo to space {destination.pos}? [Y/n] ").casefold().strip()
@@ -423,6 +437,7 @@ def _play_game(game: Game) -> None:
 				while True:
 					print("\tChoose a space to go to:")
 					n_options = 1
+					print(dests)
 					for i, space in enumerate(dests):
 						print(f"\t[i+1]\t{space.pos}")
 						n_options += 1
@@ -436,7 +451,7 @@ def _play_game(game: Game) -> None:
 					except (ValueError, IndexError):
 						continue
 					dest_conf = "n"
-					if destination == player.piece.locations:
+					if destination == player.piece.location:
 						dest_conf = input("\tStay put? [Y/n] ").casefold().strip()
 					else:
 						dest_conf = input(
@@ -503,7 +518,7 @@ def _play_game(game: Game) -> None:
 				guess = guess_suspect, guess_weapon, player.piece.location.room
 			print(
 				f"\tGuessing {guess_suspect.name} with {guess_weapon.name} in ",
-				player.location.room.name + "."
+				player.piece.location.room.name + "."
 			)
 			print()
 
@@ -642,21 +657,23 @@ def main():
 			print("At least one human player is required.")
 			continue
 		n_human = response
-		continue
+		break
 	print()
 	assert n_human is not None, "Make ty happy?"
 
 	n_robot = 6 - n_human
 	remaining_suspects = [suspect for suspect in Suspect]
 
-	humans = _create_human_players(n_human, remaining_suspects)
-	robots = _create_robot_players(n_robot, remaining_suspects)
+	game = Game()
+
+	humans = _create_human_players(n_human, remaining_suspects, game)
+	robots = _create_robot_players(n_robot, remaining_suspects, game)
 
 	all_players = humans + robots
 	all_players.sort(key=lambda x: x.index)
 	_confirm_turn_order(all_players)
 
-	game = Game(all_players)
+	game.players = all_players
 	game.begin()
 	_play_game(game)
 
