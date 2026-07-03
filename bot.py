@@ -1,6 +1,9 @@
 from dotenv import load_dotenv
 from discord.ext import commands
-import discord, os, re, random
+import discord
+import os
+import re
+import random
 
 load_dotenv()
 
