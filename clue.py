@@ -387,7 +387,7 @@ def _play_game(game: Game) -> None:
 					zip(dests, costs),
 					key=lambda x: x[1]+100 if x[0].room else x[1]
 				)[0]
-				dst_str = destination.room.name if choice.room else str(choice.pos)
+				dst_str = destination.room.name if destination.room else str(destination.pos)
 				print(f"\t{player.name} went to space {dst_str}.")
 			elif any([space.room for space in dests]):	# only show rooms for brevity
 				rooms = [dest for dest in dests if dest.room]
@@ -411,7 +411,7 @@ def _play_game(game: Game) -> None:
 						)
 						if fuzz.ratio(inp, "stay put") \
 							> fuzz.ratio(inp, destination.room.name.casefold()):
-							best_guess = player.piece.location
+							destination = player.piece.location
 					inp = "n"
 					if destination == player.piece.locations:
 						inp = input("\tStay put? [Y/n] ").casefold().strip()
