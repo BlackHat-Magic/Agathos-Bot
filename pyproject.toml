@@ -7,6 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "discord>=2.3.2",
     "python-dotenv>=1.2.2",
+    "rapidfuzz>=3.14.5",
 ]
 
 [dependency-groups]
