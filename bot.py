@@ -22,7 +22,7 @@ async def on_ready():
 		print(e)
 
 @client.tree.command(name="r", description="quickly roll a d20")
-async def roll(interaction: discord.Interaction):
+async def quick_roll(interaction: discord.Interaction):
 	await interaction.response.send_message(f"<@{interaction.user.id}> rolled a `[{random.randint(1, 20)}]`.")
 
 @client.tree.command(name="roll", description="roll a die")
@@ -112,7 +112,7 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
 							die_result = [random.randint(1,20), random.randint(1,20)]
 						else:
 							die_result = random.randint(1, num_sides)
-					if(type(die_result) == int):
+					if isinstance(die_result, int):
 						while die_result < reroll_below:
 							if(reroll_below > num_sides):
 								break
@@ -131,7 +131,7 @@ async def roll(interaction:discord.Interaction, expression: str, repeat: int = 1
 					drop -= 1
 
 				for result in die_results:
-					if(type(result) == list):
+					if isinstance(result, list):
 						if(advantage_disadvantage in ["d", "dis", "disadv", "disadvantage"]):
 							if(subtract):
 								total -= min(result)
@@ -188,7 +188,7 @@ async def disadvantage(interaction: discord.Interaction, bonus: int = 0, repeat:
 		await interaction.response.send_message("Too many repetitions (max 20)", ephemeral=True)
 		return
 
-	response = f"<@{interaction.user.id}> Rolled 1d20{'+'+bonus if bonus > 0 else bonus if bonus < 0 else ''} with disadvantage."
+	response = f"<@{interaction.user.id}> Rolled 1d20{'+'+str(bonus) if bonus > 0 else bonus if bonus < 0 else ''} with disadvantage."
 
 	for i in range(repeat):
 		results = [random.randint(1, 20) for i in range(2)]
@@ -196,4 +196,7 @@ async def disadvantage(interaction: discord.Interaction, bonus: int = 0, repeat:
 
 	await interaction.response.send_message(response)
 
-client.run(os.getenv("DISCORD_CLIENT_TOKEN"))
+token = os.getenv("DISCORD_CLIENT_TOKEN")
+if token is None:
+	raise RuntimeError("DISCORD_CLIENT_TOKEN environment variable is not set")
+client.run(token)
