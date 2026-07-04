@@ -86,4 +86,29 @@ describe('evaluateAccusation', () => {
     expect(evaluateAccusation(g, 0, { suspect: 'Professor Plum', weapon: 'Rope', room: 'Library' })).toBe(false);
     expect(players[0].failedAccusation).toBe(true);
   });
+
+  it('ends game when all humans have failed (regardless of robots)', () => {
+    const human1 = mkPlayer('Miss Scarlett', 0, [], false);
+    const human2 = mkPlayer('Professor Plum', 1, [], false);
+    const robot = mkPlayer('Mrs. Peacock', 2, [], true);
+    const g = createGame([human1, human2, robot]);
+    g.solution = {
+      suspect: { type: 'suspect', suspect: 'Mr. Green' },
+      weapon: { type: 'weapon', weapon: 'Rope' },
+      room: { type: 'room', room: 'Library' },
+    };
+    g.phase = 'playing';
+    // Human 1 fails — game continues (human 2 still in)
+    const r1 = evaluateAccusation(g, 0, { suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' });
+    expect(r1).toBe(false);
+    expect(human1.failedAccusation).toBe(true);
+    expect(g.phase as string).toBe('playing');
+    expect(g.finishedAt).toBeNull();
+    // Human 2 fails — all humans failed, game ends (robot state doesn't matter)
+    const r2 = evaluateAccusation(g, 1, { suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' });
+    expect(r2).toBe(false);
+    expect(human2.failedAccusation).toBe(true);
+    expect(g.phase as string).toBe('finished');
+    expect(g.finishedAt).not.toBeNull();
+  });
 });
