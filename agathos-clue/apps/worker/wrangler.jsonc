@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agathos-clue",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS"
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "GAME_ROOM", "class_name": "GameRoom" }
+    ]
+  },
+  "d1_databases": [
+    { "binding": "LOBBY_DB", "database_name": "agathos-clue-lobby", "database_id": "local" }
+  ],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["GameRoom"] }
+  ],
+  "vars": {
+    "DISCORD_CLIENT_ID": "REPLACE_ME",
+    "DISCORD_REDIRECT_URI": "http://localhost:8787/auth/callback"
+  }
+}

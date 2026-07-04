@@ -1,0 +1,20 @@
+{
+  "name": "@agathos/worker",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "@agathos/game": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.4",
+    "typescript": "^5.5.2",
+    "vitest": "~3.2.0",
+    "wrangler": "^4.107.0"
+  }
+}
