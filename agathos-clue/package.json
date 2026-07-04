@@ -1,0 +1,12 @@
+{
+  "name": "agathos-clue",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev:web": "bun --filter @agathos/web dev",
+    "dev:worker": "bun --filter @agathos/worker dev",
+    "build": "bun --filter @agathos/web build && bun --filter @agathos/worker build",
+    "test": "bun --filter '*' test",
+    "typecheck": "bun --filter '*' typecheck"
+  }
+}
