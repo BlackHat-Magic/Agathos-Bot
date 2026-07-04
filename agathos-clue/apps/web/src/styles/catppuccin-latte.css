@@ -2,12 +2,7 @@
  *
  * Mirrors catppuccin-mocha.css: Tailwind v4 `@theme` tokens + a Skeleton v3
  * `[data-theme='latte']` block. See catppuccin-mocha.css for the full
- * rationale on Skeleton v3 variable names and Catppuccin shades. Latte adds
- * the rosewater token (the plan listed 17 Latte tokens incl. rosewater).
- *
- * NOTE: The plan's latte block had typos (`--color-surface-200` /
- * `--color-surface-300` instead of the `--sk-*` equivalents) — fixed by
- * using the real v3 names (`--color-surface-200/300`) here.
+ * rationale on Skeleton v3 variable names and Catppuccin shades.
  */
 
 /* --------------------------------------------------------------------------
@@ -96,7 +91,7 @@
 	--color-primary-800: #581e9a;
 	--color-primary-900: #471a80;
 	--color-primary-950: #2e0f57;
-	--color-primary-contrast-dark: #ffffff;
+	--color-primary-contrast-dark: var(--color-latte-text);
 	--color-primary-contrast-light: var(--color-latte-base);
 	--color-primary-contrast-50:  var(--color-primary-contrast-dark);
 	--color-primary-contrast-100: var(--color-primary-contrast-dark);

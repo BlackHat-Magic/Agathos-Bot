@@ -8,7 +8,8 @@ export function setTheme(t: Theme): void {
 }
 
 export function initTheme(): Theme {
-	const saved = localStorage.getItem(STORAGE_KEY) as Theme | null;
+	const raw = localStorage.getItem(STORAGE_KEY);
+	const saved: Theme | null = raw === 'mocha' || raw === 'latte' ? raw : null;
 	const prefersLight =
 		window.matchMedia('(prefers-color-scheme: light)').matches;
 	const theme: Theme = saved ?? (prefersLight ? 'latte' : 'mocha');

@@ -6,12 +6,13 @@
 @import './catppuccin-mocha.css';
 @import './catppuccin-latte.css';
 
+/* Prevents flash of wrong color-scheme before initTheme() runs at mount. */
 :root { color-scheme: dark light; }
 
 body {
 	font-family: var(--font-body);
-	background-color: var(--color-mocha-base);
-	color: var(--color-mocha-text);
+	background-color: var(--color-root-bg-dark);
+	color: var(--typo-base--color-dark);
 }
 
 h1, h2, h3, h4, h5, h6, .font-display {
