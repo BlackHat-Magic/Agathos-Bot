@@ -1,5 +1,19 @@
 @import 'tailwindcss';
 @import '@skeletonlabs/skeleton';
 @import '@skeletonlabs/skeleton-svelte';
+@import '@fontsource-variable/space-grotesk';
+@import '@fontsource-variable/figtree';
 @import './catppuccin-mocha.css';
 @import './catppuccin-latte.css';
+
+:root { color-scheme: dark light; }
+
+body {
+	font-family: var(--font-body);
+	background-color: var(--color-mocha-base);
+	color: var(--color-mocha-text);
+}
+
+h1, h2, h3, h4, h5, h6, .font-display {
+	font-family: var(--font-display);
+}
