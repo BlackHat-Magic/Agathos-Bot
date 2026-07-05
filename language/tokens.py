@@ -4,7 +4,7 @@ from enum import auto, Enum, StrEnum
 from typing import Literal
 
 
-class SymbolType(StrEnum):
+class TokenType(StrEnum):
 	# control flow
 	FN = "fn"  # TODO: do we want this?
 	IF = "if"
@@ -21,6 +21,7 @@ class SymbolType(StrEnum):
 	# identifiers
 
 	# literals
+	LITERAL_NULL = "NULL"
 
 	# postfixes
 	OPEN_PAREN = "("
@@ -92,20 +93,6 @@ class SymbolType(StrEnum):
 	EOF = "EOF"
 
 
-class PayloadType(Enum):
-	# identifiers
-	IDENTIFIER = auto()
-
-	# literals
-	LITERAL_STRING = auto()
-	LITERAL_NUMBER = auto()
-	LITERAL_BOOL = auto()
-	LITERAL_NULL = auto()
-
-
-TokenType = SymbolType | PayloadType
-
-
 @dataclass(frozen=True)
 class SimpleToken:
 	type: SymbolType
@@ -113,29 +100,25 @@ class SimpleToken:
 
 @dataclass(frozen=True)
 class IdentifierToken:
-	type: Literal[PayloadType.IDENTIFIER] = Payload.IDENTIFIER
+	type: Literal["identifier"]
 	label: str
 
 
 @dataclass(frozen=True)
 class StringToken:
-	type: Literal[PayloadType.LITERAL_STRING] = PayloadType.LITERAL_STRING
+	type: Literal["literal_string"]
 	literal: str
 
 
 @dataclass(frozen=True)
 class NumberToken:
-	type: Literal[PayloadType.LITERAL_NUMBER] = PayloadType.LITERAL_NUMBER
+	type: Literal["literal_number"]
 	literal: str
 
 
 @dataclass(frozen=True)
 class BoolToken:
-	type: Literal[PayloadType.LITERAL_BOOL] = PayloadType.LITERAL_BOOL
+	type: Literal["literal_bool"]
 	literal: bool
 
-@dataclass(frozen=True)
-class NullToken:
-	type: Literal[PayloadType.LITERAL_NULL] = PayloadType.LITERAL_NULL
-
-Token = SimpleToken | IdentifierToken | StringToken | NumberToken | BoolToken | NullToken
+Token = SimpleToken | IdentifierToken | StringToken | NumberToken | BoolToken

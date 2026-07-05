@@ -1,4 +1,4 @@
-from .tokens import SymbolType, SimpleToken, IdentifierToken, StringToken, NumberToken, BoolToken, NullToken, Token
+from .tokens import SymbolType, SimpleToken, IdentifierToken, StringToken, NumberToken, BoolToken, Token
 
 class Tokenizer:
 	def __init__(self, program: str) -> None:
@@ -244,6 +244,6 @@ class Tokenizer:
 			case "TRUE" | "FALSE":
 				return BoolToken(literal=symbol == "TRUE")
 			case "NULL":
-				return NullToken()
+				return SimpleToken(type=SymbolType.LITERAL_NULL)
 			case _:
 				return IdentifierToken(label=symbol)
