@@ -1,16 +1,25 @@
-from .tokens import SymbolType, SimpleToken, IdentifierToken, StringToken, NumberToken, BoolToken, Token
+from .tokens import (
+	TokenType,
+	SimpleToken,
+	IdentifierToken,
+	StringToken,
+	NumberToken,
+	BoolToken,
+	Token,
+)
+
 
 class Tokenizer:
 	def __init__(self, program: str) -> None:
 		self.program: list[str] = [char for char in program]
 
-	def _peek(self, position: int = 0) -> str | None:
+	def _peek(self) -> str | None:
 		if len(self.program) < 1:
 			return None
-		return self.program[position]
+		return self.program[0]
 
 	def _advance(self) -> str | None:
-		if len(self.program ) < 1:
+		if len(self.program) < 1:
 			return None
 		return self.program.pop(0)
 
@@ -25,152 +34,66 @@ class Tokenizer:
 	def next_token(self) -> Token:
 		self._skip_whitespace()
 
-		match (self._advance(), self._peek(0), self._peek(1)):
-			case ("{", _, _):
-				return SimpleToken(type=SymbolType.OPEN_BRACE)
-			case ("}", _, _):
-				return SimpleToken(type=SymbolType.CLOSE_BRACE)
-			case ("(", _, _):
-				return SimpleToken(type=SymbolType.OPEN_PAREN)
-			case (")", _, _):
-				return SimpleToken(type=SymbolType.CLOSE_PAREN)
-			case ("[", _, _):
-				return SimpleToken(type=SymbolType.OPEN_BRACKET)
-			case ("]", _, _):
-				return SimpleToken(type=SymbolType.CLOSE_BRACKET)
+		symbol = self._advance()
+		if symbol is None:
+			return SimpleToken(type=TokenType.EOF)
 
-			case ("+", "+", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.INCREMENT)
-			case ("+", "=", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.ADDITION_ASSIGN)
-			case ("+", _, _):
-				return SimpleToken(type=SymbolType.ADD)
+		match symbol:
+			# catches postfixes, bitwise NOT, and comma
+			case "{" | "}" | "(" | ")" | "[" | "]" | "~" | ",":
+				return SimpleToken(type=TokenType(symbol))
 
-			case ("-", "-", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.DECREMENT)
-			case ("-", "=", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.SUBTRACTION_ASSIGN)
-			case ("-", _, _):
-				return SimpleToken(type=SymbolType.SUBTRACT)
+			# catches add, subtract, increment, decrement, addition assign, and subtraction assign
+			case "+" | "-":
+				peeked = self._peek()
+				if peeked == symbol or peeked == "=":
+					symbol += peeked  # ty: ignore[unsupported-operator]
+					self._advance()
+				return SimpleToken(type=TokenType(symbol))
 
-			case ("!", "=", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.NOT_EQUAL)
-			case ("!", _, _):
-				return SimpleToken(type=SymbolType.LOGICAL_NOT)
+			# catches logical not, modulus, assignment, bitwise XOR, not equal, modulus assign,
+			# equality, and bitwise XOR assign
+			case "!" | "%" | "=" | "^":
+				peeked = self._peek()
+				if peeked == "=":
+					symbol += peeked
+					self._advance()
+				return SimpleToken(type=TokenType(symbol))
 
-			case ("~", _, _):
-				return SimpleToken(type=SymbolType.BITWISE_NOT)
+			# catches multiply, divide, less than, greater than, exponent, floor divide, left shift
+			# right shift, multiply assign, divide assign, less than or equal, greater than or equal,
+			# exponentiation assign, floor divide assign, left shift assign, and right shift assign
+			case "*" | "/" | "<" | ">":
+				peeked = self._peek()
+				if peeked == symbol:
+					symbol += peeked  # ty: ignore[unsupported-operator]
+					self._advance()
+					peeked = self._peek()
+				if peeked == "=":
+					symbol += peeked
+					self._advance()
+				return SimpleToken(type=TokenType(symbol))
 
-			case ("*", "*", "="):
-				self._advance()
-				self._advance()
-				return SimpleToken(type=SymbolType.EXPONENTIATION_ASSIGN)
-			case ("*", "*", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.EXPONENT)
-			case ("*", "=", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.MULTIPLICATION_ASSIGN)
-			case ("*", _, _):
-				return SimpleToken(type=SymbolType.MULTIPLY)
+			# catches bitwise and, bitwise or, logical and, logical or, bitwise and assign, and bitwise
+			# or assign
+			case "&" | "|":
+				peeked = self._peek()
+				if peeked == symbol or peeked == "=":
+					symbol += peeked  # ty: ignore[unsupported-operator]
+					self._advance()
+				return SimpleToken(type=TokenType(symbol))
 
-			case ("/", "/", "="):
+			case ":" if self._peek() == "=":
 				self._advance()
-				self._advance()
-				return SimpleToken(type=SymbolType.FLOOR_DIVISION_ASSIGN)
-			case ("/", "/", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.FLOOR_DIVIDE)
-			case ("/", "=", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.DIVISION_ASSIGN)
-			case ("/", _, _):
-				return SimpleToken(type=SymbolType.DIVIDE)
-
-			case ("%", "=", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.MODULUS_ASSIGN)
-			case ("%", _, _):
-				return SimpleToken(type=SymbolType.MODULO)
-
-			case ("<", "<", "="):
-				self._advance()
-				self._advance()
-				return SimpleToken(type=SymbolType.LSHIFT_ASSIGN)
-			case ("<", "<", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.LSHIFT)
-			case ("<", "=", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.LESS_THAN_EQUAL)
-			case ("<", _):
-				return SimpleToken(type=SymbolType.LESS_THAN)
-
-			case (">", ">", "="):
-				self._advance()
-				self._advance()
-				return SimpleToken(type=SymbolType.RSHIFT_ASSIGN)
-			case (">", ">", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.RSHIFT)
-			case (">", "=", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.GREATER_THAN_EQUAL)
-			case (">", _):
-				return SimpleToken(type=SymbolType.GREATER_THAN)
-
-			case ("=", "=", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.EQUAL)
-			case ("=", _, _):
-				return SimpleToken(type=SymbolType.ASSIGNMENT)
-
-			case ("&", "&", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.LOGICAL_AND)
-			case ("&", "=", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.BITWISE_AND_ASSIGN)
-			case ("&", _, _):
-				return SimpleToken(type=SymbolType.BITWISE_AND)
-
-			case ("^", "=", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.BITWISE_XOR_ASSIGN)
-			case ("^", _, _):
-				self._advance()
-				return SimpleToken(type=SymbolType.BITWISE_XOR)
-
-			case ("|", "|", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.LOGICAL_OR)
-			case ("|", "=", _):
-				self._advance()
-				return SimpleToken(type=SymbolType.BITWISE_OR_ASSIGN)
-			case ("|", _, _):
-				return SimpleToken(type=SymbolType.BITWISE_OR)
-
-			case (":", "=", _):
-				return SimpleToken(type=SymbolType.DECLARATION)
-
-			case (",", _, _):
-				return SimpleToken(type=SymbolType.COMMA)
-
-			case (None, _, _):
-				return SimpleToken(type=SymbolType.EOF)
-			case (a, _, _) if a is not None and a in "\"'":	# TODO: this None check is redundant
-				return self._tokenize_string(a)
-			case (a, _, _) if a is not None and a.isdecimal() or a == ".":
-				return self._tokenize_number(a)
-			case (a, _, _) if a is not None and a.isalpha() or a == "_":
-				return self._tokenize_complex(a)
+				return SimpleToken(type=TokenType.DECLARATION)
+			case c if c == '"' or c == "'":
+				return self._tokenize_string(c)
+			case c if c.isdecimal() or c == ".":
+				return self._tokenize_number(c)
+			case c if c.isalpha() or c == "_":
+				return self._tokenize_complex(c)
 			case _:
-				raise SyntaxError	# TODO: better error handling
+				raise SyntaxError  # TODO: better error handling
 
 	def _tokenize_string(self, delimeter: str) -> StringToken:
 		literal = ""
@@ -179,7 +102,7 @@ class Tokenizer:
 		peeked = self._peek()
 		while peeked != delimeter or escaped:
 			if peeked is None:
-				raise SyntaxError	# TODO: better error handling
+				raise SyntaxError  # TODO: better error handling
 
 			if escaped:
 				# not formatted: \r, \b, \f, \v, \a
@@ -214,36 +137,36 @@ class Tokenizer:
 			self._advance()
 		match symbol:
 			case "fn":
-				return SimpleToken(type=SymbolType.FN)
+				return SimpleToken(type=TokenType.FN)
 			case "if":
-				return SimpleToken(type=SymbolType.IF)
+				return SimpleToken(type=TokenType.IF)
 			case "else":
-				return SimpleToken(type=SymbolType.ELSE)
+				return SimpleToken(type=TokenType.ELSE)
 			case "elif":
-				return SimpleToken(type=SymbolType.ELIF)
+				return SimpleToken(type=TokenType.ELIF)
 			case "for":
-				return SimpleToken(type=SymbolType.FOR)
+				return SimpleToken(type=TokenType.FOR)
 			case "while":
-				return SimpleToken(type=SymbolType.WHILE)
+				return SimpleToken(type=TokenType.WHILE)
 			case "break":
-				return SimpleToken(type=SymbolType.BREAK)
+				return SimpleToken(type=TokenType.BREAK)
 			case "continue":
-				return SimpleToken(type=SymbolType.CONTINUE)
+				return SimpleToken(type=TokenType.CONTINUE)
 			case "return":
-				return SimpleToken(type=SymbolType.RETURN)
+				return SimpleToken(type=TokenType.RETURN)
 			case "d":
-				return SimpleToken(type=SymbolType.DIE_ROLL)
+				return SimpleToken(type=TokenType.DIE_ROLL)
 			case "b" | "below":
-				return SimpleToken(type=SymbolType.REROLL_BELOW)
+				return SimpleToken(type=TokenType.REROLL_BELOW)
 			case "a" | "above":
-				return SimpleToken(type=SymbolType.REROLL_ABOVE)
+				return SimpleToken(type=TokenType.REROLL_ABOVE)
 			case "m" | "min":
-				return SimpleToken(type=SymbolType.MINIMUM)
+				return SimpleToken(type=TokenType.MINIMUM)
 			case "x" | "max":
-				return SimpleToken(type=SymbolType.MAXIMUM)
+				return SimpleToken(type=TokenType.MAXIMUM)
 			case "TRUE" | "FALSE":
 				return BoolToken(literal=symbol == "TRUE")
 			case "NULL":
-				return SimpleToken(type=SymbolType.LITERAL_NULL)
+				return SimpleToken(type=TokenType.LITERAL_NULL)
 			case _:
 				return IdentifierToken(label=symbol)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from enum import auto, Enum, StrEnum
+from enum import StrEnum
 from typing import Literal
 
 
@@ -95,30 +95,31 @@ class TokenType(StrEnum):
 
 @dataclass(frozen=True)
 class SimpleToken:
-	type: SymbolType
+	type: TokenType
 
 
 @dataclass(frozen=True)
 class IdentifierToken:
-	type: Literal["identifier"]
+	type: Literal["identifier"] = "identifier"
 	label: str
 
 
 @dataclass(frozen=True)
 class StringToken:
-	type: Literal["literal_string"]
+	type: Literal["literal_string"] = "identifier"
 	literal: str
 
 
 @dataclass(frozen=True)
 class NumberToken:
-	type: Literal["literal_number"]
+	type: Literal["literal_number"] = "identifier"
 	literal: str
 
 
 @dataclass(frozen=True)
 class BoolToken:
-	type: Literal["literal_bool"]
+	type: Literal["literal_bool"] = "identifier"
 	literal: bool
+
 
 Token = SimpleToken | IdentifierToken | StringToken | NumberToken | BoolToken
