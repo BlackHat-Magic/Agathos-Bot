@@ -7,6 +7,7 @@ from typing import Literal
 class TokenType(StrEnum):
 	# control flow
 	FN = "fn"  # TODO: do we want this?
+	RETURN_TYPE = "->"
 	IF = "if"
 	ELSE = "else"
 	ELIF = "elif"
@@ -89,6 +90,7 @@ class TokenType(StrEnum):
 	RSHIFT_ASSIGN = ">>="
 
 	COMMA = ","
+	COLON = ":"
 
 	EOF = "EOF"
 
@@ -100,25 +102,25 @@ class SimpleToken:
 
 @dataclass(frozen=True)
 class IdentifierToken:
-	type: Literal["identifier"] = "identifier"
+	type: Literal["identifier"]
 	label: str
 
 
 @dataclass(frozen=True)
 class StringToken:
-	type: Literal["literal_string"] = "identifier"
+	type: Literal["literal_string"]
 	literal: str
 
 
 @dataclass(frozen=True)
 class NumberToken:
-	type: Literal["literal_number"] = "identifier"
+	type: Literal["literal_number"]
 	literal: str
 
 
 @dataclass(frozen=True)
 class BoolToken:
-	type: Literal["literal_bool"] = "identifier"
+	type: Literal["literal_bool"]
 	literal: bool
 
 

@@ -74,18 +74,16 @@ class Tokenizer:
 					self._advance()
 				return SimpleToken(type=TokenType(symbol))
 
-			# catches bitwise and, bitwise or, logical and, logical or, bitwise and assign, and bitwise
-			# or assign
-			case "&" | "|":
+			# catches bitwise and, bitwise or, colon, logical and, logical or, function declaration,
+			# bitwise and assign, bitwise or assign, and implicit declaration
+			case "&" | "|" | ":":
 				peeked = self._peek()
 				if peeked == symbol or peeked == "=":
 					symbol += peeked  # ty: ignore[unsupported-operator]
 					self._advance()
 				return SimpleToken(type=TokenType(symbol))
 
-			case ":" if self._peek() == "=":
-				self._advance()
-				return SimpleToken(type=TokenType.DECLARATION)
+			# catches implicit declaration, colon
 			case c if c == '"' or c == "'":
 				return self._tokenize_string(c)
 			case c if c.isdecimal() or c == ".":
@@ -119,7 +117,7 @@ class Tokenizer:
 			literal += peeked
 			self._advance()
 			escaped = False
-		return StringToken(literal=literal)
+		return StringToken(type="literal_string", literal=literal)
 
 	def _tokenize_number(self, first_digit: str) -> NumberToken:
 		literal = first_digit
@@ -127,7 +125,7 @@ class Tokenizer:
 		while peeked is not None and (peeked.isdecimal() or peeked in "._"):
 			literal += peeked
 			self._advance()
-		return NumberToken(literal=literal)
+		return NumberToken(type="literal_number", literal=literal)
 
 	def _tokenize_complex(self, first_char: str) -> Token:
 		symbol = first_char
@@ -135,38 +133,21 @@ class Tokenizer:
 		while peeked is not None and (peeked.isalpha() or peeked == "_"):
 			symbol += peeked
 			self._advance()
+		try:
+			type_ = TokenType(symbol)
+			return SimpleToken(type=type_)
+		except ValueError:
+			pass
 		match symbol:
-			case "fn":
-				return SimpleToken(type=TokenType.FN)
-			case "if":
-				return SimpleToken(type=TokenType.IF)
-			case "else":
-				return SimpleToken(type=TokenType.ELSE)
-			case "elif":
-				return SimpleToken(type=TokenType.ELIF)
-			case "for":
-				return SimpleToken(type=TokenType.FOR)
-			case "while":
-				return SimpleToken(type=TokenType.WHILE)
-			case "break":
-				return SimpleToken(type=TokenType.BREAK)
-			case "continue":
-				return SimpleToken(type=TokenType.CONTINUE)
-			case "return":
-				return SimpleToken(type=TokenType.RETURN)
-			case "d":
-				return SimpleToken(type=TokenType.DIE_ROLL)
-			case "b" | "below":
+			case "below":
 				return SimpleToken(type=TokenType.REROLL_BELOW)
-			case "a" | "above":
+			case "above":
 				return SimpleToken(type=TokenType.REROLL_ABOVE)
-			case "m" | "min":
+			case "min":
 				return SimpleToken(type=TokenType.MINIMUM)
-			case "x" | "max":
+			case "max":
 				return SimpleToken(type=TokenType.MAXIMUM)
 			case "TRUE" | "FALSE":
-				return BoolToken(literal=symbol == "TRUE")
-			case "NULL":
-				return SimpleToken(type=TokenType.LITERAL_NULL)
+				return BoolToken(type="literal_bool", literal=symbol == "TRUE")
 			case _:
-				return IdentifierToken(label=symbol)
+				return IdentifierToken(type="identifier", label=symbol)
