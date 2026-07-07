@@ -83,7 +83,7 @@ class Tokenizer:
 					self._advance()
 				return SimpleToken(type=TokenType(symbol))
 
-			# catches implicit declaration, colon
+			# literals and identifiers
 			case c if c == '"' or c == "'":
 				return self._tokenize_string(c)
 			case c if c.isdecimal() or c == ".":
@@ -137,17 +137,6 @@ class Tokenizer:
 			type_ = TokenType(symbol)
 			return SimpleToken(type=type_)
 		except ValueError:
-			pass
-		match symbol:
-			case "below":
-				return SimpleToken(type=TokenType.REROLL_BELOW)
-			case "above":
-				return SimpleToken(type=TokenType.REROLL_ABOVE)
-			case "min":
-				return SimpleToken(type=TokenType.MINIMUM)
-			case "max":
-				return SimpleToken(type=TokenType.MAXIMUM)
-			case "TRUE" | "FALSE":
+			if symbol == "TRUE" or symbol == "FALSE":
 				return BoolToken(type="literal_bool", literal=symbol == "TRUE")
-			case _:
-				return IdentifierToken(type="identifier", label=symbol)
+			return IdentifierToken(type="identifier", label=symbol)

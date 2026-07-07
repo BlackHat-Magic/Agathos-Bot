@@ -6,8 +6,7 @@ from typing import Literal
 
 class TokenType(StrEnum):
 	# control flow
-	FN = "fn"  # TODO: do we want this?
-	RETURN_TYPE = "->"
+	FUNCTION = "::"  # TODO: do we want this?
 	IF = "if"
 	ELSE = "else"
 	ELIF = "elif"
@@ -20,6 +19,10 @@ class TokenType(StrEnum):
 	CLOSE_BRACE = "}"  # TODO: same as above
 
 	# identifiers
+	DTYPE_STRING = "str"
+	DTYPE_FLOAT = "float"
+	DTYPE_INT = "int"
+	DTYPE_BOOL = "bool"
 
 	# literals
 	LITERAL_NULL = "NULL"
