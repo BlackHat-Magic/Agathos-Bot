@@ -25,7 +25,7 @@ class TokenType(StrEnum):
 	DTYPE_BOOL = "bool"
 
 	# literals
-	LITERAL_NULL = "NULL"
+	LITERAL_NULL = "null"
 
 	# postfixes
 	OPEN_PAREN = "("
