@@ -87,9 +87,25 @@ class Tokenizer:
 			case c if c == '"' or c == "'":
 				return self._tokenize_string(c)
 			case c if c.isdecimal() or c == ".":
-				return self._tokenize_number(c)
+				symbol = c
+				peeked = self._peek()
+				while peeked is not None and (peeked.isdecimal() or peeked in "._"):
+					symbol += peeked
+					self._advance()
+				return NumberToken(type="literal_number", literal=symbol)
 			case c if c.isalpha() or c == "_":
-				return self._tokenize_complex(c)
+				symbol = c
+				peeked = self._peek()
+				while peeked is not None and (peeked.isalpha() or peeked == "_"):
+					symbol += peeked
+					self._advance()
+				try:
+					type_ = TokenType(symbol)
+					return SimpleToken(type=type_)
+				except ValueError:
+					if symbol == "TRUE" or symbol == "FALSE":
+						return BoolToken(type="literal_bool", literal=symbol == "TRUE")
+					return IdentifierToken(type="identifier", label=symbol)
 			case _:
 				raise SyntaxError  # TODO: better error handling
 
@@ -118,25 +134,3 @@ class Tokenizer:
 			self._advance()
 			escaped = False
 		return StringToken(type="literal_string", literal=literal)
-
-	def _tokenize_number(self, first_digit: str) -> NumberToken:
-		literal = first_digit
-		peeked = self._peek()
-		while peeked is not None and (peeked.isdecimal() or peeked in "._"):
-			literal += peeked
-			self._advance()
-		return NumberToken(type="literal_number", literal=literal)
-
-	def _tokenize_complex(self, first_char: str) -> Token:
-		symbol = first_char
-		peeked = self._peek()
-		while peeked is not None and (peeked.isalpha() or peeked == "_"):
-			symbol += peeked
-			self._advance()
-		try:
-			type_ = TokenType(symbol)
-			return SimpleToken(type=type_)
-		except ValueError:
-			if symbol == "TRUE" or symbol == "FALSE":
-				return BoolToken(type="literal_bool", literal=symbol == "TRUE")
-			return IdentifierToken(type="identifier", label=symbol)
