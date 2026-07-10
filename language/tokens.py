@@ -11,6 +11,7 @@ class TokenType(StrEnum):
 	ELSE = "else"
 	ELIF = "elif"
 	FOR = "for"  # TODO: do we want this? (loop?)
+	IN = "in"
 	WHILE = "while"  # TODO: do we want this? (loop?)
 	BREAK = "break"
 	CONTINUE = "continue"
