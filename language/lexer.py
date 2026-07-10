@@ -40,7 +40,7 @@ class Tokenizer:
 
 		match symbol:
 			# catches postfixes, bitwise NOT, and comma
-			case "{" | "}" | "(" | ")" | "[" | "]" | "~" | ",":
+			case "{" | "}" | "(" | ")" | "[" | "]" | "~" | "," | ";":
 				return SimpleToken(type=TokenType(symbol))
 
 			# catches add, subtract, increment, decrement, addition assign, and subtraction assign
