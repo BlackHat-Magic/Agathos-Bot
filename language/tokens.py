@@ -94,7 +94,7 @@ class TokenType(StrEnum):
 
 	COMMA = ","
 	COLON = ":"
-
+	SEMICOLON = ";"
 	EOF = "EOF"
 
 
