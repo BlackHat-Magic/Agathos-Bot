@@ -99,6 +99,7 @@ class Tokenizer:
 				while peeked is not None and (peeked.isalpha() or peeked == "_"):
 					symbol += peeked
 					self._advance()
+					peeked = self._peek()
 				try:
 					type_ = TokenType(symbol)
 					return SimpleToken(type=type_)
