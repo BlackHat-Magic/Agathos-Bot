@@ -1,0 +1,28 @@
+name: Question
+description: Ask for help or clarification
+title: "<question summary>"
+labels: [Question]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: What would you like to know?
+      description: Be specific. The more detail you provide, the better the answer you'll get.
+      placeholder: I'm trying to do X but running into Y. I've tried Z, but...
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What are you trying to accomplish? What have you already tried or researched?
+      placeholder: |
+        - README says ... but I'm not sure how to ...
+        - I searched existing issues and didn't find an answer
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment (if applicable)
+      placeholder: |
+        OS:
+        Version/Branch:

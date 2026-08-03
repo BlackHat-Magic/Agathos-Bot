@@ -1,4 +1,33 @@
+<div align="center">
+
 # Agathos-Bot
+
+Discord bot for tabletop game tools
+
+</div>
+
+## Overview
+
+Discord bot for dice rolling and soon (tm) other stuff. Use `/roll` to roll a die.
+
+### Goals
+
+N/A
+
+### Features
+
+- [X] Arbitrary dice rolling
+- [ ] Clue
+- [ ] TTRPG VTT?
+- [ ] Other classic/popular board games?
+
+### Software Stack / Technologies Used
+
+- Language: Python
+- Framework: discord.py
+- Database: N/A (for now?)
+
+## Quickstart
 
 Permissions Integer: 448824461376
 
