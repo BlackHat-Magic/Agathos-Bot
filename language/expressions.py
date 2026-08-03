@@ -24,7 +24,7 @@ class BinaryOp(StrEnum):
 
 	MULTIPLY = "*"
 	DIVIDE = "/"
-	FLOOR_DIVIDE = "/"
+	FLOOR_DIVIDE = "//"
 	MODULO = "%"
 
 	ADD = "+"
@@ -34,7 +34,7 @@ class BinaryOp(StrEnum):
 	RSHIFT = ">>"
 
 	LESS_THAN = "<"
-	LESSTHAN_EQUAL = "<="
+	LESS_THAN_EQUAL = "<="
 	GREATER_THAN = ">"
 	GREATER_THAN_EQUAL = ">="
 
@@ -54,8 +54,8 @@ class BinaryOp(StrEnum):
 	SUBTRACTION_ASSIGN = "-="
 	MULTIPLICATION_ASSIGN = "*="
 	DIVISION_ASSIGN = "/="
-	MODULUS_ASSIGN = "//="
-	FLOOR_DIVISION_ASSIGN = "%="
+	MODULUS_ASSIGN = "%="
+	FLOOR_DIVISION_ASSIGN = "//="
 	EXPONENTIATION_ASSIGN = "**="
 	BITWISE_AND_ASSIGN = "&="
 	BITWISE_XOR_ASSIGN = "^="
@@ -64,71 +64,91 @@ class BinaryOp(StrEnum):
 	RSHIFT_ASSIGN = ">>="
 
 
-class Type(StrEnum):
-	DTYPE = "dtype"
-	STRING = "str"
-	FLOAT = "float"
-	INT = "int"
-	BOOL = "bool"
-	NULL = "null"
+# instead of an enum
+Type = type | str | float | int | bool | None
+BuiltinType = type
 
 
 @dataclass(frozen=True)
 class PrimitiveType:
-	type: Literal["primitive_type"]
-	dtype: Literal[Type.DTYPE]
+	value: Type
+	dtype: BuiltinType = type
+	type: Literal["primitive_type"] = "primitive_type"
 
 
 @dataclass(frozen=True)
 class ArrayType:
-	type: Literal["array_type"]
-	dtype: Literal[Type.DTYPE]
 	member_type: DataType
+	dtype: BuiltinType = type
+	type: Literal["array_type"] = "array_type"
 
 
 @dataclass(frozen=True)
 class FunctionType:
-	type: Literal["function_type"]
-	dtype: Literal[Type.DTYPE]
 	parameters: list[Identifier]
-	returns: DataType | list[DataType]
+	returns: DataType
+	dtype: BuiltinType = type
+	type: Literal["function_type"] = "function_type"
 
 
-DataType = PrimitiveType | ArrayType | FunctionType
+DataType = type | ArrayType | FunctionType | None
+
+
+@dataclass(frozen=True, init=False, eq=False)
+class String(str):
+	type: Literal["literal"] = "literal"
+	dtype: BuiltinType = str
+
+
+@dataclass(frozen=True, init=False, eq=False)
+class Float(float):
+	type: Literal["literal"] = "literal"
+	dtype: BuiltinType = float
+
+
+@dataclass(frozen=True, init=False, eq=False)
+class Int(int):
+	type: Literal["literal"] = "literal"
+	dtype: BuiltinType = int
+
+
+@dataclass(frozen=True, init=False, eq=False)
+class Bool(int):
+	type: Literal["literal"] = "literal"
+	dtype: BuiltinType = bool
 
 
 @dataclass(frozen=True)
-class Primitive:
-	type: Literal["primitive"]
-	dtype: PrimitiveType
-	value: str | float | int | bool | None
+class Null:
+	type: Literal["literal"] = "literal"
+	dtype: None = None
 
 
 @dataclass(frozen=True)
 class Array:
 	type: Literal["array"]
 	dtype: ArrayType
-	value: list
+	value: list[Expression]
 
 
 @dataclass(frozen=True)
 class Function:
 	type: Literal["function"]
 	dtype: FunctionType
-	body: list[Expression]
+	body: Block
 
 
 @dataclass(frozen=True)
 class Identifier:
 	type: Literal["identifier"]
 	dtype: DataType
-	identifier: str
+	label: str
 
 
 @dataclass(frozen=True)
 class Index:
 	type: Literal["index"]
-	dtype: ArrayType  # array type
+	dtype: DataType  # member type (what gets returned by indexing)
 	array: Expression
 	index: Expression
 
@@ -137,33 +157,45 @@ class Index:
 class Call:
 	type: Literal["call"]
 	dtype: DataType  # return type
-	identifier: str
+	callee: Expression
 	args: list[Expression]
 
 
 @dataclass(frozen=True)
-class If:  # TODO: ternary
+class If:
 	type: Literal["if"]
-	then_branch: list[Expression]
-	elif_branches: list[tuple[Expression, list[Expression]]]
-	else_branch: list[Expression]
+	dtype: DataType
+	then_branch: Block
+	elif_branches: list[tuple[Expression, Block]]
+	else_branch: Block | None
+	has_value: bool = False
 
 
 @dataclass(frozen=True)
 class For:
 	type: Literal["for"]
-	dtype: DataType  # TODO: yield keyword
+	dtype: DataType
 	target: Identifier
 	iterable: Expression
-	body: list[Expression]
+	body: Block
+	has_value: bool = False
 
 
 @dataclass(frozen=True)
 class While:
 	type: Literal["while"]
-	dtype: DataType  # TODO: yield keyword
+	dtype: DataType
 	test: Expression
+	body: Block
+	has_value: bool = False
+
+
+@dataclass(frozen=True)
+class Block:
+	type: Literal["block"]
+	dtype: DataType
 	body: list[Expression]
+	has_value: bool = False
 
 
 @dataclass(frozen=True)
@@ -172,7 +204,7 @@ class Unary:
 	dtype: DataType
 	operation: UnaryOp
 	operand: Expression
-	operand_loc: Literal["before", "after"]
+	operator_loc: Literal["before", "after"]
 
 
 @dataclass(frozen=True)
@@ -185,14 +217,36 @@ class Binary:  # includes assignment and declaration
 
 
 @dataclass(frozen=True)
+class Ternary:
+	type: Literal["ternary"]
+	dtype: DataType
+	if_true: Expression
+	condition: Expression
+	if_false: Expression
+
+
+@dataclass(frozen=True)
 class Return:
 	type: Literal["return"]
 	dtype: DataType
 	expression: Expression
 
 
+@dataclass(frozen=True)
+class Yield:
+	type: Literal["yield"]
+	dtype: DataType
+	expression: Expression
+	has_value: bool = True
+
+
 Expression = (
-	Primitive
+	String
+	| Float
+	| Int
+	| Bool
+	| Null
+	| PrimitiveType
 	| Array
 	| Function
 	| Identifier
@@ -202,6 +256,9 @@ Expression = (
 	| If
 	| For
 	| While
+	| Block
 	| Binary
+	| Ternary
 	| Return
+	| Yield
 )

@@ -16,6 +16,7 @@ class TokenType(StrEnum):
 	BREAK = "break"
 	CONTINUE = "continue"
 	RETURN = "return"  # TODO: do we want this? (coupled to fn)
+	YIELD = "yield"
 	OPEN_BRACE = "{"  # TODO: do we want this? What would we even use it for?
 	CLOSE_BRACE = "}"  # TODO: same as above
 

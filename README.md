@@ -17,6 +17,8 @@ N/A
 ### Features
 
 - [X] Arbitrary dice rolling
+- [ ] list comprehension equivalent in custom language
+- [ ] option and result types in custom language
 - [ ] Clue
 - [ ] TTRPG VTT?
 - [ ] Other classic/popular board games?
