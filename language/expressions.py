@@ -37,6 +37,7 @@ class BinaryOp(StrEnum):
 	LESS_THAN_EQUAL = "<="
 	GREATER_THAN = ">"
 	GREATER_THAN_EQUAL = ">="
+	IN = "in"
 
 	EQUAL = "=="
 	NOT_EQUAL = "!="
@@ -132,10 +133,40 @@ class Array:
 
 
 @dataclass(frozen=True)
+class Range:
+	type: Literal["range"]
+	dtype: ArrayType
+	start: Expression
+	stop: Expression
+	step: Expression
+
+
+@dataclass(frozen=True)
+class Slice:
+	type: Literal["slice"]
+	dtype: ArrayType
+	array: Expression
+	start: Expression | None = None
+	stop: Expression | None = None
+	step: Expression | None = None
+
+
+@dataclass(frozen=True)
+class Comprehension:
+	type: Literal["comprehension"]
+	dtype: ArrayType
+	expression: Expression
+	target: Identifier
+	iterable: Expression
+
+
+@dataclass(frozen=True)
 class Function:
 	type: Literal["function"]
 	dtype: FunctionType
+	name: str
 	body: Block
+	flow: FlowSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +200,7 @@ class If:
 	elif_branches: list[tuple[Expression, Block]]
 	else_branch: Block | None
 	has_value: bool = False
+	flow: FlowSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -179,6 +211,7 @@ class For:
 	iterable: Expression
 	body: Block
 	has_value: bool = False
+	flow: FlowSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -188,6 +221,7 @@ class While:
 	test: Expression
 	body: Block
 	has_value: bool = False
+	flow: FlowSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -196,6 +230,7 @@ class Block:
 	dtype: DataType
 	body: list[Expression]
 	has_value: bool = False
+	flow: FlowSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -229,7 +264,30 @@ class Ternary:
 class Return:
 	type: Literal["return"]
 	dtype: DataType
-	expression: Expression
+	expression: Expression | None = None
+
+
+@dataclass(frozen=True)
+class Break:
+	type: Literal["break"]
+	condition: Expression | None = None
+	dtype: None = None
+
+
+@dataclass(frozen=True)
+class Continue:
+	type: Literal["continue"]
+	condition: Expression | None = None
+	dtype: None = None
+
+
+@dataclass(frozen=True)
+class FlowSummary:
+	can_fall_through: bool
+	return_types: tuple[DataType, ...]
+	yield_types: tuple[DataType, ...]
+	breaks: bool
+	continues: bool
 
 
 @dataclass(frozen=True)
@@ -248,6 +306,9 @@ Expression = (
 	| Null
 	| PrimitiveType
 	| Array
+	| Range
+	| Slice
+	| Comprehension
 	| Function
 	| Identifier
 	| Index
@@ -261,4 +322,6 @@ Expression = (
 	| Ternary
 	| Return
 	| Yield
+	| Break
+	| Continue
 )
