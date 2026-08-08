@@ -1,4 +1,5 @@
 import unittest
+from typing import cast
 
 from language.interpreter import (
 	CallDepthError,
@@ -9,6 +10,10 @@ from language.interpreter import (
 	RuntimeEnv,
 	RuntimeErrorBase,
 	UndefinedNameError,
+	_BreakSignal,
+	_ContinueSignal,
+	_ReturnSignal,
+	_YieldSignal,
 )
 
 
@@ -30,17 +35,25 @@ class RuntimeEnvTests(unittest.TestCase):
 		self.assertEqual(parent.lookup("value"), "outer")
 		self.assertEqual(child.lookup("value"), "inner")
 
-	def test_assignment_updates_nearest_binding(self):
+	def test_assignment_updates_nearest_same_name_binding_only(self):
 		parent = RuntimeEnv()
-		parent.declare("outer", 1)
+		parent.declare("value", "outer")
 		child = parent.child()
-		child.declare("inner", 2)
+		child.declare("value", "inner")
 
-		child.assign("inner", 3)
-		child.assign("outer", 4)
+		child.assign("value", "updated")
 
-		self.assertEqual(child.lookup("inner"), 3)
-		self.assertEqual(parent.lookup("outer"), 4)
+		self.assertEqual(child.lookup("value"), "updated")
+		self.assertEqual(parent.lookup("value"), "outer")
+
+	def test_assignment_updates_ancestor_when_child_has_no_binding(self):
+		parent = RuntimeEnv()
+		parent.declare("value", "outer")
+		child = parent.child()
+
+		child.assign("value", "updated")
+
+		self.assertEqual(parent.lookup("value"), "updated")
 
 	def test_lookup_rejects_undefined_name(self):
 		with self.assertRaises(UndefinedNameError):
@@ -66,6 +79,19 @@ class RuntimeEnvTests(unittest.TestCase):
 
 		self.assertEqual(child.lookup("value"), 2)
 
+	def test_parent_must_be_runtime_environment(self):
+		with self.assertRaises(TypeError):
+			RuntimeEnv(parent=cast(RuntimeEnv, object()))
+
+	def test_parent_link_is_read_only(self):
+		parent = RuntimeEnv()
+		child = parent.child()
+
+		with self.assertRaises(AttributeError):
+			setattr(child, "parent", child)
+
+		self.assertIs(child.parent, parent)
+
 
 class RuntimeErrorHierarchyTests(unittest.TestCase):
 	def test_runtime_errors_share_common_base(self):
@@ -82,6 +108,23 @@ class RuntimeErrorHierarchyTests(unittest.TestCase):
 			with self.subTest(error_type=error_type):
 				self.assertTrue(issubclass(error_type, RuntimeErrorBase))
 				self.assertTrue(issubclass(error_type, Exception))
+
+
+class RuntimeControlSignalTests(unittest.TestCase):
+	def test_value_signals_preserve_value_and_exception_args(self):
+		for signal_type in (_ReturnSignal, _YieldSignal):
+			with self.subTest(signal_type=signal_type):
+				signal = signal_type("value")
+				self.assertEqual(signal.value, "value")
+				self.assertEqual(signal.args, ("value",))
+				self.assertNotEqual(signal, signal_type("value"))
+
+	def test_empty_signals_have_no_value_or_exception_args(self):
+		for signal_type in (_BreakSignal, _ContinueSignal):
+			with self.subTest(signal_type=signal_type):
+				signal = signal_type()
+				self.assertEqual(signal.args, ())
+				self.assertNotEqual(signal, signal_type())
 
 
 if __name__ == "__main__":

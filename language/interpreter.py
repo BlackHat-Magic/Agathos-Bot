@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 
 class RuntimeErrorBase(Exception):
 	"""Base class for errors raised while executing Agathos expressions."""
@@ -34,57 +32,87 @@ class CallDepthError(RuntimeErrorBase):
 
 
 class RuntimeEnv:
-	"""A lexical runtime frame with an optional enclosing environment."""
+	"""A lexical runtime frame with an optional read-only enclosing environment."""
+
+	__slots__ = ("_parent", "_values")
 
 	def __init__(self, parent: RuntimeEnv | None = None) -> None:
-		"""Create an empty frame chained to ``parent`` when provided."""
-		self.parent = parent
+		"""Create an empty frame chained to ``parent`` when provided.
+
+		Raises:
+			TypeError: If ``parent`` is neither a ``RuntimeEnv`` nor ``None``.
+		"""
+		if parent is not None and not isinstance(parent, RuntimeEnv):
+			raise TypeError("parent must be a RuntimeEnv or None")
+		self._parent = parent
 		self._values: dict[str, object] = {}
+
+	@property
+	def parent(self) -> RuntimeEnv | None:
+		"""Return the enclosing environment without allowing reassignment."""
+		return self._parent
 
 	def child(self) -> RuntimeEnv:
 		"""Return a new empty frame whose parent is this environment."""
 		return RuntimeEnv(parent=self)
 
 	def declare(self, name: str, value: object) -> None:
-		"""Bind ``name`` in this frame, rejecting duplicate local bindings."""
+		"""Bind ``name`` in this frame, rejecting duplicate local bindings.
+
+		Raises:
+			InvalidOperationError: If ``name`` is already bound in this frame.
+		"""
 		if name in self._values:
 			raise InvalidOperationError(f"name already declared: {name}")
 		self._values[name] = value
 
 	def lookup(self, name: str) -> object:
-		"""Return the nearest binding for ``name`` or raise if it is undefined."""
+		"""Return the nearest binding for ``name``.
+
+		Raises:
+			UndefinedNameError: If ``name`` is not bound in this chain.
+		"""
 		if name in self._values:
 			return self._values[name]
-		if self.parent is not None:
-			return self.parent.lookup(name)
+		if self._parent is not None:
+			return self._parent.lookup(name)
 		raise UndefinedNameError(f"undefined name: {name}")
 
 	def assign(self, name: str, value: object) -> None:
-		"""Update the nearest binding for ``name`` or raise if it is undefined."""
+		"""Update the nearest binding for ``name``.
+
+		The update mutates the frame containing the nearest binding, which may be
+		an ancestor of this environment.
+
+		Raises:
+			UndefinedNameError: If ``name`` is not bound in this chain.
+		"""
 		if name in self._values:
 			self._values[name] = value
 			return
-		if self.parent is not None:
-			self.parent.assign(name, value)
+		if self._parent is not None:
+			self._parent.assign(name, value)
 			return
 		raise UndefinedNameError(f"undefined name: {name}")
 
 
-@dataclass
 class _ReturnSignal(Exception):
-	value: object
+	def __init__(self, value: object) -> None:
+		super().__init__(value)
+		self.value = value
 
 
-@dataclass
 class _BreakSignal(Exception):
-	pass
+	def __init__(self) -> None:
+		super().__init__()
 
 
-@dataclass
 class _ContinueSignal(Exception):
-	pass
+	def __init__(self) -> None:
+		super().__init__()
 
 
-@dataclass
 class _YieldSignal(Exception):
-	value: object
+	def __init__(self, value: object) -> None:
+		super().__init__(value)
+		self.value = value
