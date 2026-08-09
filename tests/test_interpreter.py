@@ -3,6 +3,7 @@ import random
 from typing import cast
 
 from language.expressions import (
+	ArrayType,
 	Binary,
 	BinaryOp,
 	Block,
@@ -147,6 +148,36 @@ class RuntimeControlSignalTests(unittest.TestCase):
 
 
 class InterpreterTests(unittest.TestCase):
+	def _evaluate_manual_return(self, returns, value):
+		environment = RuntimeEnv()
+		environment.declare("returned", value)
+		function = Function(
+			type="function",
+			dtype=FunctionType(parameters=[], returns=returns),
+			name="manual",
+			body=Block(
+				type="block",
+				dtype=None,
+				body=[
+					Return(
+						type="return",
+						dtype=returns,
+						expression=Identifier(
+							type="identifier", dtype=returns, label="returned"
+						),
+					)
+				],
+			),
+		)
+		environment.declare("manual", RuntimeFunction(function, environment))
+		call = Call(
+			type="call",
+			dtype=returns,
+			callee=Identifier(type="identifier", dtype=function.dtype, label="manual"),
+			args=[],
+		)
+		return Interpreter()._evaluate(call, environment)
+
 	def test_function_binds_parameters_and_returns_value(self):
 		self.assertEqual(
 			Interpreter().execute_source(
@@ -186,6 +217,67 @@ class InterpreterTests(unittest.TestCase):
 		self.assertIsNone(
 			Interpreter().execute_source("notify :: () { return; }; notify()")
 		)
+
+	def test_no_value_function_rejects_explicit_non_none_return(self):
+		with self.assertRaises(InvalidOperationError):
+			self._evaluate_manual_return(None, 1)
+
+	def test_value_function_rejects_explicit_none_return(self):
+		with self.assertRaises(InvalidOperationError):
+			self._evaluate_manual_return(int, None)
+
+	def test_scalar_return_types_are_exact_and_roll_results_use_total_type(self):
+		self.assertEqual(
+			self._evaluate_manual_return(int, RollResult(total=4, details=())),
+			RollResult(total=4, details=()),
+		)
+		self.assertEqual(
+			self._evaluate_manual_return(float, RollResult(total=4.5, details=())),
+			RollResult(total=4.5, details=()),
+		)
+
+		for returns, value in ((int, 1.5), (int, True), (float, 1)):
+			with self.subTest(returns=returns, value=value):
+				with self.assertRaises(InvalidOperationError):
+					self._evaluate_manual_return(returns, value)
+		with self.assertRaises(InvalidOperationError):
+			self._evaluate_manual_return(int, RollResult(total=4.5, details=()))
+		with self.assertRaises(InvalidOperationError):
+			self._evaluate_manual_return(float, RollResult(total=4, details=()))
+
+	def test_array_returns_match_element_types_recursively(self):
+		array_type = ArrayType(ArrayType(int))
+		self.assertEqual(
+			self._evaluate_manual_return(array_type, [[1, 2], [3]]),
+			[[1, 2], [3]],
+		)
+
+		for value in ([[1, "wrong"]], [1, [2]]):
+			with self.subTest(value=value):
+				with self.assertRaises(InvalidOperationError):
+					self._evaluate_manual_return(array_type, value)
+
+	def test_function_returns_require_runtime_functions(self):
+		returned_function = Function(
+			type="function",
+			dtype=FunctionType(parameters=[], returns=None),
+			name="returned",
+			body=Block(type="block", dtype=None, body=[]),
+		)
+		returned_environment = RuntimeEnv()
+		runtime_function = RuntimeFunction(returned_function, returned_environment)
+		function_type = FunctionType(parameters=[], returns=None)
+
+		self.assertIs(
+			self._evaluate_manual_return(function_type, runtime_function),
+			runtime_function,
+		)
+		with self.assertRaises(InvalidOperationError):
+			self._evaluate_manual_return(function_type, returned_function)
+
+	def test_malformed_return_type_mode_is_rejected(self):
+		with self.assertRaises(InvalidOperationError):
+			self._evaluate_manual_return(object(), 1)
 
 	def test_value_function_falling_through_is_rejected_defensively(self):
 		function = Function(
@@ -241,10 +333,17 @@ class InterpreterTests(unittest.TestCase):
 	def test_call_depth_exhaustion_restores_depth(self):
 		interpreter = Interpreter(max_call_depth=2)
 
-		with self.assertRaises(CallDepthError):
+		with self.assertRaisesRegex(CallDepthError, "call depth exceeded maximum: 2"):
 			interpreter.execute_source("loop :: () { loop(); }; loop()")
 		self.assertEqual(interpreter._call_depth, 0)
 		self.assertEqual(interpreter.execute_source("1"), 1)
+
+	def test_zero_call_depth_rejects_call_without_entering_function(self):
+		interpreter = Interpreter(max_call_depth=0)
+
+		with self.assertRaises(CallDepthError):
+			interpreter.execute_source("noop :: () {}; noop()")
+		self.assertEqual(interpreter._call_depth, 0)
 
 	def test_forward_function_declarations_are_unavailable_at_runtime(self):
 		declarations = Parser(

@@ -9,6 +9,7 @@ from typing import Any
 
 from .expressions import (
 	Array,
+	ArrayType,
 	Binary,
 	BinaryOp,
 	Block,
@@ -16,6 +17,7 @@ from .expressions import (
 	Call,
 	Float,
 	Function,
+	FunctionType,
 	Identifier,
 	Int,
 	Null,
@@ -279,7 +281,7 @@ class RuntimeFunction:
 
 
 class Interpreter:
-	"""Execute the scalar and block subset of the Agathos expression language.
+	"""Execute the scalar, block, and function subset of Agathos.
 
 	Each call to :meth:`execute` starts with a fresh root environment and resets
 	the execution counter. Declarations and assignments mutate only that
@@ -287,6 +289,14 @@ class Interpreter:
 	random source and limits. Unsupported expression kinds and operators raise
 	``InvalidOperationError``. Parsing errors from :meth:`execute_source` are
 	propagated unchanged.
+
+	Function definitions bind a named :class:`RuntimeFunction` in the current
+	lexical environment. A function captures that environment, and each call
+	uses a child frame for its parameters and local declarations, so nested
+	functions and recursive calls resolve names lexically. ``return`` exits the
+	nearest function; explicit values are checked against the function's
+	declared return type, while no-value functions may return only ``None``.
+	Calls at or beyond ``max_call_depth`` raise :class:`CallDepthError`.
 	"""
 
 	def __init__(
@@ -296,6 +306,10 @@ class Interpreter:
 		max_call_depth: int = 100,
 	) -> None:
 		"""Create an interpreter with optional randomness and execution limits.
+
+		``max_call_depth`` limits active nested function calls. A call that would
+		exceed it raises :class:`CallDepthError`, and the depth counter is restored
+		even when a call raises another runtime error.
 
 		Raises:
 			ValueError: If either execution limit is negative.
@@ -359,6 +373,10 @@ class Interpreter:
 			if not isinstance(callee, RuntimeFunction):
 				raise InvalidOperationError("callee is not a runtime function")
 			function = callee.function
+			if not isinstance(function.dtype, FunctionType):
+				raise InvalidOperationError(
+					f"function has an invalid type descriptor: {function.name}"
+				)
 			if len(arguments) != len(function.dtype.parameters):
 				raise InvalidOperationError(
 					"function called with incorrect argument count"
@@ -375,7 +393,7 @@ class Interpreter:
 				try:
 					self._evaluate(function.body, call_environment)
 				except _ReturnSignal as signal:
-					return signal.value
+					return self._validate_function_return(function, signal.value)
 				if function.dtype.returns is not None:
 					raise InvalidOperationError(
 						f"value-returning function fell through: {function.name}"
@@ -412,6 +430,42 @@ class Interpreter:
 			value = value.total
 		if isinstance(value, bool) or not isinstance(value, (int, float)):
 			raise InvalidOperationError("expected a numeric operand")
+		return value
+
+	@classmethod
+	def _matches_return_type(cls, value: object, return_type: object) -> bool:
+		"""Return whether a runtime value satisfies a function return contract."""
+		if return_type is None:
+			return value is None
+		if value is None:
+			return False
+		if isinstance(return_type, ArrayType):
+			return isinstance(value, list) and all(
+				cls._matches_return_type(item, return_type.member_type)
+				for item in value
+			)
+		if isinstance(return_type, FunctionType):
+			return isinstance(value, RuntimeFunction)
+		if return_type in (int, float) and isinstance(value, RollResult):
+			value = value.total
+		return isinstance(return_type, type) and type(value) is return_type
+
+	@classmethod
+	def _validate_function_return(cls, function: Function, value: object) -> object:
+		"""Validate and return a value emitted by a function's return signal."""
+		if not isinstance(function.dtype, FunctionType):
+			raise InvalidOperationError(
+				f"function has an invalid type descriptor: {function.name}"
+			)
+		if not cls._matches_return_type(value, function.dtype.returns):
+			expected = (
+				"no value"
+				if function.dtype.returns is None
+				else repr(function.dtype.returns)
+			)
+			raise InvalidOperationError(
+				f"invalid return value for function {function.name}: expected {expected}"
+			)
 		return value
 
 	@staticmethod
@@ -829,7 +883,16 @@ class Interpreter:
 
 		The root environment and step counter are fresh for every call. An empty
 		program returns ``None``. Runtime errors are raised as they occur, and
-		partial environment changes are discarded when the call ends.
+		partial environment changes are discarded when the call ends. Function
+		definitions capture the environment where they execute; calls create
+		lexical child frames, and ``return`` exits the nearest function after its
+		value is checked against the declared return mode and type. A call that
+		would exceed ``max_call_depth`` raises :class:`CallDepthError`.
+
+		Raises:
+			CallDepthError: If nested function calls exceed ``max_call_depth``.
+			InvalidOperationError: If a return escapes a function or violates its
+				declared return contract.
 		"""
 		self._steps = 0
 		self._call_depth = 0
@@ -845,8 +908,13 @@ class Interpreter:
 	def execute_source(self, source: str) -> object:
 		"""Tokenize, parse, and execute one source program.
 
-		Parsing errors and runtime errors are propagated to the caller. The
-		program itself has no persistent environment or external side effects.
+		Function declarations become available after their declaration executes,
+		and calls use lexical closures over the declaration environment. Explicit
+		returns are validated at the call boundary; value-returning functions must
+		produce their declared type, while no-value functions return ``None``.
+		Parsing errors, :class:`CallDepthError`, and other runtime errors are
+		propagated to the caller. The program itself has no persistent environment
+		or external side effects.
 		"""
 		expressions = Parser(Tokenizer(source).tokenize()).parse_program()
 		return self.execute(expressions)
