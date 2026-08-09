@@ -64,6 +64,7 @@ class DieRollDetail:
 	rerolls: tuple[tuple[int, ...], ...]
 	dropped: tuple[int, ...]
 	clamped: tuple[tuple[int, int] | None, ...]
+	values: tuple[int, ...]
 
 	def __init__(
 		self,
@@ -72,7 +73,10 @@ class DieRollDetail:
 		rerolls: Iterable[Iterable[int]],
 		dropped: Iterable[int],
 		clamped: Iterable[Iterable[int] | None] = (),
+		values: Iterable[int] | None = None,
 	) -> None:
+		rolls_tuple = tuple(rolls)
+		rerolls_tuple = tuple(tuple(roll) for roll in rerolls)
 		normalized_clamped: list[tuple[int, int] | None] = []
 		for clamp in clamped:
 			if clamp is None:
@@ -80,11 +84,25 @@ class DieRollDetail:
 			else:
 				original, replacement = clamp
 				normalized_clamped.append((original, replacement))
+		clamped_tuple = tuple(normalized_clamped)
+		if values is None:
+			current_values = []
+			for index, original in enumerate(rolls_tuple):
+				reroll = rerolls_tuple[index] if index < len(rerolls_tuple) else ()
+				value = reroll[-1] if reroll else original
+				clamp = clamped_tuple[index] if index < len(clamped_tuple) else None
+				if clamp is not None:
+					value = clamp[1]
+				current_values.append(value)
+			values_tuple = tuple(current_values)
+		else:
+			values_tuple = tuple(values)
 		object.__setattr__(self, "sides", sides)
-		object.__setattr__(self, "rolls", tuple(rolls))
-		object.__setattr__(self, "rerolls", tuple(tuple(roll) for roll in rerolls))
+		object.__setattr__(self, "rolls", rolls_tuple)
+		object.__setattr__(self, "rerolls", rerolls_tuple)
 		object.__setattr__(self, "dropped", tuple(dropped))
-		object.__setattr__(self, "clamped", tuple(normalized_clamped))
+		object.__setattr__(self, "clamped", clamped_tuple)
+		object.__setattr__(self, "values", values_tuple)
 
 	def format(self) -> str:
 		"""Return a stable, human-readable representation of this detail."""
@@ -316,19 +334,12 @@ class Interpreter:
 			rolls=rolls,
 			rerolls=[()] * count,
 			dropped=(),
+			values=rolls,
 		)
 
 	@staticmethod
 	def _detail_values(detail: DieRollDetail) -> list[int]:
-		values = []
-		for index, original in enumerate(detail.rolls):
-			rerolls = detail.rerolls[index] if index < len(detail.rerolls) else ()
-			value = rerolls[-1] if rerolls else original
-			clamp = detail.clamped[index] if index < len(detail.clamped) else None
-			if clamp is not None:
-				value = clamp[1]
-			values.append(value)
-		return values
+		return list(detail.values)
 
 	def _modify_dice(
 		self, operation: BinaryOp, left: object, right: object
@@ -343,7 +354,8 @@ class Interpreter:
 				new_details.append(detail)
 				continue
 
-			values = self._detail_values(detail)
+			previous_values = self._detail_values(detail)
+			values = previous_values.copy()
 			rerolls = [
 				list(detail.rerolls[index]) if index < len(detail.rerolls) else []
 				for index in range(len(detail.rolls))
@@ -379,7 +391,7 @@ class Interpreter:
 						value = threshold
 				values[index] = value
 
-			total_delta += sum(values) - sum(self._detail_values(detail))
+			total_delta += sum(values) - sum(previous_values)
 			clamp_details = clamped if any(item is not None for item in clamped) else ()
 			new_details.append(
 				DieRollDetail(
@@ -388,6 +400,7 @@ class Interpreter:
 					rerolls=rerolls,
 					dropped=detail.dropped,
 					clamped=clamp_details,
+					values=values,
 				)
 			)
 

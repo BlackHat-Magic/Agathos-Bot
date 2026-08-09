@@ -356,6 +356,28 @@ class InterpreterTests(unittest.TestCase):
 		self.assertIsInstance(combined.details[0], DieRollDetail)
 		self.assertIsInstance(combined.details[1], RollCompositionDetail)
 
+	def test_modifier_orderings_keep_canonical_final_die_values(self):
+		minimum_then_reroll = Interpreter(rng=random.Random(0)).execute_source(
+			"3d6m3b4"
+		)
+		maximum_then_reroll = Interpreter(rng=random.Random(0)).execute_source(
+			"3d6x3a2"
+		)
+
+		for result, expected_values, expected_total in (
+			(minimum_then_reroll, (4, 4, 5), 13),
+			(maximum_then_reroll, (2, 2, 1), 5),
+		):
+			with self.subTest(expected_total=expected_total):
+				self.assertIsInstance(result, RollResult)
+				assert isinstance(result, RollResult)
+				detail = result.details[0]
+				self.assertIsInstance(detail, DieRollDetail)
+				assert isinstance(detail, DieRollDetail)
+				self.assertEqual(detail.values, expected_values)
+				self.assertEqual(result.total, expected_total)
+				self.assertEqual(sum(detail.values), result.total)
+
 	def test_reroll_after_clamp_preserves_both_detail_fields(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("3d6m3b3")
 
@@ -419,12 +441,14 @@ class InterpreterTests(unittest.TestCase):
 		rolls = [7, 13]
 		rerolls = [[2, 8], []]
 		dropped = [13]
+		values = [7, 13]
 		details = []
 		detail = DieRollDetail(
 			sides=20,
 			rolls=rolls,
 			rerolls=rerolls,
 			dropped=dropped,
+			values=values,
 		)
 		details.append(detail)
 		result = RollResult(total=15, details=details)
@@ -433,11 +457,13 @@ class InterpreterTests(unittest.TestCase):
 		rerolls[0].append(19)
 		rerolls.append([4])
 		dropped.clear()
+		values.append(1)
 		details.clear()
 
 		self.assertEqual(detail.rolls, (7, 13))
 		self.assertEqual(detail.rerolls, ((2, 8), ()))
 		self.assertEqual(detail.dropped, (13,))
+		self.assertEqual(detail.values, (7, 13))
 		self.assertEqual(result.details, (detail,))
 
 	def test_roll_details_survive_manual_arithmetic_and_comparisons(self):
