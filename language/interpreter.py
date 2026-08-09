@@ -63,6 +63,7 @@ class DieRollDetail:
 	rolls: tuple[int, ...]
 	rerolls: tuple[tuple[int, ...], ...]
 	dropped: tuple[int, ...]
+	clamped: tuple[tuple[int, int] | None, ...]
 
 	def __init__(
 		self,
@@ -70,18 +71,23 @@ class DieRollDetail:
 		rolls: Iterable[int],
 		rerolls: Iterable[Iterable[int]],
 		dropped: Iterable[int],
+		clamped: Iterable[tuple[int, int] | None] = (),
 	) -> None:
 		object.__setattr__(self, "sides", sides)
 		object.__setattr__(self, "rolls", tuple(rolls))
 		object.__setattr__(self, "rerolls", tuple(tuple(roll) for roll in rerolls))
 		object.__setattr__(self, "dropped", tuple(dropped))
+		object.__setattr__(self, "clamped", tuple(clamped))
 
 	def format(self) -> str:
 		"""Return a stable, human-readable representation of this detail."""
-		return (
+		formatted = (
 			f"d{self.sides} rolls={self.rolls!r} "
 			f"rerolls={self.rerolls!r} dropped={self.dropped!r}"
 		)
+		if any(clamp is not None for clamp in self.clamped):
+			formatted += f" clamped={self.clamped!r}"
+		return formatted
 
 
 @dataclass(frozen=True)
@@ -283,6 +289,104 @@ class Interpreter:
 			isinstance(value, (int, float)) and not isinstance(value, bool)
 		)
 
+	@classmethod
+	def _dice_integer(cls, value: object, name: str) -> int:
+		try:
+			numeric = cls._numeric(value)
+		except InvalidOperationError as error:
+			raise InvalidDiceError(f"{name} must be numeric") from error
+		if isinstance(numeric, float) and not numeric.is_integer():
+			raise InvalidDiceError(f"{name} must be integral")
+		return int(numeric)
+
+	def _roll_dice(self, count: int, sides: int) -> DieRollDetail:
+		rolls = []
+		for _ in range(count):
+			self._tick()
+			rolls.append(self.rng.randint(1, sides))
+		return DieRollDetail(
+			sides=sides,
+			rolls=rolls,
+			rerolls=[()] * count,
+			dropped=(),
+		)
+
+	@staticmethod
+	def _detail_values(detail: DieRollDetail) -> list[int]:
+		values = []
+		for index, original in enumerate(detail.rolls):
+			rerolls = detail.rerolls[index] if index < len(detail.rerolls) else ()
+			value = rerolls[-1] if rerolls else original
+			clamp = detail.clamped[index] if index < len(detail.clamped) else None
+			if clamp is not None:
+				value = clamp[1]
+			values.append(value)
+		return values
+
+	def _modify_dice(
+		self, operation: BinaryOp, left: object, right: object
+	) -> RollResult:
+		if not isinstance(left, RollResult):
+			raise InvalidDiceError("dice modifiers require a roll result")
+		threshold = self._dice_integer(right, "dice threshold")
+		new_details: list[object] = []
+		total_delta = 0
+		for detail in left.details:
+			if not isinstance(detail, DieRollDetail):
+				new_details.append(detail)
+				continue
+
+			values = self._detail_values(detail)
+			rerolls = [
+				list(detail.rerolls[index]) if index < len(detail.rerolls) else []
+				for index in range(len(detail.rolls))
+			]
+			clamped = [
+				detail.clamped[index] if index < len(detail.clamped) else None
+				for index in range(len(detail.rolls))
+			]
+			for index, value in enumerate(values):
+				if operation in (BinaryOp.REROLL_BELOW, BinaryOp.REROLL_ABOVE):
+					qualifies = (
+						value < threshold
+						if operation == BinaryOp.REROLL_BELOW
+						else value > threshold
+					)
+					while qualifies:
+						self._tick()
+						value = self.rng.randint(1, detail.sides)
+						rerolls[index].append(value)
+						qualifies = (
+							value < threshold
+							if operation == BinaryOp.REROLL_BELOW
+							else value > threshold
+						)
+					clamped[index] = None
+				else:
+					qualifies = (
+						value < threshold
+						if operation == BinaryOp.MINIMUM
+						else value > threshold
+					)
+					if qualifies:
+						clamped[index] = (value, threshold)
+						value = threshold
+				values[index] = value
+
+			total_delta += sum(values) - sum(self._detail_values(detail))
+			clamp_details = clamped if any(item is not None for item in clamped) else ()
+			new_details.append(
+				DieRollDetail(
+					sides=detail.sides,
+					rolls=detail.rolls,
+					rerolls=rerolls,
+					dropped=detail.dropped,
+					clamped=clamp_details,
+				)
+			)
+
+		return RollResult(total=left.total + total_delta, details=new_details)
+
 	def _combine_result(
 		self,
 		left: object,
@@ -373,16 +477,27 @@ class Interpreter:
 		return left, right
 
 	def _apply_binary(self, operation: BinaryOp, left: object, right: object) -> object:
+		if operation == BinaryOp.DIE_ROLL:
+			count = self._dice_integer(left, "dice count")
+			sides = self._dice_integer(right, "dice sides")
+			if count < 0:
+				raise InvalidDiceError("dice count must not be negative")
+			if sides < 1:
+				raise InvalidDiceError("dice sides must be at least one")
+			detail = self._roll_dice(count, sides)
+			parent_details = left.details if isinstance(left, RollResult) else ()
+			return RollResult(
+				total=sum(detail.rolls),
+				details=(*parent_details, detail) if count else parent_details,
+			)
+
 		if operation in (
-			BinaryOp.DIE_ROLL,
 			BinaryOp.REROLL_BELOW,
 			BinaryOp.REROLL_ABOVE,
 			BinaryOp.MINIMUM,
 			BinaryOp.MAXIMUM,
 		):
-			raise InvalidOperationError(
-				f"operator is not implemented: {operation.value}"
-			)
+			return self._modify_dice(operation, left, right)
 
 		if operation in (
 			BinaryOp.ADD,

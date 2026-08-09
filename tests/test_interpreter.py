@@ -1,4 +1,5 @@
 import unittest
+import random
 from typing import cast
 
 from language.expressions import Binary, BinaryOp, Identifier, Int
@@ -245,12 +246,131 @@ class InterpreterTests(unittest.TestCase):
 				with self.assertRaises(DivisionByZeroError):
 					Interpreter().execute_source(source)
 
-	def test_numeric_rejects_boolean_and_dice_operations_are_deferred(self):
+	def test_numeric_rejects_boolean(self):
 		interpreter = Interpreter()
 		with self.assertRaises(InvalidOperationError):
 			interpreter._apply_binary(BinaryOp.ADD, True, 1)
-		with self.assertRaises(InvalidOperationError):
-			interpreter.execute_source("1d6")
+
+	def test_dice_rolls_are_seeded_and_record_each_die(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("3d6")
+
+		self.assertEqual(
+			result,
+			RollResult(
+				total=9,
+				details=(DieRollDetail(6, (4, 4, 1), ((), (), ()), ()),),
+			),
+		)
+
+	def test_zero_dice_returns_an_empty_roll_result(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("0d6")
+
+		self.assertEqual(result, RollResult(total=0, details=()))
+
+	def test_invalid_dice_parameters_raise_invalid_dice_error(self):
+		interpreter = Interpreter(rng=random.Random(0))
+		for count, sides in ((-1, 6), (1.5, 6), (1, 0), (1, 6.5)):
+			with self.subTest(count=count, sides=sides):
+				with self.assertRaises(InvalidDiceError):
+					interpreter._apply_binary(BinaryOp.DIE_ROLL, count, sides)
+
+	def test_nested_dice_use_the_left_total_and_preserve_details(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("1d6d20")
+
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		self.assertEqual(result.total, 42)
+		self.assertEqual(
+			result.details,
+			(
+				DieRollDetail(6, (4,), ((),), ()),
+				DieRollDetail(20, (14, 2, 9, 17), ((), (), (), ()), ()),
+			),
+		)
+
+	def test_reroll_below_records_each_reroll_sequence(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("3d6b3")
+
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		self.assertEqual(result.total, 11)
+		self.assertEqual(
+			result.details[0],
+			DieRollDetail(6, (4, 4, 1), ((), (), (3,)), ()),
+		)
+
+	def test_reroll_above_records_each_reroll_sequence(self):
+		result = Interpreter(rng=random.Random(1)).execute_source("3d6a3")
+
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		self.assertEqual(result.total, 6)
+		self.assertEqual(
+			result.details[0],
+			DieRollDetail(6, (2, 5, 1), ((), (3,), ()), ()),
+		)
+
+	def test_minimum_and_maximum_retain_clamp_details(self):
+		minimum = Interpreter(rng=random.Random(0)).execute_source("3d6m3")
+		maximum = Interpreter(rng=random.Random(0)).execute_source("3d6x3")
+
+		self.assertIsInstance(minimum, RollResult)
+		self.assertIsInstance(maximum, RollResult)
+		assert isinstance(minimum, RollResult)
+		assert isinstance(maximum, RollResult)
+		self.assertEqual(minimum.total, 11)
+		self.assertEqual(maximum.total, 7)
+		minimum_detail = minimum.details[0]
+		maximum_detail = maximum.details[0]
+		self.assertIsInstance(minimum_detail, DieRollDetail)
+		self.assertIsInstance(maximum_detail, DieRollDetail)
+		assert isinstance(minimum_detail, DieRollDetail)
+		assert isinstance(maximum_detail, DieRollDetail)
+		self.assertEqual(
+			minimum_detail.clamped,
+			(None, None, (1, 3)),
+		)
+		self.assertEqual(
+			maximum_detail.clamped,
+			((4, 3), (4, 3), None),
+		)
+
+	def test_dice_modifiers_chain_and_arithmetic_preserves_details(self):
+		chained = Interpreter(rng=random.Random(0)).execute_source("3d6b3m4")
+		combined = Interpreter(rng=random.Random(0)).execute_source("1d6 + 5")
+
+		self.assertIsInstance(chained, RollResult)
+		self.assertIsInstance(combined, RollResult)
+		assert isinstance(chained, RollResult)
+		assert isinstance(combined, RollResult)
+		chained_detail = chained.details[0]
+		self.assertIsInstance(chained_detail, DieRollDetail)
+		assert isinstance(chained_detail, DieRollDetail)
+		self.assertEqual(chained.total, 12)
+		self.assertEqual(
+			chained_detail.rerolls,
+			((), (), (3,)),
+		)
+		self.assertEqual(chained_detail.clamped, (None, None, (3, 4)))
+		self.assertEqual(combined.total, 9)
+		self.assertIsInstance(combined.details[0], DieRollDetail)
+		self.assertIsInstance(combined.details[1], RollCompositionDetail)
+
+	def test_roll_detail_format_includes_rolls_rerolls_and_clamps(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("3d6b3m4 + 2")
+
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		self.assertEqual(
+			result.format(),
+			"total=14 details=[d6 rolls=(4, 4, 1) rerolls=((), (), (3,)) "
+			"dropped=() clamped=(None, None, (3, 4)); "
+			"(12 + 2 = 14)]",
+		)
+
+	def test_reroll_execution_limit_stops_an_infinite_reroll(self):
+		with self.assertRaises(ExecutionLimitError):
+			Interpreter(rng=random.Random(0), max_steps=7).execute_source("1d6b7")
 
 	def test_roll_result_is_immutable_and_formats_deterministically(self):
 		detail = DieRollDetail(
