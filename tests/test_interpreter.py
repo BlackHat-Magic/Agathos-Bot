@@ -7,6 +7,7 @@ from language.interpreter import (
 	ExecutionLimitError,
 	InvalidDiceError,
 	InvalidOperationError,
+	Interpreter,
 	RuntimeEnv,
 	RuntimeErrorBase,
 	UndefinedNameError,
@@ -125,6 +126,65 @@ class RuntimeControlSignalTests(unittest.TestCase):
 				signal = signal_type()
 				self.assertEqual(signal.args, ())
 				self.assertNotEqual(signal, signal_type())
+
+
+class InterpreterTests(unittest.TestCase):
+	def test_execute_source_returns_latest_value(self):
+		interpreter = Interpreter()
+
+		self.assertEqual(
+			interpreter.execute_source("var := 5; result := var; result;"), 5
+		)
+
+	def test_execute_source_evaluates_scalar_literals(self):
+		for source, expected in (
+			('"text"', "text"),
+			("1.5", 1.5),
+			("5", 5),
+			("true", True),
+			("null", None),
+		):
+			with self.subTest(source=source):
+				self.assertEqual(Interpreter().execute_source(source), expected)
+
+	def test_block_declaration_shadows_outer_binding(self):
+		self.assertEqual(
+			Interpreter().execute_source("value := 1; { value := 2; value; }; value;"),
+			1,
+		)
+
+	def test_assignment_updates_nearest_visible_binding(self):
+		self.assertEqual(
+			Interpreter().execute_source("value := 1; { value = 2; }; value;"),
+			2,
+		)
+
+	def test_block_has_a_child_scope_and_returns_latest_result(self):
+		self.assertEqual(
+			Interpreter().execute_source("{ value := 2; value; }"),
+			2,
+		)
+
+	def test_empty_program_returns_none(self):
+		self.assertIsNone(Interpreter().execute_source(""))
+
+	def test_execute_resets_step_state_for_each_program(self):
+		interpreter = Interpreter(max_steps=1)
+
+		self.assertEqual(interpreter.execute_source("1"), 1)
+		self.assertEqual(interpreter.execute_source("2"), 2)
+
+	def test_step_exhaustion_raises_before_next_dispatch(self):
+		with self.assertRaises(ExecutionLimitError):
+			Interpreter(max_steps=1).execute_source("1; 2")
+
+	def test_primitive_type_descriptor_is_not_a_runtime_value(self):
+		with self.assertRaises(InvalidOperationError):
+			Interpreter().execute_source("int")
+
+	def test_unsupported_binary_operator_is_rejected(self):
+		with self.assertRaisesRegex(InvalidOperationError, "not implemented"):
+			Interpreter().execute_source("1 + 2")
 
 
 if __name__ == "__main__":
