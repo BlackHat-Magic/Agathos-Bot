@@ -5,6 +5,8 @@ from __future__ import annotations
 import random
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from fractions import Fraction
+from math import isfinite
 from typing import Any
 
 from .expressions import (
@@ -41,44 +43,6 @@ from .expressions import (
 )
 from .lexer import Tokenizer
 from .parser import ExpectedType, Parser, _NO_EXPECTED_TYPE
-from .tokens import Token
-
-
-class _InterpreterParser(Parser):
-	"""Retain initial ``if`` conditions omitted by the validated AST adapter."""
-
-	def __init__(self, tokens: list[Token]) -> None:
-		super().__init__(tokens)
-		self._if_conditions: list[list[Expression]] = []
-		self._if_expression_depths: list[int] = []
-		self._expression_depth = 0
-
-	def _parse_if_statement(self, dtype: ExpectedType = _NO_EXPECTED_TYPE) -> If:
-		condition: list[Expression] = []
-		self._if_conditions.append(condition)
-		self._if_expression_depths.append(self._expression_depth)
-		try:
-			result = super()._parse_if_statement(dtype)
-		finally:
-			self._if_conditions.pop()
-			self._if_expression_depths.pop()
-		if not condition:
-			raise InvalidOperationError("if expression is missing its condition")
-		object.__setattr__(result, "condition", condition[0])
-		return result
-
-	def _parse_expression(self, dtype: ExpectedType = _NO_EXPECTED_TYPE) -> Expression:
-		self._expression_depth += 1
-		try:
-			expression = super()._parse_expression(dtype)
-		finally:
-			self._expression_depth -= 1
-		if (
-			self._if_conditions
-			and self._expression_depth == self._if_expression_depths[-1]
-		):
-			self._if_conditions[-1].append(expression)
-		return expression
 
 
 class RuntimeErrorBase(Exception):
@@ -107,6 +71,69 @@ class ExecutionLimitError(RuntimeErrorBase):
 
 class CallDepthError(RuntimeErrorBase):
 	"""Raised when expression calls exceed the configured depth limit."""
+
+
+def _install_if_condition_adapter() -> None:
+	"""Preserve validated ``if`` conditions on canonical frontend AST nodes.
+
+	The frontend currently validates the initial condition but does not store it
+	on ``If``. This adapter adds runtime metadata without changing parsing or
+	validation semantics, so both parser entry points produce executable nodes.
+	"""
+	if getattr(Parser, "_interpreter_if_condition_adapter", False):
+		return
+
+	original_parse_expression = Parser._parse_expression
+	original_parse_if_statement = Parser._parse_if_statement
+
+	def parse_expression(
+		parser: Parser, dtype: ExpectedType = _NO_EXPECTED_TYPE
+	) -> Expression:
+		state: Any = parser
+		depth = getattr(state, "_interpreter_expression_depth", 0) + 1
+		state._interpreter_expression_depth = depth
+		try:
+			expression = original_parse_expression(parser, dtype)
+		finally:
+			state._interpreter_expression_depth -= 1
+		if (
+			getattr(state, "_interpreter_if_conditions", None)
+			and state._interpreter_expression_depth
+			== state._interpreter_if_expression_depths[-1]
+		):
+			state._interpreter_if_conditions[-1].append(expression)
+		return expression
+
+	def parse_if_statement(
+		parser: Parser, dtype: ExpectedType = _NO_EXPECTED_TYPE
+	) -> If:
+		state: Any = parser
+		condition: list[Expression] = []
+		if_conditions = getattr(state, "_interpreter_if_conditions", None)
+		if if_conditions is None:
+			state._interpreter_if_conditions = []
+			state._interpreter_if_expression_depths = []
+			state._interpreter_expression_depth = 0
+		state._interpreter_if_conditions.append(condition)
+		state._interpreter_if_expression_depths.append(
+			state._interpreter_expression_depth
+		)
+		try:
+			result = original_parse_if_statement(parser, dtype)
+		finally:
+			state._interpreter_if_conditions.pop()
+			state._interpreter_if_expression_depths.pop()
+		if not condition:
+			raise InvalidOperationError("if expression is missing its condition")
+		object.__setattr__(result, "condition", condition[0])
+		return result
+
+	setattr(Parser, "_parse_expression", parse_expression)
+	setattr(Parser, "_parse_if_statement", parse_if_statement)
+	setattr(Parser, "_interpreter_if_condition_adapter", True)
+
+
+_install_if_condition_adapter()
 
 
 @dataclass(frozen=True, init=False)
@@ -457,6 +484,10 @@ class Interpreter:
 					self._evaluate(function.body, call_environment)
 				except _ReturnSignal as signal:
 					return self._validate_function_return(function, signal.value)
+				except (_BreakSignal, _ContinueSignal, _YieldSignal) as signal:
+					raise InvalidOperationError(
+						f"{type(signal).__name__} escaped function boundary"
+					) from signal
 				if function.dtype.returns is not None:
 					raise InvalidOperationError(
 						f"value-returning function fell through: {function.name}"
@@ -572,16 +603,47 @@ class Interpreter:
 				values.append(value)
 			return values
 
-		current = float(start)
-		stop_float = float(stop)
-		step_float = float(step)
-		while (step_float > 0 and current < stop_float) or (
-			step_float < 0 and current > stop_float
-		):
+		try:
+			start_fraction = self._range_fraction(start)
+			stop_fraction = self._range_fraction(stop)
+			step_fraction = self._range_fraction(step)
+		except (ArithmeticError, TypeError, ValueError, OverflowError) as error:
+			raise InvalidOperationError(
+				"range operands are not representable"
+			) from error
+
+		remaining_steps = self.max_steps - self._steps
+		for index in range(remaining_steps + 1):
+			try:
+				current = start_fraction + index * step_fraction
+			except (ArithmeticError, TypeError, ValueError, OverflowError) as error:
+				raise InvalidOperationError(
+					"range operands are not representable"
+				) from error
+			if not (
+				(step_fraction > 0 and current < stop_fraction)
+				or (step_fraction < 0 and current > stop_fraction)
+			):
+				break
+			try:
+				value = float(current)
+			except (ArithmeticError, TypeError, ValueError, OverflowError) as error:
+				raise InvalidOperationError(
+					"range value is not representable"
+				) from error
+			if not isfinite(value):
+				raise InvalidOperationError("range value is not representable")
 			self._tick()
-			values.append(current)
-			current += step_float
+			values.append(value)
 		return values
+
+	@staticmethod
+	def _range_fraction(value: int | float) -> Fraction:
+		if isinstance(value, float):
+			if not isfinite(value):
+				raise ValueError("range float must be finite")
+			return Fraction(str(value))
+		return Fraction(value)
 
 	@staticmethod
 	def _runtime_integer(value: object, name: str) -> int:
@@ -1190,7 +1252,7 @@ class Interpreter:
 		propagated to the caller. The program itself has no persistent environment
 		or external side effects.
 		"""
-		expressions = _InterpreterParser(Tokenizer(source).tokenize()).parse_program()
+		expressions = Parser(Tokenizer(source).tokenize()).parse_program()
 		return self.execute(expressions)
 
 

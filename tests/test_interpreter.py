@@ -318,6 +318,33 @@ class InterpreterTests(unittest.TestCase):
 		with self.assertRaises(InvalidOperationError):
 			Interpreter().execute([return_expression])
 
+	def test_function_converts_malformed_control_signals_to_runtime_errors(self):
+		for expression_type, expression in (
+			("break", Break(type="break")),
+			("continue", Continue(type="continue")),
+			("yield", Yield(type="yield", dtype=int, expression=Int(1))),
+		):
+			with self.subTest(expression_type=expression_type):
+				function = Function(
+					type="function",
+					dtype=FunctionType(parameters=[], returns=None),
+					name="malformed",
+					body=Block(type="block", dtype=None, body=[expression]),
+				)
+				environment = RuntimeEnv()
+				environment.declare("malformed", RuntimeFunction(function, environment))
+				call = Call(
+					type="call",
+					dtype=None,
+					callee=Identifier(
+						type="identifier", dtype=function.dtype, label="malformed"
+					),
+					args=[],
+				)
+
+				with self.assertRaises(InvalidOperationError):
+					Interpreter()._evaluate(call, environment)
+
 	def test_undefined_and_non_callable_calls_raise_runtime_errors(self):
 		undefined_call = Call(
 			type="call",
@@ -385,6 +412,13 @@ class InterpreterTests(unittest.TestCase):
 		self.assertEqual(
 			interpreter.execute_source("var := 5; result := var; result;"), 5
 		)
+
+	def test_execute_accepts_canonical_parser_if_ast(self):
+		program = Parser(
+			Tokenizer("if false { yield 1; } else { yield 2; }").tokenize()
+		).parse_program()
+
+		self.assertEqual(Interpreter().execute(program), 2)
 
 	def test_execute_source_evaluates_scalar_literals(self):
 		for source, expected in (
@@ -835,8 +869,19 @@ class InterpreterTests(unittest.TestCase):
 		self.assertEqual(interpreter.execute_source("1:5"), [1, 2, 3, 4])
 		self.assertEqual(interpreter.execute_source("5:0:-2"), [5, 3, 1])
 		self.assertEqual(
-			interpreter.execute_source("0.0:1.0:0.25"), [0.0, 0.25, 0.5, 0.75]
+			interpreter.execute_source("0.0:1.0:0.1"),
+			[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
 		)
+		self.assertEqual(
+			interpreter.execute_source("0.0:-1.0:-0.1"),
+			[0.0, -0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9],
+		)
+
+	def test_mixed_huge_integer_float_range_errors_are_normalized(self):
+		with self.assertRaises(InvalidOperationError):
+			Interpreter().execute_source(
+				"start := 10 ** 400; stop := start + 1; start:stop:0.1"
+			)
 
 	def test_range_zero_step_is_checked_at_runtime_and_ticks_items(self):
 		with self.assertRaises(InvalidOperationError):
