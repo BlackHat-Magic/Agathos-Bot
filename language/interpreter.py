@@ -886,6 +886,8 @@ class Interpreter:
 
 	def _evaluate_unary(self, expression: Unary, environment: RuntimeEnv) -> object:
 		operation = expression.operation
+		if not isinstance(operation, UnaryOp):
+			raise InvalidOperationError(f"operator is not implemented: {operation!r}")
 		if operation in (UnaryOp.INCREMENT, UnaryOp.DECREMENT):
 			if not isinstance(expression.operand, Identifier):
 				raise InvalidOperationError("increment target must be an identifier")
@@ -930,6 +932,8 @@ class Interpreter:
 		return left, right
 
 	def _apply_binary(self, operation: BinaryOp, left: object, right: object) -> object:
+		if not isinstance(operation, BinaryOp):
+			raise InvalidOperationError(f"operator is not implemented: {operation!r}")
 		if operation == BinaryOp.DIE_ROLL:
 			count = self._dice_integer(left, "dice count")
 			sides = self._dice_integer(right, "dice sides")
@@ -1166,6 +1170,8 @@ class Interpreter:
 			CallDepthError: If nested function calls exceed ``max_call_depth``.
 			InvalidOperationError: If a return escapes a function or violates its
 				declared return contract.
+			RuntimeErrorBase: For other failures during expression evaluation,
+				including undefined names, invalid operations, and execution limits.
 		"""
 		self._steps = 0
 		self._call_depth = 0
@@ -1189,13 +1195,11 @@ class Interpreter:
 	def execute_source(self, source: str) -> object:
 		"""Tokenize, parse, and execute one source program.
 
-		Function declarations become available after their declaration executes,
-		and calls use lexical closures over the declaration environment. Explicit
-		returns are validated at the call boundary; value-returning functions must
-		produce their declared type, while no-value functions return ``None``.
-		Parsing errors, :class:`CallDepthError`, and other runtime errors are
-		propagated to the caller. The program itself has no persistent environment
-		or external side effects.
+		Function declarations become available after their declaration executes, and
+		calls use lexical closures over the declaration environment. Parsing errors,
+		:class:`CallDepthError`, and other runtime errors are propagated to the
+		caller. The program itself has no persistent environment or external side
+		effects.
 		"""
 		expressions = Parser(Tokenizer(source).tokenize()).parse_program()
 		return self.execute(expressions)

@@ -1,6 +1,6 @@
 import unittest
 import random
-from typing import cast
+from typing import Any, cast
 
 from language.expressions import (
 	ArrayType,
@@ -16,6 +16,7 @@ from language.expressions import (
 	Index,
 	Int,
 	Return,
+	Unary,
 	Yield,
 )
 from language.interpreter import (
@@ -369,6 +370,14 @@ class InterpreterTests(unittest.TestCase):
 		self.assertEqual(interpreter._call_depth, 0)
 		self.assertEqual(interpreter.execute_source("1"), 1)
 
+	def test_failed_call_restores_depth_after_runtime_error(self):
+		interpreter = Interpreter(max_call_depth=1)
+
+		with self.assertRaises(DivisionByZeroError):
+			interpreter.execute_source("fail :: int () { return 1 // 0; }; fail()")
+		self.assertEqual(interpreter._call_depth, 0)
+		self.assertEqual(interpreter.execute_source("1"), 1)
+
 	def test_zero_call_depth_rejects_call_without_entering_function(self):
 		interpreter = Interpreter(max_call_depth=0)
 
@@ -412,6 +421,31 @@ class InterpreterTests(unittest.TestCase):
 		self.assertEqual(
 			interpreter.execute_source("var := 5; result := var; result;"), 5
 		)
+
+	def test_execute_returns_latest_seeded_roll_result(self):
+		program = Parser(Tokenizer("0; 1d6").tokenize()).parse_program()
+
+		self.assertEqual(
+			Interpreter(rng=random.Random(0)).execute(program),
+			RollResult(
+				total=4,
+				details=(DieRollDetail(6, (4,), ((),), ()),),
+			),
+		)
+
+	def test_repeated_execute_calls_reset_environment_steps_and_depth(self):
+		interpreter = Interpreter(max_steps=3, max_call_depth=1)
+		program = Parser(Tokenizer("value := 1; value").tokenize()).parse_program()
+
+		self.assertEqual(interpreter.execute(program), 1)
+		self.assertEqual(interpreter._steps, 3)
+		self.assertEqual(interpreter._call_depth, 0)
+
+		missing = Identifier(type="identifier", dtype=int, label="value")
+		with self.assertRaises(UndefinedNameError):
+			interpreter.execute([missing])
+		self.assertEqual(interpreter._steps, 1)
+		self.assertEqual(interpreter._call_depth, 0)
 
 	def test_execute_accepts_canonical_parser_if_ast(self):
 		program = Parser(
@@ -457,6 +491,33 @@ class InterpreterTests(unittest.TestCase):
 
 		self.assertEqual(interpreter.execute_source("1"), 1)
 		self.assertEqual(interpreter.execute_source("2"), 2)
+		self.assertEqual(interpreter._steps, 1)
+
+	def test_max_steps_bounds_infinite_while(self):
+		with self.assertRaises(ExecutionLimitError):
+			Interpreter(max_steps=8).execute_source("while true {}")
+
+	def test_max_steps_bounds_large_ranges(self):
+		with self.assertRaises(ExecutionLimitError):
+			Interpreter(max_steps=8).execute_source("0:100000000000000000000")
+
+	def test_max_steps_bounds_comprehension_iterations(self):
+		with self.assertRaises(ExecutionLimitError):
+			Interpreter(max_steps=8).execute_source(
+				"[item * 2 for item in 0:100000000000000000000]"
+			)
+
+	def test_max_steps_bounds_loop_iterations(self):
+		with self.assertRaises(ExecutionLimitError):
+			Interpreter(max_steps=8).execute_source(
+				"for item in 0:100000000000000000000 { item; }"
+			)
+
+	def test_max_steps_bounds_nested_calls(self):
+		with self.assertRaises(ExecutionLimitError):
+			Interpreter(max_steps=8).execute_source(
+				"recurse :: int (value: int) { return recurse(value); }; recurse(1)"
+			)
 
 	def test_step_exhaustion_raises_before_next_dispatch(self):
 		with self.assertRaises(ExecutionLimitError):
@@ -530,6 +591,21 @@ class InterpreterTests(unittest.TestCase):
 		with self.assertRaises(InvalidOperationError):
 			interpreter._apply_binary(BinaryOp.ADD, True, 1)
 
+	def test_malformed_operators_are_normalized_to_runtime_errors(self):
+		interpreter = Interpreter()
+		with self.assertRaises(RuntimeErrorBase):
+			interpreter._apply_binary(cast(BinaryOp, object()), 1, 1)
+
+		unary = Unary(
+			type="unary",
+			dtype=int,
+			operation=cast(Any, object()),
+			operand=Int(1),
+			operator_loc="before",
+		)
+		with self.assertRaises(RuntimeErrorBase):
+			interpreter._evaluate(unary, RuntimeEnv())
+
 	def test_dice_rolls_are_seeded_and_record_each_die(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("3d6")
 
@@ -548,9 +624,16 @@ class InterpreterTests(unittest.TestCase):
 
 	def test_invalid_dice_parameters_raise_invalid_dice_error(self):
 		interpreter = Interpreter(rng=random.Random(0))
-		for count, sides in ((-1, 6), (1.5, 6), (1, 0), (1, 6.5)):
+		for count, sides in (
+			(-1, 6),
+			(1.5, 6),
+			(True, 6),
+			(1, 0),
+			(1, 6.5),
+			(1, False),
+		):
 			with self.subTest(count=count, sides=sides):
-				with self.assertRaises(InvalidDiceError):
+				with self.assertRaises(RuntimeErrorBase):
 					interpreter._apply_binary(BinaryOp.DIE_ROLL, count, sides)
 
 	def test_nested_dice_modifiers_only_apply_to_outer_values(self):
@@ -909,6 +992,17 @@ class InterpreterTests(unittest.TestCase):
 		)
 		with self.assertRaises(InvalidOperationError):
 			interpreter.execute_source("values := [1]; values[2]")
+		with self.assertRaises(RuntimeErrorBase):
+			interpreter.execute_source("step := 0; [1][::step]")
+
+		invalid_array = Index(
+			type="index",
+			dtype=int,
+			array=Int(1),
+			index=Int(0),
+		)
+		with self.assertRaises(RuntimeErrorBase):
+			interpreter.execute([invalid_array])
 
 	def test_comprehensions_scope_targets_and_tick_each_iteration(self):
 		self.assertEqual(
