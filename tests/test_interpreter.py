@@ -274,18 +274,21 @@ class InterpreterTests(unittest.TestCase):
 				with self.assertRaises(InvalidDiceError):
 					interpreter._apply_binary(BinaryOp.DIE_ROLL, count, sides)
 
-	def test_nested_dice_use_the_left_total_and_preserve_details(self):
-		result = Interpreter(rng=random.Random(0)).execute_source("1d6d20")
+	def test_nested_dice_modifiers_only_apply_to_outer_values(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("1d6d20m10")
 
 		self.assertIsInstance(result, RollResult)
 		assert isinstance(result, RollResult)
-		self.assertEqual(result.total, 42)
+		self.assertEqual(result.total, 51)
+		self.assertEqual(len(result.details), 1)
+		outer_detail = result.details[0]
+		self.assertIsInstance(outer_detail, DieRollDetail)
+		assert isinstance(outer_detail, DieRollDetail)
+		self.assertEqual(outer_detail.values, (14, 10, 10, 17))
+		self.assertEqual(result.total, sum(outer_detail.values))
 		self.assertEqual(
-			result.details,
-			(
-				DieRollDetail(6, (4,), ((),), ()),
-				DieRollDetail(20, (14, 2, 9, 17), ((), (), (), ()), ()),
-			),
+			outer_detail.nested,
+			(DieRollDetail(6, (4,), ((),), ()),),
 		)
 
 	def test_reroll_below_records_each_reroll_sequence(self):
@@ -328,11 +331,11 @@ class InterpreterTests(unittest.TestCase):
 		assert isinstance(maximum_detail, DieRollDetail)
 		self.assertEqual(
 			minimum_detail.clamped,
-			(None, None, (1, 3)),
+			((), (), ((1, 3),)),
 		)
 		self.assertEqual(
 			maximum_detail.clamped,
-			((4, 3), (4, 3), None),
+			(((4, 3),), ((4, 3),), ()),
 		)
 
 	def test_dice_modifiers_chain_and_arithmetic_preserves_details(self):
@@ -351,10 +354,22 @@ class InterpreterTests(unittest.TestCase):
 			chained_detail.rerolls,
 			((), (), (3,)),
 		)
-		self.assertEqual(chained_detail.clamped, (None, None, (3, 4)))
+		self.assertEqual(chained_detail.clamped, ((), (), ((3, 4),)))
 		self.assertEqual(combined.total, 9)
 		self.assertIsInstance(combined.details[0], DieRollDetail)
 		self.assertIsInstance(combined.details[1], RollCompositionDetail)
+
+	def test_modifier_chain_accumulates_clamp_history(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("3d6m3m4")
+
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		detail = result.details[0]
+		self.assertIsInstance(detail, DieRollDetail)
+		assert isinstance(detail, DieRollDetail)
+		self.assertEqual(detail.values, (4, 4, 4))
+		self.assertEqual(detail.clamped, ((), (), ((1, 3), (3, 4))))
+		self.assertEqual(result.total, sum(detail.values))
 
 	def test_modifier_orderings_keep_canonical_final_die_values(self):
 		minimum_then_reroll = Interpreter(rng=random.Random(0)).execute_source(
@@ -387,7 +402,7 @@ class InterpreterTests(unittest.TestCase):
 		self.assertIsInstance(detail, DieRollDetail)
 		assert isinstance(detail, DieRollDetail)
 		self.assertEqual(detail.rerolls, ((), (), ()))
-		self.assertEqual(detail.clamped, (None, None, (1, 3)))
+		self.assertEqual(detail.clamped, ((), (), ((1, 3),)))
 
 	def test_roll_detail_snapshots_nested_clamp_pairs(self):
 		clamp_pair = [1, 3]
@@ -403,7 +418,7 @@ class InterpreterTests(unittest.TestCase):
 		clamp_pair[1] = 99
 		clamped.clear()
 
-		self.assertEqual(detail.clamped, ((1, 3), None))
+		self.assertEqual(detail.clamped, (((1, 3),), ()))
 
 	def test_roll_detail_format_includes_rolls_rerolls_and_clamps(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("3d6b3m4 + 2")
@@ -413,7 +428,7 @@ class InterpreterTests(unittest.TestCase):
 		self.assertEqual(
 			result.format(),
 			"total=14 details=[d6 rolls=(4, 4, 1) rerolls=((), (), (3,)) "
-			"dropped=() clamped=(None, None, (3, 4)); "
+			"values=(4, 4, 4) dropped=() clamped=((), (), ((3, 4),)); "
 			"(12 + 2 = 14)]",
 		)
 
@@ -432,7 +447,8 @@ class InterpreterTests(unittest.TestCase):
 
 		self.assertEqual(
 			result.format(),
-			"total=15 details=[d20 rolls=(7, 13) rerolls=((2, 8), ()) dropped=(13,)]",
+			"total=15 details=[d20 rolls=(7, 13) rerolls=((2, 8), ()) "
+			"values=(8, 13) dropped=(13,)]",
 		)
 		with self.assertRaises(AttributeError):
 			setattr(result, "total", 16)
@@ -466,6 +482,25 @@ class InterpreterTests(unittest.TestCase):
 		self.assertEqual(detail.values, (7, 13))
 		self.assertEqual(result.details, (detail,))
 
+	def test_roll_detail_rejects_inconsistent_explicit_values(self):
+		with self.assertRaisesRegex(ValueError, "one value per tracked die"):
+			DieRollDetail(
+				sides=20,
+				rolls=(7, 13),
+				rerolls=((), ()),
+				dropped=(),
+				values=(7,),
+			)
+
+		with self.assertRaisesRegex(TypeError, "values must contain integers"):
+			DieRollDetail(
+				sides=20,
+				rolls=(7,),
+				rerolls=((),),
+				dropped=(),
+				values=(7.5,),
+			)
+
 	def test_roll_details_survive_manual_arithmetic_and_comparisons(self):
 		detail = DieRollDetail(sides=20, rolls=(7,), rerolls=(), dropped=())
 		roll = RollResult(total=7, details=(detail,))
@@ -482,7 +517,8 @@ class InterpreterTests(unittest.TestCase):
 		)
 		self.assertEqual(
 			combined.format(),
-			"total=12 details=[d20 rolls=(7,) rerolls=() dropped=(); (7 + 5 = 12)]",
+			"total=12 details=[d20 rolls=(7,) rerolls=() values=(7,) dropped=(); "
+			"(7 + 5 = 12)]",
 		)
 
 		environment = RuntimeEnv()

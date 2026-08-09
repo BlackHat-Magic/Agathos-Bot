@@ -63,8 +63,9 @@ class DieRollDetail:
 	rolls: tuple[int, ...]
 	rerolls: tuple[tuple[int, ...], ...]
 	dropped: tuple[int, ...]
-	clamped: tuple[tuple[int, int] | None, ...]
+	clamped: tuple[tuple[tuple[int, int], ...], ...]
 	values: tuple[int, ...]
+	nested: tuple[object, ...]
 
 	def __init__(
 		self,
@@ -72,46 +73,96 @@ class DieRollDetail:
 		rolls: Iterable[int],
 		rerolls: Iterable[Iterable[int]],
 		dropped: Iterable[int],
-		clamped: Iterable[Iterable[int] | None] = (),
-		values: Iterable[int] | None = None,
+		clamped: Iterable[object] = (),
+		values: Iterable[object] | None = None,
+		nested: Iterable[object] = (),
 	) -> None:
 		rolls_tuple = tuple(rolls)
 		rerolls_tuple = tuple(tuple(roll) for roll in rerolls)
-		normalized_clamped: list[tuple[int, int] | None] = []
+		normalized_clamped: list[tuple[tuple[int, int], ...]] = []
 		for clamp in clamped:
 			if clamp is None:
-				normalized_clamped.append(None)
-			else:
-				original, replacement = clamp
-				normalized_clamped.append((original, replacement))
+				normalized_clamped.append(())
+				continue
+			if not isinstance(clamp, Iterable):
+				raise TypeError("clamped entries must be iterable")
+			clamp_values = tuple(clamp)
+			if len(clamp_values) == 2:
+				original, replacement = clamp_values
+				if (
+					isinstance(original, int)
+					and not isinstance(original, bool)
+					and isinstance(replacement, int)
+					and not isinstance(replacement, bool)
+				):
+					normalized_clamped.append(((original, replacement),))
+					continue
+			history: list[tuple[int, int]] = []
+			for pair in clamp_values:
+				if not isinstance(pair, Iterable):
+					raise ValueError("clamped entries must be pairs of integers")
+				try:
+					original, replacement = tuple(pair)
+				except (TypeError, ValueError) as error:
+					raise ValueError(
+						"clamped entries must be pairs of integers"
+					) from error
+				if (
+					not isinstance(original, int)
+					or isinstance(original, bool)
+					or not isinstance(replacement, int)
+					or isinstance(replacement, bool)
+				):
+					raise TypeError("clamped entries must contain integers")
+				history.append((original, replacement))
+			normalized_clamped.append(tuple(history))
 		clamped_tuple = tuple(normalized_clamped)
 		if values is None:
 			current_values = []
 			for index, original in enumerate(rolls_tuple):
 				reroll = rerolls_tuple[index] if index < len(rerolls_tuple) else ()
 				value = reroll[-1] if reroll else original
-				clamp = clamped_tuple[index] if index < len(clamped_tuple) else None
-				if clamp is not None:
-					value = clamp[1]
+				clamp_history = (
+					clamped_tuple[index] if index < len(clamped_tuple) else ()
+				)
+				if clamp_history:
+					value = clamp_history[-1][1]
 				current_values.append(value)
 			values_tuple = tuple(current_values)
 		else:
 			values_tuple = tuple(values)
+			if len(values_tuple) != len(rolls_tuple):
+				raise ValueError("values must contain one value per tracked die")
+			if any(
+				not isinstance(value, int) or isinstance(value, bool)
+				for value in values_tuple
+			):
+				raise TypeError("values must contain integers")
 		object.__setattr__(self, "sides", sides)
 		object.__setattr__(self, "rolls", rolls_tuple)
 		object.__setattr__(self, "rerolls", rerolls_tuple)
 		object.__setattr__(self, "dropped", tuple(dropped))
 		object.__setattr__(self, "clamped", clamped_tuple)
 		object.__setattr__(self, "values", values_tuple)
+		object.__setattr__(self, "nested", tuple(nested))
 
 	def format(self) -> str:
 		"""Return a stable, human-readable representation of this detail."""
 		formatted = (
 			f"d{self.sides} rolls={self.rolls!r} "
-			f"rerolls={self.rerolls!r} dropped={self.dropped!r}"
+			f"rerolls={self.rerolls!r} values={self.values!r} "
+			f"dropped={self.dropped!r}"
 		)
-		if any(clamp is not None for clamp in self.clamped):
+		if any(self.clamped):
 			formatted += f" clamped={self.clamped!r}"
+		if self.nested:
+			formatted_nested = []
+			for detail in self.nested:
+				if isinstance(detail, (DieRollDetail, RollCompositionDetail)):
+					formatted_nested.append(detail.format())
+				else:
+					formatted_nested.append(repr(detail))
+			formatted += f" nested=[{'; '.join(formatted_nested)}]"
 		return formatted
 
 
@@ -361,7 +412,7 @@ class Interpreter:
 				for index in range(len(detail.rolls))
 			]
 			clamped = [
-				detail.clamped[index] if index < len(detail.clamped) else None
+				list(detail.clamped[index]) if index < len(detail.clamped) else []
 				for index in range(len(detail.rolls))
 			]
 			for index, value in enumerate(values):
@@ -387,12 +438,12 @@ class Interpreter:
 						else value > threshold
 					)
 					if qualifies:
-						clamped[index] = (value, threshold)
+						clamped[index].append((value, threshold))
 						value = threshold
 				values[index] = value
 
 			total_delta += sum(values) - sum(previous_values)
-			clamp_details = clamped if any(item is not None for item in clamped) else ()
+			clamp_details = clamped if any(clamped) else ()
 			new_details.append(
 				DieRollDetail(
 					sides=detail.sides,
@@ -401,6 +452,7 @@ class Interpreter:
 					dropped=detail.dropped,
 					clamped=clamp_details,
 					values=values,
+					nested=detail.nested,
 				)
 			)
 
@@ -505,9 +557,19 @@ class Interpreter:
 				raise InvalidDiceError("dice sides must be at least one")
 			detail = self._roll_dice(count, sides)
 			parent_details = left.details if isinstance(left, RollResult) else ()
+			if parent_details:
+				detail = DieRollDetail(
+					sides=detail.sides,
+					rolls=detail.rolls,
+					rerolls=detail.rerolls,
+					dropped=detail.dropped,
+					clamped=detail.clamped,
+					values=detail.values,
+					nested=parent_details,
+				)
 			return RollResult(
-				total=sum(detail.rolls),
-				details=(*parent_details, detail) if count else parent_details,
+				total=sum(detail.values),
+				details=(detail,) if count else parent_details,
 			)
 
 		if operation in (
