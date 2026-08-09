@@ -291,6 +291,29 @@ class InterpreterTests(unittest.TestCase):
 			(DieRollDetail(6, (4,), ((),), ()),),
 		)
 
+	def test_zero_count_outer_dice_isolated_from_nested_modifiers(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("(1d1 - 1d1)d20m10")
+
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		self.assertEqual(result.total, 0)
+		self.assertEqual(len(result.details), 1)
+		outer_detail = result.details[0]
+		self.assertIsInstance(outer_detail, DieRollDetail)
+		assert isinstance(outer_detail, DieRollDetail)
+		self.assertEqual(outer_detail.sides, 20)
+		self.assertEqual(outer_detail.rolls, ())
+		self.assertEqual(outer_detail.values, ())
+		self.assertEqual(outer_detail.clamped, ())
+		self.assertEqual(
+			outer_detail.nested,
+			(
+				DieRollDetail(1, (1,), ((),), ()),
+				DieRollDetail(1, (1,), ((),), ()),
+				RollCompositionDetail(operation="-", left=1, right=1, result=0),
+			),
+		)
+
 	def test_reroll_below_records_each_reroll_sequence(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("3d6b3")
 

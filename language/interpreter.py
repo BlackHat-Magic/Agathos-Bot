@@ -569,7 +569,7 @@ class Interpreter:
 				)
 			return RollResult(
 				total=sum(detail.values),
-				details=(detail,) if count else parent_details,
+				details=(detail,) if count or parent_details else (),
 			)
 
 		if operation in (
