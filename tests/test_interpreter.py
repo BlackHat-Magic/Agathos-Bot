@@ -1,13 +1,17 @@
 import unittest
 from typing import cast
 
+from language.expressions import Binary, BinaryOp, Identifier, Int
 from language.interpreter import (
 	CallDepthError,
+	DieRollDetail,
 	DivisionByZeroError,
 	ExecutionLimitError,
 	InvalidDiceError,
 	InvalidOperationError,
 	Interpreter,
+	RollCompositionDetail,
+	RollResult,
 	RuntimeEnv,
 	RuntimeErrorBase,
 	UndefinedNameError,
@@ -182,9 +186,126 @@ class InterpreterTests(unittest.TestCase):
 		with self.assertRaises(InvalidOperationError):
 			Interpreter().execute_source("int")
 
-	def test_unsupported_binary_operator_is_rejected(self):
-		with self.assertRaisesRegex(InvalidOperationError, "not implemented"):
-			Interpreter().execute_source("1 + 2")
+	def test_unary_operations_and_identifier_mutation(self):
+		interpreter = Interpreter()
+
+		self.assertEqual(interpreter.execute_source("value := 1; ++value;"), 2)
+		self.assertEqual(
+			interpreter.execute_source("value := 1; old := value++; old;"), 1
+		)
+		self.assertEqual(interpreter.execute_source("value := 1; value--; value;"), 0)
+		self.assertEqual(interpreter.execute_source("!false"), True)
+		self.assertEqual(interpreter.execute_source("~5"), -6)
+		self.assertEqual(interpreter.execute_source("+5"), 5)
+		self.assertEqual(interpreter.execute_source("-5"), -5)
+
+	def test_arithmetic_shift_bitwise_and_logical_operations(self):
+		for source, expected in (
+			("1 + 2", 3),
+			("5 - 2", 3),
+			("2 * 3", 6),
+			("5 / 2", 2.5),
+			("5 // 2", 2),
+			("5 % 2", 1),
+			("2 ** 3", 8),
+			("1 << 3", 8),
+			("8 >> 2", 2),
+			("6 & 3", 2),
+			("6 ^ 3", 5),
+			("6 | 3", 7),
+			("true && false", False),
+			("true || false", True),
+		):
+			with self.subTest(source=source):
+				self.assertEqual(Interpreter().execute_source(source), expected)
+
+	def test_comparisons_equality_and_list_membership(self):
+		for source, expected in (
+			("1 < 2", True),
+			("2 <= 2", True),
+			("3 > 2", True),
+			("3 >= 4", False),
+			("2 == 2", True),
+			("2 != 2", False),
+			("2 in [1, 2, 3]", True),
+			("4 in [1, 2, 3]", False),
+		):
+			with self.subTest(source=source):
+				self.assertEqual(Interpreter().execute_source(source), expected)
+
+	def test_compound_assignment_uses_operator_dispatch(self):
+		self.assertEqual(
+			Interpreter().execute_source("value := 2; value *= 3; value += 1; value;"),
+			7,
+		)
+
+	def test_zero_division_errors_are_normalized(self):
+		for source in ("1 / 0", "1 // 0", "1 % 0"):
+			with self.subTest(source=source):
+				with self.assertRaises(DivisionByZeroError):
+					Interpreter().execute_source(source)
+
+	def test_numeric_rejects_boolean_and_dice_operations_are_deferred(self):
+		interpreter = Interpreter()
+		with self.assertRaises(InvalidOperationError):
+			interpreter._apply_binary(BinaryOp.ADD, True, 1)
+		with self.assertRaises(InvalidOperationError):
+			interpreter.execute_source("1d6")
+
+	def test_roll_result_is_immutable_and_formats_deterministically(self):
+		detail = DieRollDetail(
+			sides=20,
+			rolls=(7, 13),
+			rerolls=((2, 8), ()),
+			dropped=(13,),
+		)
+		result = RollResult(total=15, details=(detail,))
+
+		self.assertEqual(
+			result.format(),
+			"total=15 details=[d20 rolls=(7, 13) rerolls=((2, 8), ()) dropped=(13,)]",
+		)
+		with self.assertRaises(AttributeError):
+			setattr(result, "total", 16)
+
+	def test_roll_details_survive_manual_arithmetic_and_comparisons(self):
+		detail = DieRollDetail(sides=20, rolls=(7,), rerolls=(), dropped=())
+		roll = RollResult(total=7, details=(detail,))
+		interpreter = Interpreter()
+
+		combined = interpreter._combine_result(roll, 5, 12, "+")
+		self.assertIsInstance(combined, RollResult)
+		assert isinstance(combined, RollResult)
+		self.assertEqual(combined.total, 12)
+		self.assertEqual(combined.details[0], detail)
+		self.assertEqual(
+			combined.details[1],
+			RollCompositionDetail(operation="+", left=7, right=5, result=12),
+		)
+		self.assertEqual(
+			combined.format(),
+			"total=12 details=[d20 rolls=(7,) rerolls=() dropped=(); (7 + 5 = 12)]",
+		)
+
+		environment = RuntimeEnv()
+		environment.declare("roll", roll)
+		roll_identifier = Identifier(type="identifier", dtype=int, label="roll")
+		addition = Binary(
+			type="binary",
+			dtype=int,
+			operation=BinaryOp.ADD,
+			left=roll_identifier,
+			right=Int(5),
+		)
+		comparison = Binary(
+			type="binary",
+			dtype=bool,
+			operation=BinaryOp.GREATER_THAN,
+			left=roll_identifier,
+			right=Int(5),
+		)
+		self.assertEqual(interpreter._evaluate(addition, environment), combined)
+		self.assertTrue(interpreter._evaluate(comparison, environment))
 
 
 if __name__ == "__main__":
