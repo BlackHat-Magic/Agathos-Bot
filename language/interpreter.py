@@ -71,13 +71,20 @@ class DieRollDetail:
 		rolls: Iterable[int],
 		rerolls: Iterable[Iterable[int]],
 		dropped: Iterable[int],
-		clamped: Iterable[tuple[int, int] | None] = (),
+		clamped: Iterable[Iterable[int] | None] = (),
 	) -> None:
+		normalized_clamped: list[tuple[int, int] | None] = []
+		for clamp in clamped:
+			if clamp is None:
+				normalized_clamped.append(None)
+			else:
+				original, replacement = clamp
+				normalized_clamped.append((original, replacement))
 		object.__setattr__(self, "sides", sides)
 		object.__setattr__(self, "rolls", tuple(rolls))
 		object.__setattr__(self, "rerolls", tuple(tuple(roll) for roll in rerolls))
 		object.__setattr__(self, "dropped", tuple(dropped))
-		object.__setattr__(self, "clamped", tuple(clamped))
+		object.__setattr__(self, "clamped", tuple(normalized_clamped))
 
 	def format(self) -> str:
 		"""Return a stable, human-readable representation of this detail."""
@@ -361,7 +368,6 @@ class Interpreter:
 							if operation == BinaryOp.REROLL_BELOW
 							else value > threshold
 						)
-					clamped[index] = None
 				else:
 					qualifies = (
 						value < threshold

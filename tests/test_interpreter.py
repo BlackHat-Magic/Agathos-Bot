@@ -356,6 +356,33 @@ class InterpreterTests(unittest.TestCase):
 		self.assertIsInstance(combined.details[0], DieRollDetail)
 		self.assertIsInstance(combined.details[1], RollCompositionDetail)
 
+	def test_reroll_after_clamp_preserves_both_detail_fields(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("3d6m3b3")
+
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		detail = result.details[0]
+		self.assertIsInstance(detail, DieRollDetail)
+		assert isinstance(detail, DieRollDetail)
+		self.assertEqual(detail.rerolls, ((), (), ()))
+		self.assertEqual(detail.clamped, (None, None, (1, 3)))
+
+	def test_roll_detail_snapshots_nested_clamp_pairs(self):
+		clamp_pair = [1, 3]
+		clamped = [clamp_pair, None]
+		detail = DieRollDetail(
+			sides=6,
+			rolls=(1, 4),
+			rerolls=((), ()),
+			dropped=(),
+			clamped=clamped,
+		)
+
+		clamp_pair[1] = 99
+		clamped.clear()
+
+		self.assertEqual(detail.clamped, ((1, 3), None))
+
 	def test_roll_detail_format_includes_rolls_rerolls_and_clamps(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("3d6b3m4 + 2")
 
