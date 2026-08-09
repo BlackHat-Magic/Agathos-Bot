@@ -6,13 +6,17 @@ from language.expressions import (
 	ArrayType,
 	Binary,
 	BinaryOp,
+	Break,
 	Block,
 	Call,
+	Continue,
 	Function,
 	FunctionType,
 	Identifier,
+	Index,
 	Int,
 	Return,
+	Yield,
 )
 from language.interpreter import (
 	CallDepthError,
@@ -804,6 +808,141 @@ class InterpreterTests(unittest.TestCase):
 		)
 		self.assertEqual(interpreter._evaluate(addition, environment), combined)
 		self.assertTrue(interpreter._evaluate(comparison, environment))
+
+	def test_if_and_ternary_evaluate_only_the_selected_branch(self):
+		self.assertEqual(
+			Interpreter().execute_source(
+				"if true { yield 1; } else { yield 1 << -1; }"
+			),
+			1,
+		)
+		self.assertEqual(
+			Interpreter().execute_source("1 if true else 1 << -1"),
+			1,
+		)
+
+	def test_value_blocks_capture_direct_yield_and_keep_child_scope(self):
+		self.assertEqual(
+			Interpreter().execute_source(
+				"outer := 1; { outer := 2; yield outer; }; outer"
+			),
+			1,
+		)
+		self.assertEqual(Interpreter().execute_source("{ yield 7; }"), 7)
+
+	def test_ranges_are_half_open_and_support_integer_and_float_steps(self):
+		interpreter = Interpreter()
+		self.assertEqual(interpreter.execute_source("1:5"), [1, 2, 3, 4])
+		self.assertEqual(interpreter.execute_source("5:0:-2"), [5, 3, 1])
+		self.assertEqual(
+			interpreter.execute_source("0.0:1.0:0.25"), [0.0, 0.25, 0.5, 0.75]
+		)
+
+	def test_range_zero_step_is_checked_at_runtime_and_ticks_items(self):
+		with self.assertRaises(InvalidOperationError):
+			Interpreter().execute_source("step := 0; 0:3:step")
+		with self.assertRaises(ExecutionLimitError):
+			Interpreter(max_steps=4).execute_source("0:10")
+
+	def test_index_and_omitted_slices_use_runtime_list_semantics(self):
+		interpreter = Interpreter()
+		self.assertEqual(
+			interpreter.execute_source("values := [0, 1, 2, 3, 4]; values[2];"),
+			2,
+		)
+		self.assertEqual(
+			interpreter.execute_source("values := [0, 1, 2, 3, 4]; values[1:];"),
+			[1, 2, 3, 4],
+		)
+		self.assertEqual(
+			interpreter.execute_source("values := [0, 1, 2, 3, 4]; values[:4:2];"),
+			[0, 2],
+		)
+		with self.assertRaises(InvalidOperationError):
+			interpreter.execute_source("values := [1]; values[2]")
+
+	def test_comprehensions_scope_targets_and_tick_each_iteration(self):
+		self.assertEqual(
+			Interpreter().execute_source("[item * 2 for item in 1:4]"), [2, 4, 6]
+		)
+		with self.assertRaises(ExecutionLimitError):
+			Interpreter(max_steps=4).execute_source("[item for item in 0:10]")
+		with self.assertRaises(NameError):
+			Parser(Tokenizer("[item for item in [1]]; item").tokenize()).parse_program()
+
+	def test_ordinary_and_collecting_for_and_while_loops(self):
+		self.assertEqual(
+			Interpreter().execute_source(
+				"total := 0; for item in [1, 2, 3] { total += item; }; total"
+			),
+			6,
+		)
+		self.assertEqual(
+			Interpreter().execute_source("for item in 1:4 { yield item * 2; }"),
+			[2, 4, 6],
+		)
+		self.assertEqual(
+			Interpreter().execute_source(
+				"index := 0; while index < 3 { index += 1; yield index; }"
+			),
+			[1, 2, 3],
+		)
+
+	def test_nested_collections_have_independent_buffers(self):
+		self.assertEqual(
+			Interpreter().execute_source(
+				"for outer in [1, 2] { yield for inner in [3, 4] { yield inner; }; }"
+			),
+			[[3, 4], [3, 4]],
+		)
+
+	def test_break_and_continue_conditions_fall_through_or_signal(self):
+		self.assertEqual(
+			Interpreter().execute_source(
+				"for item in [1, 2, 3] { continue if item == 2; yield item; }"
+			),
+			[1, 3],
+		)
+		self.assertEqual(
+			Interpreter().execute_source(
+				"for item in [1, 2, 3] { break if item == 2; yield item; }"
+			),
+			[1],
+		)
+
+	def test_control_signals_escaping_their_context_are_runtime_errors(self):
+		for expression in (
+			Break(type="break"),
+			Continue(type="continue"),
+			Yield(type="yield", dtype=int, expression=Int(1)),
+		):
+			with (
+				self.subTest(expression=type(expression).__name__),
+				self.assertRaises(InvalidOperationError),
+			):
+				Interpreter().execute([expression])
+
+	def test_loop_targets_are_scoped_to_each_iteration(self):
+		self.assertEqual(
+			Interpreter().execute_source(
+				"item := 9; for item in [1, 2] { item; }; item"
+			),
+			9,
+		)
+
+	def test_runtime_index_type_and_condition_validation(self):
+		interpreter = Interpreter()
+		environment = RuntimeEnv()
+		environment.declare("values", [1])
+		environment.declare("index", 1.5)
+		index = Index(
+			type="index",
+			dtype=int,
+			array=Identifier(type="identifier", dtype=ArrayType(int), label="values"),
+			index=Identifier(type="identifier", dtype=int, label="index"),
+		)
+		with self.assertRaises(InvalidOperationError):
+			interpreter._evaluate(index, environment)
 
 
 if __name__ == "__main__":

@@ -18,18 +18,67 @@ from .expressions import (
 	Float,
 	Function,
 	FunctionType,
+	For,
+	If,
 	Identifier,
 	Int,
+	Index,
 	Null,
 	PrimitiveType,
+	Range,
 	Return,
 	String,
+	Slice,
+	Ternary,
 	Unary,
 	UnaryOp,
+	While,
+	Break,
+	Continue,
 	Expression,
+	Comprehension,
+	Yield,
 )
 from .lexer import Tokenizer
-from .parser import Parser
+from .parser import ExpectedType, Parser, _NO_EXPECTED_TYPE
+from .tokens import Token
+
+
+class _InterpreterParser(Parser):
+	"""Retain initial ``if`` conditions omitted by the validated AST adapter."""
+
+	def __init__(self, tokens: list[Token]) -> None:
+		super().__init__(tokens)
+		self._if_conditions: list[list[Expression]] = []
+		self._if_expression_depths: list[int] = []
+		self._expression_depth = 0
+
+	def _parse_if_statement(self, dtype: ExpectedType = _NO_EXPECTED_TYPE) -> If:
+		condition: list[Expression] = []
+		self._if_conditions.append(condition)
+		self._if_expression_depths.append(self._expression_depth)
+		try:
+			result = super()._parse_if_statement(dtype)
+		finally:
+			self._if_conditions.pop()
+			self._if_expression_depths.pop()
+		if not condition:
+			raise InvalidOperationError("if expression is missing its condition")
+		object.__setattr__(result, "condition", condition[0])
+		return result
+
+	def _parse_expression(self, dtype: ExpectedType = _NO_EXPECTED_TYPE) -> Expression:
+		self._expression_depth += 1
+		try:
+			expression = super()._parse_expression(dtype)
+		finally:
+			self._expression_depth -= 1
+		if (
+			self._if_conditions
+			and self._expression_depth == self._if_expression_depths[-1]
+		):
+			self._if_conditions[-1].append(expression)
+		return expression
 
 
 class RuntimeErrorBase(Exception):
@@ -338,7 +387,13 @@ class Interpreter:
 			)
 		self._steps += 1
 
-	def _evaluate(self, expression: Expression, environment: RuntimeEnv) -> object:
+	def _evaluate(
+		self,
+		expression: Expression,
+		environment: RuntimeEnv,
+		*,
+		capture_yield: bool = True,
+	) -> object:
 		self._tick()
 
 		if isinstance(expression, String):
@@ -353,6 +408,14 @@ class Interpreter:
 			return None
 		if isinstance(expression, Array):
 			return [self._evaluate(item, environment) for item in expression.value]
+		if isinstance(expression, Range):
+			return self._evaluate_range(expression, environment)
+		if isinstance(expression, Slice):
+			return self._evaluate_slice(expression, environment)
+		if isinstance(expression, Index):
+			return self._evaluate_index(expression, environment)
+		if isinstance(expression, Comprehension):
+			return self._evaluate_comprehension(expression, environment)
 		if isinstance(expression, PrimitiveType):
 			raise InvalidOperationError("type descriptors are not runtime values")
 		if isinstance(expression, Identifier):
@@ -403,17 +466,87 @@ class Interpreter:
 				self._call_depth -= 1
 		if isinstance(expression, Return):
 			value = (
-				self._evaluate(expression.expression, environment)
+				self._evaluate(expression.expression, environment, capture_yield=True)
 				if expression.expression is not None
 				else None
 			)
 			raise _ReturnSignal(value)
+		if isinstance(expression, Yield):
+			value = self._evaluate(
+				expression.expression, environment, capture_yield=True
+			)
+			raise _YieldSignal(value)
+		if isinstance(expression, Break):
+			if expression.condition is not None:
+				condition = self._evaluate(expression.condition, environment)
+				if not isinstance(condition, bool):
+					raise InvalidOperationError(
+						"loop control condition must be boolean"
+					)
+				if not condition:
+					return None
+			raise _BreakSignal()
+		if isinstance(expression, Continue):
+			if expression.condition is not None:
+				condition = self._evaluate(expression.condition, environment)
+				if not isinstance(condition, bool):
+					raise InvalidOperationError(
+						"loop control condition must be boolean"
+					)
+				if not condition:
+					return None
+			raise _ContinueSignal()
 		if isinstance(expression, Block):
 			child = environment.child()
 			value: object = None
-			for child_expression in expression.body:
-				value = self._evaluate(child_expression, child)
+			try:
+				for child_expression in expression.body:
+					value = self._evaluate(
+						child_expression, child, capture_yield=capture_yield
+					)
+			except _YieldSignal as signal:
+				if not expression.has_value or not capture_yield:
+					raise
+				return signal.value
 			return value
+		if isinstance(expression, If):
+			condition_expression = getattr(expression, "condition", None)
+			if condition_expression is None:
+				raise InvalidOperationError("if expression is missing its condition")
+			condition = self._evaluate(condition_expression, environment)
+			branch: Block | None = None
+			if not isinstance(condition, bool):
+				raise InvalidOperationError("if condition must be boolean")
+			if condition:
+				branch = expression.then_branch
+			else:
+				for elif_condition, elif_branch in expression.elif_branches:
+					condition = self._evaluate(elif_condition, environment)
+					if not isinstance(condition, bool):
+						raise InvalidOperationError("if condition must be boolean")
+					if condition:
+						branch = elif_branch
+						break
+				if branch is None:
+					branch = expression.else_branch
+			if branch is None:
+				return None
+			value = self._evaluate(
+				branch,
+				environment,
+				capture_yield=capture_yield or expression.has_value,
+			)
+			return value if expression.has_value else None
+		if isinstance(expression, Ternary):
+			condition = self._evaluate(expression.condition, environment)
+			if not isinstance(condition, bool):
+				raise InvalidOperationError("ternary condition must be boolean")
+			selected = expression.if_true if condition else expression.if_false
+			return self._evaluate(selected, environment, capture_yield=capture_yield)
+		if isinstance(expression, For):
+			return self._evaluate_for(expression, environment)
+		if isinstance(expression, While):
+			return self._evaluate_while(expression, environment)
 		if isinstance(expression, Unary):
 			return self._evaluate_unary(expression, environment)
 		if isinstance(expression, Binary):
@@ -422,6 +555,139 @@ class Interpreter:
 		raise InvalidOperationError(
 			f"unsupported expression: {type(expression).__name__}"
 		)
+
+	def _evaluate_range(
+		self, expression: Range, environment: RuntimeEnv
+	) -> list[int | float]:
+		start = self._numeric(self._evaluate(expression.start, environment))
+		stop = self._numeric(self._evaluate(expression.stop, environment))
+		step = self._numeric(self._evaluate(expression.step, environment))
+		if step == 0:
+			raise InvalidOperationError("range step must not be zero")
+
+		values: list[int | float] = []
+		if all(isinstance(value, int) for value in (start, stop, step)):
+			for value in range(int(start), int(stop), int(step)):
+				self._tick()
+				values.append(value)
+			return values
+
+		current = float(start)
+		stop_float = float(stop)
+		step_float = float(step)
+		while (step_float > 0 and current < stop_float) or (
+			step_float < 0 and current > stop_float
+		):
+			self._tick()
+			values.append(current)
+			current += step_float
+		return values
+
+	@staticmethod
+	def _runtime_integer(value: object, name: str) -> int:
+		if isinstance(value, RollResult):
+			value = value.total
+		if isinstance(value, bool) or not isinstance(value, int):
+			raise InvalidOperationError(f"{name} must be an integer")
+		return value
+
+	def _evaluate_index(self, expression: Index, environment: RuntimeEnv) -> object:
+		array = self._evaluate(expression.array, environment)
+		index = self._runtime_integer(
+			self._evaluate(expression.index, environment), "list index"
+		)
+		if not isinstance(array, list):
+			raise InvalidOperationError("indexing requires a list")
+		try:
+			return array[index]
+		except (IndexError, TypeError) as error:
+			raise InvalidOperationError("invalid list index") from error
+
+	def _evaluate_slice(
+		self, expression: Slice, environment: RuntimeEnv
+	) -> list[object]:
+		array = self._evaluate(expression.array, environment)
+		if not isinstance(array, list):
+			raise InvalidOperationError("slicing requires a list")
+
+		parts: list[int | None] = []
+		for name, part in zip(
+			("slice start", "slice stop", "slice step"),
+			(expression.start, expression.stop, expression.step),
+		):
+			parts.append(
+				None
+				if part is None
+				else self._runtime_integer(self._evaluate(part, environment), name)
+			)
+		try:
+			result: list[object] = list(array[slice(*parts)])
+		except (TypeError, ValueError) as error:
+			raise InvalidOperationError("invalid list slice") from error
+		for _ in result:
+			self._tick()
+		return result
+
+	def _evaluate_comprehension(
+		self, expression: Comprehension, environment: RuntimeEnv
+	) -> list[object]:
+		iterable = self._evaluate(expression.iterable, environment)
+		if not isinstance(iterable, list):
+			raise InvalidOperationError("comprehension requires a list")
+		values: list[object] = []
+		for item in iterable:
+			self._tick()
+			iteration_environment = environment.child()
+			iteration_environment.declare(expression.target.label, item)
+			values.append(self._evaluate(expression.expression, iteration_environment))
+		return values
+
+	def _evaluate_for(self, expression: For, environment: RuntimeEnv) -> object:
+		iterable = self._evaluate(expression.iterable, environment)
+		if not isinstance(iterable, list):
+			raise InvalidOperationError("for loop requires a list")
+		values: list[object] = []
+		for item in iterable:
+			self._tick()
+			iteration_environment = environment.child()
+			iteration_environment.declare(expression.target.label, item)
+			try:
+				self._evaluate(
+					expression.body, iteration_environment, capture_yield=False
+				)
+			except _YieldSignal as signal:
+				if not expression.has_value:
+					raise
+				values.append(signal.value)
+			except _BreakSignal:
+				break
+			except _ContinueSignal:
+				continue
+		return values if expression.has_value else None
+
+	def _evaluate_while(self, expression: While, environment: RuntimeEnv) -> object:
+		values: list[object] = []
+		while True:
+			condition = self._evaluate(expression.test, environment)
+			if not isinstance(condition, bool):
+				raise InvalidOperationError("while condition must be boolean")
+			if not condition:
+				break
+			self._tick()
+			iteration_environment = environment.child()
+			try:
+				self._evaluate(
+					expression.body, iteration_environment, capture_yield=False
+				)
+			except _YieldSignal as signal:
+				if not expression.has_value:
+					raise
+				values.append(signal.value)
+			except _BreakSignal:
+				break
+			except _ContinueSignal:
+				continue
+		return values if expression.has_value else None
 
 	@staticmethod
 	def _numeric(value: object) -> int | float:
@@ -903,6 +1169,14 @@ class Interpreter:
 				value = self._evaluate(expression, environment)
 		except _ReturnSignal as signal:
 			raise InvalidOperationError("return outside a function") from signal
+		except _BreakSignal as signal:
+			raise InvalidOperationError("break outside a loop") from signal
+		except _ContinueSignal as signal:
+			raise InvalidOperationError("continue outside a loop") from signal
+		except _YieldSignal as signal:
+			raise InvalidOperationError(
+				"yield outside a collecting loop or value block"
+			) from signal
 		return value
 
 	def execute_source(self, source: str) -> object:
@@ -916,7 +1190,7 @@ class Interpreter:
 		propagated to the caller. The program itself has no persistent environment
 		or external side effects.
 		"""
-		expressions = Parser(Tokenizer(source).tokenize()).parse_program()
+		expressions = _InterpreterParser(Tokenizer(source).tokenize()).parse_program()
 		return self.execute(expressions)
 
 
