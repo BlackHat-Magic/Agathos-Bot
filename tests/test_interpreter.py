@@ -268,6 +268,31 @@ class InterpreterTests(unittest.TestCase):
 		with self.assertRaises(AttributeError):
 			setattr(result, "total", 16)
 
+	def test_roll_detail_constructors_snapshot_mutable_iterables(self):
+		rolls = [7, 13]
+		rerolls = [[2, 8], []]
+		dropped = [13]
+		details = []
+		detail = DieRollDetail(
+			sides=20,
+			rolls=rolls,
+			rerolls=rerolls,
+			dropped=dropped,
+		)
+		details.append(detail)
+		result = RollResult(total=15, details=details)
+
+		rolls.append(1)
+		rerolls[0].append(19)
+		rerolls.append([4])
+		dropped.clear()
+		details.clear()
+
+		self.assertEqual(detail.rolls, (7, 13))
+		self.assertEqual(detail.rerolls, ((2, 8), ()))
+		self.assertEqual(detail.dropped, (13,))
+		self.assertEqual(result.details, (detail,))
+
 	def test_roll_details_survive_manual_arithmetic_and_comparisons(self):
 		detail = DieRollDetail(sides=20, rolls=(7,), rerolls=(), dropped=())
 		roll = RollResult(total=7, details=(detail,))

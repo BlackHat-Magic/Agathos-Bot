@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -55,7 +55,7 @@ class CallDepthError(RuntimeErrorBase):
 	"""Raised when expression calls exceed the configured depth limit."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class DieRollDetail:
 	"""Immutable detail for one group of dice."""
 
@@ -63,6 +63,18 @@ class DieRollDetail:
 	rolls: tuple[int, ...]
 	rerolls: tuple[tuple[int, ...], ...]
 	dropped: tuple[int, ...]
+
+	def __init__(
+		self,
+		sides: int,
+		rolls: Iterable[int],
+		rerolls: Iterable[Iterable[int]],
+		dropped: Iterable[int],
+	) -> None:
+		object.__setattr__(self, "sides", sides)
+		object.__setattr__(self, "rolls", tuple(rolls))
+		object.__setattr__(self, "rerolls", tuple(tuple(roll) for roll in rerolls))
+		object.__setattr__(self, "dropped", tuple(dropped))
 
 	def format(self) -> str:
 		"""Return a stable, human-readable representation of this detail."""
@@ -86,12 +98,16 @@ class RollCompositionDetail:
 		return f"({self.left!r} {self.operation} {self.right!r} = {self.result!r})"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class RollResult:
 	"""A numeric result with immutable structured roll details."""
 
 	total: int | float
 	details: tuple[object, ...]
+
+	def __init__(self, total: int | float, details: Iterable[object]) -> None:
+		object.__setattr__(self, "total", total)
+		object.__setattr__(self, "details", tuple(details))
 
 	def format(self) -> str:
 		"""Return deterministic text containing the total and all details."""
