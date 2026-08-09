@@ -196,6 +196,7 @@ class Call:
 class If:
 	type: Literal["if"]
 	dtype: DataType
+	condition: Expression
 	then_branch: Block
 	elif_branches: list[tuple[Expression, Block]]
 	else_branch: Block | None

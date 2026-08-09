@@ -42,7 +42,7 @@ from .expressions import (
 	Yield,
 )
 from .lexer import Tokenizer
-from .parser import ExpectedType, Parser, _NO_EXPECTED_TYPE
+from .parser import Parser
 
 
 class RuntimeErrorBase(Exception):
@@ -71,69 +71,6 @@ class ExecutionLimitError(RuntimeErrorBase):
 
 class CallDepthError(RuntimeErrorBase):
 	"""Raised when expression calls exceed the configured depth limit."""
-
-
-def _install_if_condition_adapter() -> None:
-	"""Preserve validated ``if`` conditions on canonical frontend AST nodes.
-
-	The frontend currently validates the initial condition but does not store it
-	on ``If``. This adapter adds runtime metadata without changing parsing or
-	validation semantics, so both parser entry points produce executable nodes.
-	"""
-	if getattr(Parser, "_interpreter_if_condition_adapter", False):
-		return
-
-	original_parse_expression = Parser._parse_expression
-	original_parse_if_statement = Parser._parse_if_statement
-
-	def parse_expression(
-		parser: Parser, dtype: ExpectedType = _NO_EXPECTED_TYPE
-	) -> Expression:
-		state: Any = parser
-		depth = getattr(state, "_interpreter_expression_depth", 0) + 1
-		state._interpreter_expression_depth = depth
-		try:
-			expression = original_parse_expression(parser, dtype)
-		finally:
-			state._interpreter_expression_depth -= 1
-		if (
-			getattr(state, "_interpreter_if_conditions", None)
-			and state._interpreter_expression_depth
-			== state._interpreter_if_expression_depths[-1]
-		):
-			state._interpreter_if_conditions[-1].append(expression)
-		return expression
-
-	def parse_if_statement(
-		parser: Parser, dtype: ExpectedType = _NO_EXPECTED_TYPE
-	) -> If:
-		state: Any = parser
-		condition: list[Expression] = []
-		if_conditions = getattr(state, "_interpreter_if_conditions", None)
-		if if_conditions is None:
-			state._interpreter_if_conditions = []
-			state._interpreter_if_expression_depths = []
-			state._interpreter_expression_depth = 0
-		state._interpreter_if_conditions.append(condition)
-		state._interpreter_if_expression_depths.append(
-			state._interpreter_expression_depth
-		)
-		try:
-			result = original_parse_if_statement(parser, dtype)
-		finally:
-			state._interpreter_if_conditions.pop()
-			state._interpreter_if_expression_depths.pop()
-		if not condition:
-			raise InvalidOperationError("if expression is missing its condition")
-		object.__setattr__(result, "condition", condition[0])
-		return result
-
-	setattr(Parser, "_parse_expression", parse_expression)
-	setattr(Parser, "_parse_if_statement", parse_if_statement)
-	setattr(Parser, "_interpreter_if_condition_adapter", True)
-
-
-_install_if_condition_adapter()
 
 
 @dataclass(frozen=True, init=False)
@@ -541,10 +478,7 @@ class Interpreter:
 				return signal.value
 			return value
 		if isinstance(expression, If):
-			condition_expression = getattr(expression, "condition", None)
-			if condition_expression is None:
-				raise InvalidOperationError("if expression is missing its condition")
-			condition = self._evaluate(condition_expression, environment)
+			condition = self._evaluate(expression.condition, environment)
 			branch: Block | None = None
 			if not isinstance(condition, bool):
 				raise InvalidOperationError("if condition must be boolean")
@@ -613,6 +547,12 @@ class Interpreter:
 			) from error
 
 		remaining_steps = self.max_steps - self._steps
+		try:
+			stop_value = float(stop_fraction)
+		except (ArithmeticError, TypeError, ValueError, OverflowError) as error:
+			raise InvalidOperationError("range stop is not representable") from error
+		if not isfinite(stop_value):
+			raise InvalidOperationError("range stop is not representable")
 		for index in range(remaining_steps + 1):
 			try:
 				current = start_fraction + index * step_fraction
@@ -633,6 +573,11 @@ class Interpreter:
 				) from error
 			if not isfinite(value):
 				raise InvalidOperationError("range value is not representable")
+			if not (
+				(step_fraction > 0 and value < stop_value)
+				or (step_fraction < 0 and value > stop_value)
+			):
+				break
 			self._tick()
 			values.append(value)
 		return values

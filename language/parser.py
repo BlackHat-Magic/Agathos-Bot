@@ -1917,6 +1917,7 @@ class Parser:
 		return If(
 			type="if",
 			dtype=final_type,
+			condition=condition,
 			then_branch=then_branch,
 			elif_branches=elif_branches,
 			else_branch=else_branch,

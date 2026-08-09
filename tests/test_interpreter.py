@@ -876,6 +876,10 @@ class InterpreterTests(unittest.TestCase):
 			interpreter.execute_source("0.0:-1.0:-0.1"),
 			[0.0, -0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9],
 		)
+		self.assertEqual(
+			interpreter.execute_source("0.1:0.3:0.09999999999999999"),
+			[0.1, 0.19999999999999998],
+		)
 
 	def test_mixed_huge_integer_float_range_errors_are_normalized(self):
 		with self.assertRaises(InvalidOperationError):
