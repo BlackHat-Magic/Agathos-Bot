@@ -2,7 +2,17 @@ import unittest
 import random
 from typing import cast
 
-from language.expressions import Binary, BinaryOp, Identifier, Int
+from language.expressions import (
+	Binary,
+	BinaryOp,
+	Block,
+	Call,
+	Function,
+	FunctionType,
+	Identifier,
+	Int,
+	Return,
+)
 from language.interpreter import (
 	CallDepthError,
 	DieRollDetail,
@@ -14,6 +24,7 @@ from language.interpreter import (
 	RollCompositionDetail,
 	RollResult,
 	RuntimeEnv,
+	RuntimeFunction,
 	RuntimeErrorBase,
 	UndefinedNameError,
 	_BreakSignal,
@@ -21,6 +32,8 @@ from language.interpreter import (
 	_ReturnSignal,
 	_YieldSignal,
 )
+from language.lexer import Tokenizer
+from language.parser import Parser
 
 
 class RuntimeEnvTests(unittest.TestCase):
@@ -134,6 +147,135 @@ class RuntimeControlSignalTests(unittest.TestCase):
 
 
 class InterpreterTests(unittest.TestCase):
+	def test_function_binds_parameters_and_returns_value(self):
+		self.assertEqual(
+			Interpreter().execute_source(
+				"identity :: int (value: int) { return value; }; identity(7)"
+			),
+			7,
+		)
+
+	def test_function_captures_lexical_environment(self):
+		self.assertEqual(
+			Interpreter().execute_source(
+				"offset := 5; add :: int (value: int) { return value + offset; }; "
+				"add(3)"
+			),
+			8,
+		)
+
+	def test_recursive_function_uses_captured_binding(self):
+		interpreter = Interpreter(max_call_depth=3)
+
+		with self.assertRaises(CallDepthError):
+			interpreter.execute_source(
+				"recurse :: int (value: int) { return recurse(value); }; recurse(1)"
+			)
+		self.assertEqual(interpreter._call_depth, 0)
+
+	def test_nested_function_captures_lexical_locals(self):
+		self.assertEqual(
+			Interpreter().execute_source(
+				"outer :: int (base: int) { inner :: int (value: int) { "
+				"return base + value; }; return inner(2); }; outer(3)"
+			),
+			5,
+		)
+
+	def test_no_value_function_returns_none(self):
+		self.assertIsNone(
+			Interpreter().execute_source("notify :: () { return; }; notify()")
+		)
+
+	def test_value_function_falling_through_is_rejected_defensively(self):
+		function = Function(
+			type="function",
+			dtype=FunctionType(parameters=[], returns=int),
+			name="missing",
+			body=Block(type="block", dtype=None, body=[]),
+		)
+		environment = RuntimeEnv()
+		environment.declare("missing", RuntimeFunction(function, environment))
+		call = Call(
+			type="call",
+			dtype=int,
+			callee=Identifier(type="identifier", dtype=function.dtype, label="missing"),
+			args=[],
+		)
+
+		with self.assertRaises(InvalidOperationError):
+			Interpreter()._evaluate(call, environment)
+
+	def test_function_locals_do_not_leak(self):
+		interpreter = Interpreter()
+
+		self.assertEqual(
+			interpreter.execute_source(
+				"local := 2; make :: () { local := 1; }; make(); local"
+			),
+			2,
+		)
+
+	def test_return_signal_outside_function_is_a_runtime_error(self):
+		return_expression = Return(type="return", dtype=None)
+
+		with self.assertRaises(InvalidOperationError):
+			Interpreter().execute([return_expression])
+
+	def test_undefined_and_non_callable_calls_raise_runtime_errors(self):
+		undefined_call = Call(
+			type="call",
+			dtype=int,
+			callee=Identifier(
+				type="identifier", dtype=FunctionType([], int), label="missing"
+			),
+			args=[],
+		)
+		with self.assertRaises(UndefinedNameError):
+			Interpreter()._evaluate(undefined_call, RuntimeEnv())
+
+		non_callable_call = Call(type="call", dtype=int, callee=Int(1), args=[])
+		with self.assertRaises(InvalidOperationError):
+			Interpreter()._evaluate(non_callable_call, RuntimeEnv())
+
+	def test_call_depth_exhaustion_restores_depth(self):
+		interpreter = Interpreter(max_call_depth=2)
+
+		with self.assertRaises(CallDepthError):
+			interpreter.execute_source("loop :: () { loop(); }; loop()")
+		self.assertEqual(interpreter._call_depth, 0)
+		self.assertEqual(interpreter.execute_source("1"), 1)
+
+	def test_forward_function_declarations_are_unavailable_at_runtime(self):
+		declarations = Parser(
+			Tokenizer(
+				"first :: int () { return 1; }; second :: int () { return 2; }"
+			).tokenize()
+		).parse_program()
+		second = cast(Function, declarations[1])
+		call = Call(
+			type="call",
+			dtype=int,
+			callee=Identifier(type="identifier", dtype=second.dtype, label=second.name),
+			args=[],
+		)
+
+		with self.assertRaises(UndefinedNameError):
+			Interpreter().execute([declarations[0], call, declarations[1]])
+
+	def test_function_preserves_roll_result_arguments_and_returns(self):
+		result = Interpreter(rng=random.Random(0)).execute_source(
+			"identity :: int (value: int) { return value; }; identity(1d6)"
+		)
+
+		self.assertEqual(
+			result,
+			RollResult(
+				total=4,
+				details=(DieRollDetail(6, (4,), ((),), ()),),
+			),
+		)
+
 	def test_execute_source_returns_latest_value(self):
 		interpreter = Interpreter()
 

@@ -13,11 +13,14 @@ from .expressions import (
 	BinaryOp,
 	Block,
 	Bool,
+	Call,
 	Float,
+	Function,
 	Identifier,
 	Int,
 	Null,
 	PrimitiveType,
+	Return,
 	String,
 	Unary,
 	UnaryOp,
@@ -267,6 +270,14 @@ class RuntimeEnv:
 		raise UndefinedNameError(f"undefined name: {name}")
 
 
+@dataclass(frozen=True)
+class RuntimeFunction:
+	"""A named function and the environment in which it was declared."""
+
+	function: Function
+	environment: RuntimeEnv
+
+
 class Interpreter:
 	"""Execute the scalar and block subset of the Agathos expression language.
 
@@ -335,6 +346,50 @@ class Interpreter:
 			if isinstance(value, PrimitiveType):
 				raise InvalidOperationError("type descriptors are not runtime values")
 			return value
+		if isinstance(expression, Function):
+			environment.declare(
+				expression.name, RuntimeFunction(expression, environment)
+			)
+			return None
+		if isinstance(expression, Call):
+			callee = self._evaluate(expression.callee, environment)
+			arguments = [
+				self._evaluate(argument, environment) for argument in expression.args
+			]
+			if not isinstance(callee, RuntimeFunction):
+				raise InvalidOperationError("callee is not a runtime function")
+			function = callee.function
+			if len(arguments) != len(function.dtype.parameters):
+				raise InvalidOperationError(
+					"function called with incorrect argument count"
+				)
+			if self._call_depth >= self.max_call_depth:
+				raise CallDepthError(
+					f"call depth exceeded maximum: {self.max_call_depth}"
+				)
+			self._call_depth += 1
+			try:
+				call_environment = callee.environment.child()
+				for parameter, argument in zip(function.dtype.parameters, arguments):
+					call_environment.declare(parameter.label, argument)
+				try:
+					self._evaluate(function.body, call_environment)
+				except _ReturnSignal as signal:
+					return signal.value
+				if function.dtype.returns is not None:
+					raise InvalidOperationError(
+						f"value-returning function fell through: {function.name}"
+					)
+				return None
+			finally:
+				self._call_depth -= 1
+		if isinstance(expression, Return):
+			value = (
+				self._evaluate(expression.expression, environment)
+				if expression.expression is not None
+				else None
+			)
+			raise _ReturnSignal(value)
 		if isinstance(expression, Block):
 			child = environment.child()
 			value: object = None
@@ -780,8 +835,11 @@ class Interpreter:
 		self._call_depth = 0
 		environment = RuntimeEnv()
 		value: object = None
-		for expression in expressions:
-			value = self._evaluate(expression, environment)
+		try:
+			for expression in expressions:
+				value = self._evaluate(expression, environment)
+		except _ReturnSignal as signal:
+			raise InvalidOperationError("return outside a function") from signal
 		return value
 
 	def execute_source(self, source: str) -> object:
