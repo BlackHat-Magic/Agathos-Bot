@@ -296,8 +296,8 @@ class RuntimeFunction:
 class Interpreter:
 	"""Execute the scalar, block, and function subset of Agathos.
 
-		Each call to :meth:`execute` starts with a fresh root environment and resets
-		the execution counter. ``max_steps`` is the non-negative integer budget for
+	Each call to :meth:`execute` starts with a fresh root environment and resets
+	the execution counter. ``max_steps`` is the non-negative integer budget for
 	that execution; when the budget is exhausted, :meth:`_tick` raises
 	:class:`ExecutionLimitError` before the next unit of work. Every AST dispatch
 	consumes one step. Range items, slice items, comprehension iterations, ``for``
@@ -308,13 +308,13 @@ class Interpreter:
 	``InvalidOperationError``. Parsing errors from :meth:`execute_source` are
 	propagated unchanged.
 
-		Function definitions bind a named :class:`RuntimeFunction` in the current
-		lexical environment. A function captures that environment, and each call
-		uses a child frame for its parameters and local declarations, so nested
-		functions and recursive calls resolve names lexically. ``return`` exits the
-		nearest function; explicit values are checked against the function's
-		declared return type, while no-value functions may return only ``None``.
-		Calls at or beyond ``max_call_depth`` raise :class:`CallDepthError`.
+	Function definitions bind a named :class:`RuntimeFunction` in the current
+	lexical environment. A function captures that environment, and each call
+	uses a child frame for its parameters and local declarations, so nested
+	functions and recursive calls resolve names lexically. ``return`` exits the
+	nearest function; explicit values are checked against the function's
+	declared return type, while no-value functions may return only ``None``.
+	Calls at or beyond ``max_call_depth`` raise :class:`CallDepthError`.
 	"""
 
 	def __init__(
