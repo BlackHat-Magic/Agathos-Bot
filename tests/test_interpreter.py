@@ -593,7 +593,7 @@ class InterpreterTests(unittest.TestCase):
 
 	def test_malformed_operators_are_normalized_to_runtime_errors(self):
 		interpreter = Interpreter()
-		with self.assertRaises(RuntimeErrorBase):
+		with self.assertRaises(InvalidOperationError):
 			interpreter._apply_binary(cast(BinaryOp, object()), 1, 1)
 
 		unary = Unary(
@@ -603,7 +603,7 @@ class InterpreterTests(unittest.TestCase):
 			operand=Int(1),
 			operator_loc="before",
 		)
-		with self.assertRaises(RuntimeErrorBase):
+		with self.assertRaises(InvalidOperationError):
 			interpreter._evaluate(unary, RuntimeEnv())
 
 	def test_dice_rolls_are_seeded_and_record_each_die(self):
@@ -633,7 +633,7 @@ class InterpreterTests(unittest.TestCase):
 			(1, False),
 		):
 			with self.subTest(count=count, sides=sides):
-				with self.assertRaises(RuntimeErrorBase):
+				with self.assertRaises(InvalidDiceError):
 					interpreter._apply_binary(BinaryOp.DIE_ROLL, count, sides)
 
 	def test_nested_dice_modifiers_only_apply_to_outer_values(self):
@@ -992,7 +992,7 @@ class InterpreterTests(unittest.TestCase):
 		)
 		with self.assertRaises(InvalidOperationError):
 			interpreter.execute_source("values := [1]; values[2]")
-		with self.assertRaises(RuntimeErrorBase):
+		with self.assertRaises(InvalidOperationError):
 			interpreter.execute_source("step := 0; [1][::step]")
 
 		invalid_array = Index(
@@ -1001,7 +1001,7 @@ class InterpreterTests(unittest.TestCase):
 			array=Int(1),
 			index=Int(0),
 		)
-		with self.assertRaises(RuntimeErrorBase):
+		with self.assertRaises(InvalidOperationError):
 			interpreter.execute([invalid_array])
 
 	def test_comprehensions_scope_targets_and_tick_each_iteration(self):

@@ -296,20 +296,25 @@ class RuntimeFunction:
 class Interpreter:
 	"""Execute the scalar, block, and function subset of Agathos.
 
-	Each call to :meth:`execute` starts with a fresh root environment and resets
-	the execution counter. Declarations and assignments mutate only that
+		Each call to :meth:`execute` starts with a fresh root environment and resets
+		the execution counter. ``max_steps`` is the non-negative integer budget for
+	that execution; when the budget is exhausted, :meth:`_tick` raises
+	:class:`ExecutionLimitError` before the next unit of work. Every AST dispatch
+	consumes one step. Range items, slice items, comprehension iterations, ``for``
+	iterations, ``while`` iterations, individual die rolls, and die rerolls each
+	consume an additional step. Declarations and assignments mutate only that
 	execution's environments; the interpreter instance retains its configured
 	random source and limits. Unsupported expression kinds and operators raise
 	``InvalidOperationError``. Parsing errors from :meth:`execute_source` are
 	propagated unchanged.
 
-	Function definitions bind a named :class:`RuntimeFunction` in the current
-	lexical environment. A function captures that environment, and each call
-	uses a child frame for its parameters and local declarations, so nested
-	functions and recursive calls resolve names lexically. ``return`` exits the
-	nearest function; explicit values are checked against the function's
-	declared return type, while no-value functions may return only ``None``.
-	Calls at or beyond ``max_call_depth`` raise :class:`CallDepthError`.
+		Function definitions bind a named :class:`RuntimeFunction` in the current
+		lexical environment. A function captures that environment, and each call
+		uses a child frame for its parameters and local declarations, so nested
+		functions and recursive calls resolve names lexically. ``return`` exits the
+		nearest function; explicit values are checked against the function's
+		declared return type, while no-value functions may return only ``None``.
+		Calls at or beyond ``max_call_depth`` raise :class:`CallDepthError`.
 	"""
 
 	def __init__(
@@ -319,6 +324,11 @@ class Interpreter:
 		max_call_depth: int = 100,
 	) -> None:
 		"""Create an interpreter with optional randomness and execution limits.
+
+		``max_steps`` limits the total execution budget. AST dispatches and the
+		additional range, slice, collection-iteration, dice-roll, and dice-reroll
+		operations documented on the class consume this budget. When no budget
+		remains, :meth:`_tick` raises :class:`ExecutionLimitError`.
 
 		``max_call_depth`` limits active nested function calls. A call that would
 		exceed it raises :class:`CallDepthError`, and the depth counter is restored
@@ -344,7 +354,11 @@ class Interpreter:
 		self._call_depth = 0
 
 	def _tick(self) -> None:
-		"""Account for one AST dispatch and enforce the step limit."""
+		"""Consume one step, raising ``ExecutionLimitError`` when exhausted.
+
+		The check happens before the step is consumed, so no work starts after
+		the configured ``max_steps`` budget has been reached.
+		"""
 		if self._steps >= self.max_steps:
 			raise ExecutionLimitError(
 				f"execution exceeded maximum step count: {self.max_steps}"
