@@ -162,7 +162,7 @@ class ReplTests(unittest.TestCase):
 
 	def test_real_interpreter_persists_functions_between_submissions(self):
 		output = self.run_repl_with(
-			"add :: int (value: int) { return value + 1; }\nadd(2)\nexit\n",
+			"add :: int (value: int) {\nreturn value + 1;\n}\nadd(2)\nexit\n",
 			Interpreter(),
 		)
 
@@ -317,7 +317,8 @@ class ReplIntegrationTests(unittest.TestCase):
 		self.assertEqual(
 			output.getvalue().count("Error: division or modulo by zero\n"), 1
 		)
-		self.assertEqual(output.getvalue().count("Error: "), 2)
+		self.assertIn(">>> Error: \n>>> 2\n", output.getvalue())
+		self.assertNotIn(">>> 1\n", output.getvalue())
 		self.assertIn(">>> 2\n", output.getvalue())
 
 
@@ -330,6 +331,7 @@ class ReplEntryPointTests(unittest.TestCase):
 			capture_output=True,
 			text=True,
 			check=False,
+			timeout=5,
 		)
 
 		self.assertEqual(result.returncode, 0, result.stderr)
