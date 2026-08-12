@@ -284,6 +284,21 @@ class ReplIntegrationTests(unittest.TestCase):
 		self.assertIn("Error: division or modulo by zero\n", output.getvalue())
 		self.assertIn("2\n", output.getvalue())
 
+	def test_failed_persistent_submission_does_not_leave_declaration(self):
+		output = io.StringIO()
+
+		run_repl(
+			io.StringIO("value := 1; 1 / 0\nvalue\nlater := 2\nlater\nexit\n"),
+			output,
+			Interpreter(),
+		)
+
+		self.assertEqual(
+			output.getvalue().count("Error: division or modulo by zero\n"), 1
+		)
+		self.assertEqual(output.getvalue().count("Error: "), 2)
+		self.assertIn(">>> 2\n", output.getvalue())
+
 
 if __name__ == "__main__":
 	unittest.main()

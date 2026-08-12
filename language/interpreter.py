@@ -1234,16 +1234,30 @@ class Interpreter:
 		return self.execute(expressions)
 
 	def execute_persistent_source(self, source: str) -> object:
-		"""Tokenize, parse, and execute source in the persistent environment."""
-		separator = ""
-		if self._persistent_source:
-			separator = (
-				"\n" if self._persistent_source.rstrip().endswith(";") else ";\n"
-			)
-		combined_source = self._persistent_source + separator + source
-		expressions = Parser(Tokenizer(combined_source).tokenize()).parse_program()
-		new_expressions = expressions[self._persistent_expression_count :]
-		result = self.execute_persistent(new_expressions)
+		"""Tokenize, parse, and execute source in the persistent environment.
+
+		A failed submission is transactional: its declarations, assignments, and
+		replay metadata are discarded before the original error is propagated.
+		"""
+		persistent_values = self._persistent_environment._values.copy()
+		persistent_source = self._persistent_source
+		persistent_expression_count = self._persistent_expression_count
+		try:
+			separator = ""
+			if self._persistent_source:
+				separator = (
+					"\n" if self._persistent_source.rstrip().endswith(";") else ";\n"
+				)
+			combined_source = self._persistent_source + separator + source
+			expressions = Parser(Tokenizer(combined_source).tokenize()).parse_program()
+			new_expressions = expressions[self._persistent_expression_count :]
+			result = self.execute_persistent(new_expressions)
+		except BaseException:
+			self._persistent_environment._values.clear()
+			self._persistent_environment._values.update(persistent_values)
+			self._persistent_source = persistent_source
+			self._persistent_expression_count = persistent_expression_count
+			raise
 		self._persistent_source = combined_source
 		self._persistent_expression_count = len(expressions)
 		return result

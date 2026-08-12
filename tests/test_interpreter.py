@@ -227,6 +227,16 @@ class InterpreterTests(unittest.TestCase):
 		with self.assertRaises(InvalidOperationError):
 			self._evaluate_manual_return(None, 1)
 
+	def test_failed_persistent_submission_rolls_back_declarations(self):
+		interpreter = Interpreter()
+
+		with self.assertRaises(DivisionByZeroError):
+			interpreter.execute_persistent_source("value := 1; 1 / 0")
+		with self.assertRaises(UndefinedNameError):
+			interpreter._persistent_environment.lookup("value")
+
+		self.assertEqual(interpreter.execute_persistent_source("later := 2"), 2)
+
 	def test_value_function_rejects_explicit_none_return(self):
 		with self.assertRaises(InvalidOperationError):
 			self._evaluate_manual_return(int, None)
