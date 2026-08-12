@@ -1,5 +1,9 @@
 import io
+import random
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 
 from language.interpreter import Interpreter, RollResult, RuntimeErrorBase
 from language.repl import (
@@ -276,6 +280,23 @@ class ReplTests(unittest.TestCase):
 
 
 class ReplIntegrationTests(unittest.TestCase):
+	def test_real_interpreter_formats_seeded_roll_details_in_the_stream(self):
+		output = io.StringIO()
+
+		run_repl(
+			io.StringIO("3d6\nexit\n"),
+			output,
+			Interpreter(rng=random.Random(0)),
+		)
+
+		self.assertIn(
+			(
+				">>> total=9 details=[d6 rolls=(4, 4, 1) rerolls=((), (), ()) "
+				"values=(4, 4, 1) dropped=()]\n"
+			),
+			output.getvalue(),
+		)
+
 	def test_real_interpreter_errors_do_not_stop_following_commands(self):
 		output = io.StringIO()
 
@@ -298,6 +319,21 @@ class ReplIntegrationTests(unittest.TestCase):
 		)
 		self.assertEqual(output.getvalue().count("Error: "), 2)
 		self.assertIn(">>> 2\n", output.getvalue())
+
+
+class ReplEntryPointTests(unittest.TestCase):
+	def test_module_entry_point_runs_a_submission_and_exits(self):
+		result = subprocess.run(
+			[sys.executable, "-m", "language.repl"],
+			cwd=Path(__file__).resolve().parents[1],
+			input="1 + 2\nexit\n",
+			capture_output=True,
+			text=True,
+			check=False,
+		)
+
+		self.assertEqual(result.returncode, 0, result.stderr)
+		self.assertIn(">>> 3", result.stdout)
 
 
 if __name__ == "__main__":
