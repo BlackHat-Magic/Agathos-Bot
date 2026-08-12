@@ -1238,6 +1238,7 @@ class Interpreter:
 
 		A failed submission is transactional: its declarations, assignments, and
 		replay metadata are discarded before the original error is propagated.
+		Empty submissions reset execution state but leave replay metadata unchanged.
 		"""
 		persistent_values = self._persistent_environment._values.copy()
 		persistent_source = self._persistent_source
@@ -1252,6 +1253,8 @@ class Interpreter:
 			expressions = Parser(Tokenizer(combined_source).tokenize()).parse_program()
 			new_expressions = expressions[self._persistent_expression_count :]
 			result = self.execute_persistent(new_expressions)
+			if not new_expressions:
+				return result
 		except BaseException:
 			self._persistent_environment._values.clear()
 			self._persistent_environment._values.update(persistent_values)
