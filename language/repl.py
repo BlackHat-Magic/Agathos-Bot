@@ -41,9 +41,12 @@ def run_repl(
 		_write_prompt(output_stream, ">>> ")
 		try:
 			line = input_stream.readline()
-		except EOFError, KeyboardInterrupt:
+		except EOFError:
 			output_stream.write("\n")
 			return
+		except KeyboardInterrupt:
+			output_stream.write("\n")
+			continue
 
 		if not line:
 			return
@@ -59,6 +62,9 @@ def run_repl(
 
 		try:
 			result = active_interpreter.execute_source(line)
+		except KeyboardInterrupt:
+			output_stream.write("\n")
+			continue
 		except (
 			NameError,
 			RuntimeErrorBase,
