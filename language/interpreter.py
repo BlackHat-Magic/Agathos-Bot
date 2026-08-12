@@ -352,6 +352,9 @@ class Interpreter:
 		self.max_call_depth = max_call_depth
 		self._steps = 0
 		self._call_depth = 0
+		self._persistent_environment = RuntimeEnv()
+		self._persistent_source = ""
+		self._persistent_expression_count = 0
 
 	def _tick(self) -> None:
 		"""Consume one step, raising ``ExecutionLimitError`` when exhausted.
@@ -1169,6 +1172,27 @@ class Interpreter:
 		right = self._evaluate(expression.right, environment)
 		return self._apply_binary(expression.operation, left, right)
 
+	def _execute(
+		self, expressions: Sequence[Expression], environment: RuntimeEnv
+	) -> object:
+		self._steps = 0
+		self._call_depth = 0
+		value: object = None
+		try:
+			for expression in expressions:
+				value = self._evaluate(expression, environment)
+		except _ReturnSignal as signal:
+			raise InvalidOperationError("return outside a function") from signal
+		except _BreakSignal as signal:
+			raise InvalidOperationError("break outside a loop") from signal
+		except _ContinueSignal as signal:
+			raise InvalidOperationError("continue outside a loop") from signal
+		except _YieldSignal as signal:
+			raise InvalidOperationError(
+				"yield outside a collecting loop or value block"
+			) from signal
+		return value
+
 	def execute(self, expressions: Sequence[Expression]) -> object:
 		"""Evaluate expressions in order and return the latest result.
 
@@ -1187,24 +1211,15 @@ class Interpreter:
 			RuntimeErrorBase: For other failures during expression evaluation,
 				including undefined names, invalid operations, and execution limits.
 		"""
-		self._steps = 0
-		self._call_depth = 0
-		environment = RuntimeEnv()
-		value: object = None
-		try:
-			for expression in expressions:
-				value = self._evaluate(expression, environment)
-		except _ReturnSignal as signal:
-			raise InvalidOperationError("return outside a function") from signal
-		except _BreakSignal as signal:
-			raise InvalidOperationError("break outside a loop") from signal
-		except _ContinueSignal as signal:
-			raise InvalidOperationError("continue outside a loop") from signal
-		except _YieldSignal as signal:
-			raise InvalidOperationError(
-				"yield outside a collecting loop or value block"
-			) from signal
-		return value
+		return self._execute(expressions, RuntimeEnv())
+
+	def execute_persistent(self, expressions: Sequence[Expression]) -> object:
+		"""Evaluate expressions while retaining declarations for later calls.
+
+		The step budget and call depth reset for each call, while the root runtime
+		environment is shared with previous persistent executions.
+		"""
+		return self._execute(expressions, self._persistent_environment)
 
 	def execute_source(self, source: str) -> object:
 		"""Tokenize, parse, and execute one source program.
@@ -1217,6 +1232,21 @@ class Interpreter:
 		"""
 		expressions = Parser(Tokenizer(source).tokenize()).parse_program()
 		return self.execute(expressions)
+
+	def execute_persistent_source(self, source: str) -> object:
+		"""Tokenize, parse, and execute source in the persistent environment."""
+		separator = ""
+		if self._persistent_source:
+			separator = (
+				"\n" if self._persistent_source.rstrip().endswith(";") else ";\n"
+			)
+		combined_source = self._persistent_source + separator + source
+		expressions = Parser(Tokenizer(combined_source).tokenize()).parse_program()
+		new_expressions = expressions[self._persistent_expression_count :]
+		result = self.execute_persistent(new_expressions)
+		self._persistent_source = combined_source
+		self._persistent_expression_count = len(expressions)
+		return result
 
 
 class _ReturnSignal(Exception):

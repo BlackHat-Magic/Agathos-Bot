@@ -18,6 +18,7 @@ class FakeInterpreter(Interpreter):
 		errors: tuple[BaseException, ...] = (),
 		interrupt_on_execute: bool = False,
 	):
+		super().__init__()
 		self.sources: list[str] = []
 		self.results = iter(results)
 		self.errors = iter(errors)
@@ -32,6 +33,9 @@ class FakeInterpreter(Interpreter):
 		if error is not None:
 			raise error
 		return next(self.results, "result")
+
+	def execute_persistent_source(self, source: str) -> object:
+		return self.execute_source(source)
 
 
 class RaisingInput(io.StringIO):
@@ -104,6 +108,18 @@ class ReplTests(unittest.TestCase):
 		with self.assertRaisesRegex(ValueError, "unmatched closing brace"):
 			brace_balance("}")
 
+	def test_brace_balance_handles_odd_and_even_backslashes_before_delimiters(self):
+		odd_backslashes = '"' + "\\" * 3 + '"{'
+		even_backslashes = '"' + "\\" * 2 + '"{'
+
+		self.assertEqual(brace_balance(odd_backslashes), 0)
+		self.assertEqual(brace_balance(even_backslashes), 1)
+
+	def test_brace_balance_handles_comments_after_escaped_delimiters(self):
+		source = '"' + "\\" * 2 + '" # {\n{ # }\n'
+
+		self.assertEqual(brace_balance(source), 1)
+
 	def test_multiline_submissions_execute_after_balancing(self):
 		interpreter = FakeInterpreter(results=("result",))
 
@@ -131,6 +147,28 @@ class ReplTests(unittest.TestCase):
 
 		self.assertEqual(interpreter.sources, [])
 		self.assertIn("Error: unbalanced input\n", output)
+		self.assertEqual(output.count(">>> "), 1)
+		self.assertEqual(output.count("... "), 1)
+
+	def test_real_interpreter_persists_values_between_submissions(self):
+		output = self.run_repl_with("value := 5\nvalue + 2\nexit\n", Interpreter())
+
+		self.assertIn("5\n", output)
+		self.assertIn("7\n", output)
+
+	def test_real_interpreter_persists_functions_between_submissions(self):
+		output = self.run_repl_with(
+			"add :: int (value: int) { return value + 1; }\nadd(2)\nexit\n",
+			Interpreter(),
+		)
+
+		self.assertIn("3\n", output)
+
+	def test_real_interpreter_resets_step_budget_between_submissions(self):
+		output = self.run_repl_with("1\n2\nexit\n", Interpreter(max_steps=1))
+
+		self.assertIn(">>> 1\n", output)
+		self.assertIn(">>> 2\n", output)
 
 	def test_read_submission_prompts_and_flushes_each_line(self):
 		events: list[tuple[str, str | None]] = []

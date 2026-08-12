@@ -89,9 +89,9 @@ def read_submission(input_stream: TextIO, output_stream: TextIO) -> str:
 		try:
 			line = input_stream.readline()
 		except EOFError as error:
-			raise ValueError("unbalanced input") from error
+			raise EOFError("unbalanced input") from error
 		if not line:
-			raise ValueError("unbalanced input")
+			raise EOFError("unbalanced input")
 		lines.append(_line_without_ending(line))
 
 	return "\n".join(lines) + "\n"
@@ -108,8 +108,11 @@ def run_repl(
 	while True:
 		try:
 			source = read_submission(input_stream, output_stream)
-		except EOFError:
-			output_stream.write("\n")
+		except EOFError as error:
+			if str(error):
+				print_error(error, output_stream)
+			else:
+				output_stream.write("\n")
 			return
 		except KeyboardInterrupt:
 			output_stream.write("\n")
@@ -128,7 +131,7 @@ def run_repl(
 			continue
 
 		try:
-			result = active_interpreter.execute_source(source)
+			result = active_interpreter.execute_persistent_source(source)
 		except KeyboardInterrupt:
 			output_stream.write("\n")
 			continue
