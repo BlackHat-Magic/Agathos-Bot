@@ -2,7 +2,7 @@ import io
 import unittest
 
 from language.interpreter import Interpreter, RollResult, RuntimeErrorBase
-from language.repl import format_result, run_repl
+from language.repl import _write_prompt, format_result, run_repl
 
 
 class FakeInterpreter(Interpreter):
@@ -24,6 +24,16 @@ class FakeInterpreter(Interpreter):
 class RaisingInput(io.StringIO):
 	def readline(self, size: int = -1) -> str:
 		raise KeyboardInterrupt
+
+
+class TrackingOutput(io.StringIO):
+	def __init__(self):
+		super().__init__()
+		self.flush_count = 0
+
+	def flush(self):
+		self.flush_count += 1
+		super().flush()
 
 
 class ReplTests(unittest.TestCase):
@@ -55,6 +65,23 @@ class ReplTests(unittest.TestCase):
 
 		self.assertEqual(format_result(result), "total=4 details=[]")
 		self.assertEqual(format_result(4), "4")
+		self.assertEqual(format_result("{}"), "{}")
+
+	def test_prompts_flush_before_input(self):
+		output = TrackingOutput()
+
+		run_repl(io.StringIO("exit\n"), output, FakeInterpreter())
+
+		self.assertEqual(output.getvalue(), ">>> ")
+		self.assertEqual(output.flush_count, 1)
+
+	def test_continuation_prompts_flush_before_input(self):
+		output = TrackingOutput()
+
+		_write_prompt(output, "... ")
+
+		self.assertEqual(output.getvalue(), "... ")
+		self.assertEqual(output.flush_count, 1)
 
 	def test_expected_errors_are_printed_and_the_loop_continues(self):
 		interpreter = FakeInterpreter(

@@ -5,14 +5,13 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
-from .interpreter import Interpreter, RuntimeErrorBase
+from .interpreter import Interpreter, RollResult, RuntimeErrorBase
 
 
 def format_result(value: object) -> str:
 	"""Format an interpreter result for display."""
-	formatter = getattr(value, "format", None)
-	if callable(formatter):
-		return formatter()
+	if isinstance(value, RollResult):
+		return value.format()
 	return str(value)
 
 
@@ -25,6 +24,11 @@ def _print_help(output_stream: TextIO) -> None:
 	output_stream.write("Commands: help, exit, quit\n")
 
 
+def _write_prompt(output_stream: TextIO, prompt: str) -> None:
+	output_stream.write(prompt)
+	output_stream.flush()
+
+
 def run_repl(
 	input_stream: TextIO = sys.stdin,
 	output_stream: TextIO = sys.stdout,
@@ -34,7 +38,7 @@ def run_repl(
 	active_interpreter = interpreter if interpreter is not None else Interpreter()
 
 	while True:
-		output_stream.write(">>> ")
+		_write_prompt(output_stream, ">>> ")
 		try:
 			line = input_stream.readline()
 		except EOFError, KeyboardInterrupt:
