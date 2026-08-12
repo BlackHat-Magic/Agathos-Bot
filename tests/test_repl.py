@@ -2,7 +2,13 @@ import io
 import unittest
 
 from language.interpreter import Interpreter, RollResult, RuntimeErrorBase
-from language.repl import _write_prompt, format_result, run_repl
+from language.repl import (
+	_write_prompt,
+	brace_balance,
+	format_result,
+	read_submission,
+	run_repl,
+)
 
 
 class FakeInterpreter(Interpreter):
@@ -88,6 +94,64 @@ class ReplTests(unittest.TestCase):
 		self.assertEqual(interpreter.sources, [])
 		self.assertIn("Commands: help, exit, quit\n", output)
 		self.assertEqual(output.count(">>> "), 2)
+
+	def test_brace_balance_ignores_strings_and_comments(self):
+		source = 'value := "{ # not a comment }"; # {\n{ # }\n'
+
+		self.assertEqual(brace_balance(source), 1)
+
+	def test_brace_balance_rejects_unmatched_closing_braces(self):
+		with self.assertRaisesRegex(ValueError, "unmatched closing brace"):
+			brace_balance("}")
+
+	def test_multiline_submissions_execute_after_balancing(self):
+		interpreter = FakeInterpreter(results=("result",))
+
+		output = self.run_repl_with(
+			"function :: () {\nif true {\nreturn;\n}\n}\nexit\n", interpreter
+		)
+
+		self.assertEqual(
+			interpreter.sources,
+			["function :: () {\nif true {\nreturn;\n}\n}\n"],
+		)
+		self.assertEqual(output.count("... "), 4)
+
+	def test_blank_continuation_lines_are_preserved(self):
+		interpreter = FakeInterpreter()
+
+		read_submission(io.StringIO("{\n\n}\n"), io.StringIO())
+		run_repl(io.StringIO("{\n\n}\nexit\n"), io.StringIO(), interpreter)
+
+		self.assertEqual(interpreter.sources, ["{\n\n}\n"])
+
+	def test_eof_during_continuation_reports_error_without_execution(self):
+		interpreter = FakeInterpreter()
+		output = self.run_repl_with("{\n", interpreter)
+
+		self.assertEqual(interpreter.sources, [])
+		self.assertIn("Error: unbalanced input\n", output)
+
+	def test_read_submission_prompts_and_flushes_each_line(self):
+		events: list[tuple[str, str | None]] = []
+
+		source = read_submission(
+			TrackingInput("{\n}\n", events),
+			TrackingOutput(events),
+		)
+
+		self.assertEqual(source, "{\n}\n")
+		self.assertEqual(
+			events,
+			[
+				("write", ">>> "),
+				("flush", None),
+				("read", None),
+				("write", "... "),
+				("flush", None),
+				("read", None),
+			],
+		)
 
 	def test_results_are_printed_and_the_interpreter_is_reused(self):
 		interpreter = FakeInterpreter(results=(1, "text"))
