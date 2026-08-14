@@ -1,7 +1,7 @@
 import inspect
 import random
 import unittest
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import discord
@@ -20,7 +20,9 @@ class BotHelperTests(unittest.TestCase):
 	def test_evaluate_rolls_reuses_interpreter_rng_for_repetitions(self):
 		interpreter = Interpreter(rng=random.Random(0))
 		results = bot.evaluate_rolls("d20", 2, interpreter=interpreter)
-		self.assertEqual([result.total for result in results], [13, 14])
+		self.assertTrue(all(isinstance(result, RollResult) for result in results))
+		typed_results = cast(list[RollResult], results)
+		self.assertEqual([result.total for result in typed_results], [13, 14])
 
 	def test_repeat_validation_accepts_one_through_twenty_only(self):
 		for repeat in (1, 20):
@@ -82,20 +84,19 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 	async def test_convenience_commands_build_interpreter_expressions(self):
 		interaction = FakeInteraction()
 		with patch.object(bot, "handle_roll", new=AsyncMock()) as handle_roll:
-			await bot.advantage.callback(
-				cast(discord.Interaction, interaction), bonus=5, repeat=2
-			)
+			callback = cast(Any, bot.advantage.callback)
+			await callback(cast(discord.Interaction, interaction), bonus=5, repeat=2)
 			handle_roll.assert_awaited_once_with(interaction, "+d20+5", 2)
 		with patch.object(bot, "handle_roll", new=AsyncMock()) as handle_roll:
-			await bot.disadvantage.callback(
-				cast(discord.Interaction, interaction), bonus=-2, repeat=1
-			)
+			callback = cast(Any, bot.disadvantage.callback)
+			await callback(cast(discord.Interaction, interaction), bonus=-2, repeat=1)
 			handle_roll.assert_awaited_once_with(interaction, "-d20-2", 1)
 
 	async def test_quick_roll_delegates_to_d20(self):
 		interaction = FakeInteraction()
 		with patch.object(bot, "handle_roll", new=AsyncMock()) as handle_roll:
-			await bot.quick_roll.callback(cast(discord.Interaction, interaction))
+			callback = cast(Any, bot.quick_roll.callback)
+			await callback(cast(discord.Interaction, interaction))
 			handle_roll.assert_awaited_once_with(interaction, "d20", 1)
 
 	async def test_successful_roll_defers_and_sends_formatted_result(self):
