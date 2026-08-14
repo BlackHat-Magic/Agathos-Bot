@@ -64,8 +64,20 @@ def escape_display_text(value: object) -> str:
 
 
 def format_result(value: object) -> str:
+	return _format_result(value, bold_total=True)
+
+
+def _format_result(value: object, *, bold_total: bool) -> str:
+	if isinstance(value, list):
+		return (
+			"["
+			+ ", ".join(_format_result(item, bold_total=False) for item in value)
+			+ "]"
+		)
+
 	if not isinstance(value, RollResult):
-		return f"**{escape_display_text(value)}**"
+		text = escape_display_text(value)
+		return f"**{text}**" if bold_total else text
 
 	active_values: list[str] = []
 	dropped_values: list[str] = []
@@ -76,14 +88,17 @@ def format_result(value: object) -> str:
 		dropped_values.extend(f"~~{item}~~" for item in detail.dropped)
 
 	if not active_values and not dropped_values:
-		return f"**{value.total}**"
+		return _format_result(value.total, bold_total=bold_total)
 	active = ", ".join(active_values)
 	dropped = " ".join(dropped_values)
 	body = active
 	if active and dropped:
 		body += " "
 	body += dropped
-	return f"[{body}] = **{value.total}**"
+	total = escape_display_text(value.total)
+	if bold_total:
+		total = f"**{total}**"
+	return f"[{body}] = {total}"
 
 
 def bonus_expression(base: str, bonus: int) -> str:

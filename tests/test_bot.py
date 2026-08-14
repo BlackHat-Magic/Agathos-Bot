@@ -58,6 +58,22 @@ class BotHelperTests(unittest.TestCase):
 	def test_format_result_shows_scalar_as_bold_total(self):
 		self.assertEqual(bot.format_result(3), "**3**")
 
+	def test_format_result_formats_array_elements_without_bold_markup(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("+d20")
+
+		formatted = bot.format_result([result, 3])
+
+		self.assertEqual(formatted, "[[14 ~~13~~] = 14, 3]")
+		self.assertNotIn("RollResult(", formatted)
+		self.assertNotIn("DieRollDetail(", formatted)
+
+	def test_format_result_formats_scalar_and_nested_arrays(self):
+		self.assertEqual(bot.format_result([1, 2, 3]), "[1, 2, 3]")
+		self.assertEqual(
+			bot.format_result([[1, 2], [3]]),
+			"[[1, 2], [3]]",
+		)
+
 	def test_format_result_escapes_scalar_discord_markup(self):
 		formatted = bot.format_result("** @everyone `hello`")
 
@@ -77,6 +93,23 @@ class BotHelperTests(unittest.TestCase):
 			response,
 			"<@123> rolled `d20`:\n1. [13] = **13**\n2. [5] = **5**",
 		)
+
+	def test_build_roll_response_formats_repeated_array_results(self):
+		first = Interpreter(rng=random.Random(0)).execute_source("d20")
+		second = Interpreter(rng=random.Random(1)).execute_source("d20")
+
+		response = bot.build_roll_response(
+			123,
+			"d20",
+			[[first, 3], [second, 4]],
+		)
+
+		self.assertEqual(
+			response,
+			"<@123> rolled `d20`:\n1. [[13] = 13, 3]\n2. [[5] = 5, 4]",
+		)
+		self.assertNotIn("RollResult(", response)
+		self.assertNotIn("DieRollDetail(", response)
 
 	def test_build_roll_response_omits_number_for_single_roll(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("d20")
