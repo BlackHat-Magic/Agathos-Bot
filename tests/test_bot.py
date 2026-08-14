@@ -182,6 +182,7 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 class BotStartupTests(unittest.TestCase):
 	def test_main_rejects_missing_token(self):
 		with (
+			patch.object(bot, "load_dotenv"),
 			patch.dict("os.environ", {}, clear=True),
 			self.assertRaisesRegex(RuntimeError, "DISCORD_CLIENT_TOKEN"),
 		):
@@ -189,6 +190,7 @@ class BotStartupTests(unittest.TestCase):
 
 	def test_main_runs_client_with_configured_token(self):
 		with (
+			patch.object(bot, "load_dotenv"),
 			patch.dict("os.environ", {"DISCORD_CLIENT_TOKEN": "secret"}),
 			patch.object(bot.client, "run") as run,
 		):
