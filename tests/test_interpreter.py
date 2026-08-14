@@ -606,7 +606,7 @@ class InterpreterTests(unittest.TestCase):
 			RollCompositionDetail(operation="+", left=14, right=5, result=19),
 		)
 
-	def test_advantage_detail_works_with_following_dice_modifier(self):
+	def test_unary_plus_on_modified_d20_remains_ordinary(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("+d20m20")
 		self.assertIsInstance(result, RollResult)
 		assert isinstance(result, RollResult)
@@ -615,8 +615,12 @@ class InterpreterTests(unittest.TestCase):
 		assert isinstance(detail, DieRollDetail)
 
 		self.assertEqual(result.total, 20)
-		self.assertEqual(detail.dropped, (13,))
-		self.assertEqual(detail.clamped, (((14, 20),),))
+		self.assertEqual(detail.dropped, ())
+		self.assertEqual(detail.clamped, (((13, 20),),))
+		self.assertEqual(
+			result.details[-1],
+			RollCompositionDetail(operation="+", left=20, right=0, result=20),
+		)
 
 	def test_advantage_is_not_reapplied_to_a_second_unary_operator(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("++d20")
