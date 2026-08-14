@@ -1,8 +1,10 @@
 import inspect
 import random
 import unittest
+from typing import cast
 from unittest.mock import AsyncMock, patch
 
+import discord
 import bot
 from language.interpreter import Interpreter, RollResult
 
@@ -47,30 +49,56 @@ class BotHelperTests(unittest.TestCase):
 			bot.evaluate_rolls("cheat", 1)
 
 
-class FakeInteraction:
+class FakeUser:
+	id: int
+
+	def __init__(self, user_id: int):
+		self.id = user_id
+
+
+class FakeResponse:
 	def __init__(self):
-		self.user = type("User", (), {"id": 123})()
-		self.response = type("Response", (), {})()
-		self.response.defer = AsyncMock()
-		self.response.send_message = AsyncMock()
-		self.followup = type("Followup", (), {})()
-		self.followup.send = AsyncMock()
+		self.defer: AsyncMock = AsyncMock()
+		self.send_message: AsyncMock = AsyncMock()
+
+
+class FakeFollowup:
+	def __init__(self):
+		self.send: AsyncMock = AsyncMock()
+
+
+class FakeInteraction:
+	user: FakeUser
+	response: FakeResponse
+	followup: FakeFollowup
+
+	def __init__(self):
+		self.user = FakeUser(123)
+		self.response = FakeResponse()
+		self.followup = FakeFollowup()
 
 
 class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 	async def test_convenience_commands_build_interpreter_expressions(self):
 		interaction = FakeInteraction()
 		with patch.object(bot, "handle_roll", new=AsyncMock()) as handle_roll:
-			await bot.advantage.callback(interaction, bonus=5, repeat=2)
+			await bot.advantage.callback(
+				cast(discord.Interaction, interaction), bonus=5, repeat=2
+			)
 			handle_roll.assert_awaited_once_with(interaction, "+d20+5", 2)
 		with patch.object(bot, "handle_roll", new=AsyncMock()) as handle_roll:
-			await bot.disadvantage.callback(interaction, bonus=-2, repeat=1)
+			await bot.disadvantage.callback(
+				cast(discord.Interaction, interaction), bonus=-2, repeat=1
+			)
 			handle_roll.assert_awaited_once_with(interaction, "-d20-2", 1)
 
 	async def test_successful_roll_defers_and_sends_formatted_result(self):
 		interaction = FakeInteraction()
 		await bot.handle_roll(
-			interaction, "d20", 1, interpreter=Interpreter(rng=random.Random(0))
+			cast(discord.Interaction, interaction),
+			"d20",
+			1,
+			interpreter=Interpreter(rng=random.Random(0)),
 		)
 		interaction.response.defer.assert_awaited_once_with()
 		interaction.followup.send.assert_awaited_once()
@@ -79,7 +107,7 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 
 	async def test_expected_roll_error_is_ephemeral_after_deferral(self):
 		interaction = FakeInteraction()
-		await bot.handle_roll(interaction, "1 / 0", 1)
+		await bot.handle_roll(cast(discord.Interaction, interaction), "1 / 0", 1)
 		interaction.response.defer.assert_awaited_once_with()
 		interaction.followup.send.assert_awaited_once()
 		self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
@@ -87,22 +115,26 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 
 	async def test_invalid_repeat_is_rejected_before_deferral(self):
 		interaction = FakeInteraction()
-		await bot.handle_roll(interaction, "d20", 0)
+		await bot.handle_roll(cast(discord.Interaction, interaction), "d20", 0)
 		interaction.response.send_message.assert_awaited_once()
-		self.assertTrue(interaction.response.send_message.await_args.kwargs["ephemeral"])
+		self.assertTrue(
+			interaction.response.send_message.await_args.kwargs["ephemeral"]
+		)
 		interaction.response.defer.assert_not_awaited()
 
 
 class BotStartupTests(unittest.TestCase):
 	def test_main_rejects_missing_token(self):
-		with patch.dict("os.environ", {}, clear=True), self.assertRaisesRegex(
-			RuntimeError, "DISCORD_CLIENT_TOKEN"
+		with (
+			patch.dict("os.environ", {}, clear=True),
+			self.assertRaisesRegex(RuntimeError, "DISCORD_CLIENT_TOKEN"),
 		):
 			bot.main()
 
 	def test_main_runs_client_with_configured_token(self):
-		with patch.dict("os.environ", {"DISCORD_CLIENT_TOKEN": "secret"}), patch.object(
-			bot.client, "run"
-		) as run:
+		with (
+			patch.dict("os.environ", {"DISCORD_CLIENT_TOKEN": "secret"}),
+			patch.object(bot.client, "run") as run,
+		):
 			bot.main()
 		run.assert_called_once_with("secret")
