@@ -917,6 +917,43 @@ class Interpreter:
 			d20_eligible=False,
 		)
 
+	def _apply_d20_mode(self, result: RollResult, keep_high: bool) -> RollResult:
+		if not result.d20_eligible:
+			raise InvalidOperationError("roll result is not an eligible d20")
+		if len(result.details) != 1 or not isinstance(result.details[0], DieRollDetail):
+			raise InvalidOperationError("eligible d20 has invalid details")
+
+		initial_detail = result.details[0]
+		if len(initial_detail.values) != 1:
+			raise InvalidOperationError("eligible d20 must contain one die")
+		initial_value = initial_detail.values[0]
+		additional_detail = self._roll_dice(1, 20)
+		additional_value = additional_detail.values[0]
+		kept, dropped = (
+			(
+				max(initial_value, additional_value),
+				min(initial_value, additional_value),
+			)
+			if keep_high
+			else (
+				min(initial_value, additional_value),
+				max(initial_value, additional_value),
+			)
+		)
+		return RollResult(
+			total=kept,
+			details=(
+				DieRollDetail(
+					sides=20,
+					rolls=(kept,),
+					rerolls=((),),
+					dropped=(dropped,),
+					values=(kept,),
+				),
+			),
+			d20_eligible=False,
+		)
+
 	def _evaluate_unary(self, expression: Unary, environment: RuntimeEnv) -> object:
 		operation = expression.operation
 		if not isinstance(operation, UnaryOp):
@@ -946,6 +983,10 @@ class Interpreter:
 				raise InvalidOperationError("bitwise not requires an integer operand")
 			return self._combine_unary(value, ~numeric, operation.value)
 		if operation in (UnaryOp.POSITIVE, UnaryOp.NEGATIVE):
+			if isinstance(value, RollResult) and value.d20_eligible:
+				return self._apply_d20_mode(
+					value, keep_high=operation == UnaryOp.POSITIVE
+				)
 			numeric = self._numeric(value)
 			total = +numeric if operation == UnaryOp.POSITIVE else -numeric
 			return self._combine_unary(value, total, operation.value)
