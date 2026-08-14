@@ -3,7 +3,12 @@ import os
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from language.interpreter import Interpreter, RollResult, RuntimeErrorBase
+from language.interpreter import (
+	DieRollDetail,
+	Interpreter,
+	RollResult,
+	RuntimeErrorBase,
+)
 
 
 MAX_REPETITIONS = 20
@@ -54,9 +59,26 @@ def evaluate_rolls(
 
 
 def format_result(value: object) -> str:
-	if isinstance(value, RollResult):
-		return value.format()
-	return str(value)
+	if not isinstance(value, RollResult):
+		return f"**{value}**"
+
+	active_values: list[str] = []
+	dropped_values: list[str] = []
+	for detail in value.details:
+		if not isinstance(detail, DieRollDetail):
+			continue
+		active_values.extend(str(item) for item in detail.values)
+		dropped_values.extend(f"~~{item}~~" for item in detail.dropped)
+
+	if not active_values and not dropped_values:
+		return f"**{value.total}**"
+	active = ", ".join(active_values)
+	dropped = " ".join(dropped_values)
+	body = active
+	if active and dropped:
+		body += " "
+	body += dropped
+	return f"[{body}] = **{value.total}**"
 
 
 def bonus_expression(base: str, bonus: int) -> str:
@@ -64,9 +86,15 @@ def bonus_expression(base: str, bonus: int) -> str:
 
 
 def build_roll_response(user_id: int, expression: str, results: list[object]) -> str:
-	lines = [f"<@{user_id}> Rolled: `[{expression}]`"]
-	for index, result in enumerate(results, start=1):
-		lines.append(f"Roll {index}: `{format_result(result)}`")
+	lines = [f"<@{user_id}> rolled `{expression}`:"]
+	formatted_results = [format_result(result) for result in results]
+	if len(formatted_results) == 1:
+		lines.append(formatted_results[0])
+	else:
+		lines.extend(
+			f"{index}. {result}"
+			for index, result in enumerate(formatted_results, start=1)
+		)
 	response = "\n".join(lines)
 	if len(response) > DISCORD_MESSAGE_LIMIT:
 		raise ValueError("result exceeds Discord's message length limit")
