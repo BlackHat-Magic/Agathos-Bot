@@ -405,6 +405,10 @@ class Parser:
 	# Validate operand types for a non-assignment binary op and return the
 	# result type (a raw python type for primitives, bool for comparisons, the
 	# array/function type for those -- though no ops currently apply to those).
+	@staticmethod
+	def _is_numeric_type(dtype: DataType) -> bool:
+		return dtype is int or dtype is float
+
 	def _binary_result_type(
 		self, op: BinaryOp, left: DataType, right: DataType
 	) -> DataType:
@@ -432,13 +436,9 @@ class Parser:
 				| BinaryOp.ADD
 				| BinaryOp.SUBTRACT
 			):
-				if (
-					(left is not int and left is not float)
-					or (right is not int and right is not float)
-					or (left is not right)
-				):
+				if not self._is_numeric_type(left) or not self._is_numeric_type(right):
 					raise TypeError  # TODO: better error handling
-				return left
+				return float if left is float or right is float else int
 			case BinaryOp.DIVIDE:
 				if (left is not int and left is not float) or (
 					right is not int and right is not float
@@ -455,7 +455,9 @@ class Parser:
 				| BinaryOp.GREATER_THAN
 				| BinaryOp.GREATER_THAN_EQUAL
 			):
-				if left != right or not isinstance(left, type):
+				if not (
+					self._is_numeric_type(left) and self._is_numeric_type(right)
+				) and (left != right or not isinstance(left, type)):
 					raise TypeError  # TODO: better error handling
 				return bool
 			case BinaryOp.IN:
@@ -463,7 +465,9 @@ class Parser:
 					raise TypeError  # TODO: better error handling
 				return bool
 			case BinaryOp.EQUAL | BinaryOp.NOT_EQUAL:
-				if left != right:
+				if left != right and not (
+					self._is_numeric_type(left) and self._is_numeric_type(right)
+				):
 					raise TypeError  # TODO: better error handling
 				return bool
 			case BinaryOp.BITWISE_AND | BinaryOp.BITWISE_XOR | BinaryOp.BITWISE_OR:
