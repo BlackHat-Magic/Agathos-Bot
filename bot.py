@@ -1,9 +1,15 @@
-from dotenv import load_dotenv
-from discord.ext import commands
-import discord
 import os
-import re
-import random
+
+import discord
+from discord.ext import commands
+from dotenv import load_dotenv
+from language.interpreter import Interpreter, RollResult, RuntimeErrorBase
+
+
+MAX_REPETITIONS = 20
+DISCORD_MESSAGE_LIMIT = 2000
+EXPECTED_ROLL_ERRORS = (SyntaxError, TypeError, NameError, ValueError, RuntimeErrorBase)
+
 
 load_dotenv()
 
@@ -23,212 +29,97 @@ async def on_ready():
 		print(e)
 
 
-@client.tree.command(name="r", description="quickly roll a d20")
-async def quick_roll(interaction: discord.Interaction):
-	await interaction.response.send_message(
-		f"<@{interaction.user.id}> rolled a `[{random.randint(1, 20)}]`."
-	)
+def validate_repeat(repeat: int) -> None:
+	if isinstance(repeat, bool) or not isinstance(repeat, int):
+		raise ValueError("repeat must be an integer")
+	if not 1 <= repeat <= MAX_REPETITIONS:
+		raise ValueError(f"repeat must be between 1 and {MAX_REPETITIONS}")
 
 
-@client.tree.command(name="roll", description="roll a die")
-async def roll(
+def evaluate_rolls(
+	expression: str,
+	repeat: int,
+	*,
+	interpreter: Interpreter | None = None,
+) -> list[object]:
+	validate_repeat(repeat)
+	source = expression.strip() or "d20"
+	evaluator = interpreter or Interpreter()
+	return [evaluator.execute_source(source) for _ in range(repeat)]
+
+
+def format_result(value: object) -> str:
+	if isinstance(value, RollResult):
+		return value.format()
+	return str(value)
+
+
+def bonus_expression(base: str, bonus: int) -> str:
+	return f"{base}{bonus:+d}" if bonus else base
+
+
+def build_roll_response(user_id: int, expression: str, results: list[object]) -> str:
+	lines = [f"<@{user_id}> Rolled: `[{expression}]`"]
+	for index, result in enumerate(results, start=1):
+		lines.append(f"Roll {index}: `{format_result(result)}`")
+	response = "\n".join(lines)
+	if len(response) > DISCORD_MESSAGE_LIMIT:
+		raise ValueError("result exceeds Discord's message length limit")
+	return response
+
+
+async def handle_roll(
 	interaction: discord.Interaction,
 	expression: str,
-	repeat: int = 1,
-	reroll_below: int = 1,
-	drop_lowest: int = 0,
-	advantage_disadvantage: str = "",
-):
-	if repeat > 20:
-		await interaction.response.send_message(
-			"Too many repetitions (max 20)", ephemeral=True
-		)
-		return
-	response = ""
-	cheat = False
-	badcheat = False
-	if "badcheat" in expression:
-		expression = expression.replace("badcheat", "")
-		response = "# Why would you do that...?\n\n" + response
-		badcheat = True
-	if "cheat" in expression:
-		expression = expression.replace("cheat", "")
-		response = "# CHEATER CHEATER 🎃🍴\n\n" + response
-		cheat = True
-	if expression == "":
-		expression = "d20"
-	response += f"<@{interaction.user.id}> Rolled: `[{expression}]`"
-
-	adv_check = re.fullmatch(r"\+d20([+-]\d+)", expression)
-	dis_check = re.fullmatch(r"\-d20([+-]\d+)", expression)
-
-	if bool(adv_check):
-		bonus = int(adv_check.group(1))
-		for i in range(repeat):
-			results = [random.randint(1, 20) for i in range(2)]
-			response += f"\nRoll: `{results}` Result: {max(results) + bonus}"
-		await interaction.response.send_message(response)
-		return
-	elif bool(dis_check):
-		bonus = int(dis_check.group(1))
-		for i in range(repeat):
-			results = [random.randint(1, 20) for i in range(2)]
-			response += f"\nRoll: `{results}` Result: {min(results) + bonus}"
-		await interaction.response.send_message(response)
+	repeat: int,
+	*,
+	interpreter: Interpreter | None = None,
+) -> None:
+	try:
+		validate_repeat(repeat)
+	except ValueError as error:
+		await interaction.response.send_message(f"Error: {error}", ephemeral=True)
 		return
 
 	await interaction.response.defer()
-
-	expression = expression.replace("+d", "+1d")
-	expressions = re.findall(r"([-+]?\d*d[-+]?\d+|[-+]?\d+)", expression)
-
-	dropped = []
-
-	for i in range(repeat):
-		total = 0
-		drop = drop_lowest
-
-		all_results = ""
-		dropped = []
-
-		for expression in expressions:
-			if "d" in expression:
-				match = expression.split("d")
-
-				num_dice = 1
-				num_dice = match[0]
-				if num_dice == "":
-					num_dice = 1
-				else:
-					num_dice = int(num_dice)
-				num_sides = int(match[1])
-				if num_sides < 1:
-					await interaction.followup.send(
-						"Cannot roll die with fewer than one side.", ephemeral=True
-					)
-					return
-				if int(num_dice) > 500:
-					await interaction.followup.send(
-						"Too many dice (max 500)", ephemeral=True
-					)
-					return
-				if num_dice < 0:
-					num_dice *= -1
-					subtract = True
-				else:
-					subtract = False
-
-				die_results = []
-
-				for i in range(num_dice):
-					if cheat:
-						die_result = num_sides
-					elif badcheat:
-						die_result = 1
-					else:
-						if num_sides == 20 and advantage_disadvantage != "":
-							die_result = [random.randint(1, 20), random.randint(1, 20)]
-						else:
-							die_result = random.randint(1, num_sides)
-					if isinstance(die_result, int):
-						while die_result < reroll_below:
-							if reroll_below > num_sides:
-								break
-							die_result = random.randint(1, num_sides)
-					else:
-						for result in die_result:
-							while result < reroll_below:
-								if reroll_below > num_sides:
-									break
-								result = random.randint(1, num_sides)
-					die_results.append(die_result)
-
-				while drop > 0 and len(die_results) > 0:
-					dropped.append(min(die_results))
-					die_results.remove(min(die_results))
-					drop -= 1
-
-				for result in die_results:
-					if isinstance(result, list):
-						if advantage_disadvantage in [
-							"d",
-							"dis",
-							"disadv",
-							"disadvantage",
-						]:
-							if subtract:
-								total -= min(result)
-							else:
-								total += min(result)
-							dropped.append(max(result))
-						else:
-							if subtract:
-								total -= max(result)
-							else:
-								total += max(result)
-							dropped.append(min(result))
-					else:
-						if subtract:
-							total -= result
-						else:
-							total += result
-
-				all_results += str(die_results)
-			else:
-				total += int(expression)
-
-		if len(all_results) < 1:
-			await interaction.followup.send("Invalid expression.", ephemeral=True)
-			return
-
-		response += f"\nRoll: `{all_results}` Result: `{total}`"
-		if dropped != []:
-			response += f"; Dropped: `{dropped}`"
-
-	if len(response) > 2000:
-		await interaction.followup.send(
-			"Resulting expression was too long (exceeds Discord's message length limit). Try rolling fewer dice or rolling with fewer repetitions.",
-			ephemeral=True,
+	try:
+		results = evaluate_rolls(expression, repeat, interpreter=interpreter)
+		response = build_roll_response(
+			interaction.user.id,
+			expression.strip() or "d20",
+			results,
 		)
+	except EXPECTED_ROLL_ERRORS as error:
+		await interaction.followup.send(f"Error: {error}", ephemeral=True)
 		return
 
 	await interaction.followup.send(response)
 
 
+@client.tree.command(name="r", description="quickly roll a d20")
+async def quick_roll(interaction: discord.Interaction):
+	await handle_roll(interaction, "d20", 1)
+
+
+@client.tree.command(name="roll", description="evaluate a dice expression")
+async def roll(
+	interaction: discord.Interaction,
+	expression: str,
+	repeat: int = 1,
+):
+	await handle_roll(interaction, expression, repeat)
+
+
 @client.tree.command(name="advantage", description="roll a d20 with advantage")
 async def advantage(interaction: discord.Interaction, bonus: int = 0, repeat: int = 1):
-	if repeat > 20:
-		await interaction.response.send_message(
-			"Too many repetitions (max 20)", ephemeral=True
-		)
-		return
-
-	response = f"<@{interaction.user.id}> Rolled 1d20{'+' + str(bonus) if bonus > 0 else bonus if bonus < 0 else ''} with advantage."
-
-	for i in range(repeat):
-		results = [random.randint(1, 20) for i in range(2)]
-		response += f"\nRoll: `{results}` Result: {max(results) + bonus}"
-
-	await interaction.response.send_message(response)
+	await handle_roll(interaction, bonus_expression("+d20", bonus), repeat)
 
 
 @client.tree.command(name="disadvantage", description="roll a d20 with disadvantage")
 async def disadvantage(
 	interaction: discord.Interaction, bonus: int = 0, repeat: int = 1
 ):
-	if repeat > 20:
-		await interaction.response.send_message(
-			"Too many repetitions (max 20)", ephemeral=True
-		)
-		return
-
-	response = f"<@{interaction.user.id}> Rolled 1d20{'+' + str(bonus) if bonus > 0 else bonus if bonus < 0 else ''} with disadvantage."
-
-	for i in range(repeat):
-		results = [random.randint(1, 20) for i in range(2)]
-		response += f"\nRoll: `{results}` Result: {min(results) + bonus}"
-
-	await interaction.response.send_message(response)
+	await handle_roll(interaction, bonus_expression("-d20", bonus), repeat)
 
 
 token = os.getenv("DISCORD_CLIENT_TOKEN")
