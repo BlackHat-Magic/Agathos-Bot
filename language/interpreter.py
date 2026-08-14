@@ -204,10 +204,17 @@ class RollResult:
 
 	total: int | float
 	details: tuple[object, ...]
+	d20_eligible: bool
 
-	def __init__(self, total: int | float, details: Iterable[object]) -> None:
+	def __init__(
+		self,
+		total: int | float,
+		details: Iterable[object],
+		d20_eligible: bool = False,
+	) -> None:
 		object.__setattr__(self, "total", total)
 		object.__setattr__(self, "details", tuple(details))
+		object.__setattr__(self, "d20_eligible", d20_eligible)
 
 	def format(self) -> str:
 		"""Return deterministic text containing the total and all details."""
@@ -855,7 +862,11 @@ class Interpreter:
 				)
 			)
 
-		return RollResult(total=left.total + total_delta, details=new_details)
+		return RollResult(
+			total=left.total + total_delta,
+			details=new_details,
+			d20_eligible=False,
+		)
 
 	def _combine_result(
 		self,
@@ -881,7 +892,11 @@ class Interpreter:
 				result=total,
 			)
 		)
-		return RollResult(total=total, details=tuple(details))
+		return RollResult(
+			total=total,
+			details=tuple(details),
+			d20_eligible=False,
+		)
 
 	def _combine_unary(
 		self, value: object, total: int | float, operation: str
@@ -899,6 +914,7 @@ class Interpreter:
 					result=total,
 				),
 			),
+			d20_eligible=False,
 		)
 
 	def _evaluate_unary(self, expression: Unary, environment: RuntimeEnv) -> object:
@@ -973,6 +989,7 @@ class Interpreter:
 			return RollResult(
 				total=sum(detail.values),
 				details=(detail,) if count or parent_details else (),
+				d20_eligible=(count == 1 and sides == 20 and not parent_details),
 			)
 
 		if operation in (
