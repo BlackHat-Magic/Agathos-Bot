@@ -1561,6 +1561,10 @@ class LanguageTests(unittest.TestCase):
 		self.assertIsInstance(cast(Unary, expression.left).operand, Binary)
 		self.assertEqual(expression.right, Int(5))
 
+	def test_increment_does_not_become_nested_dice_unary(self):
+		with self.assertRaises((SyntaxError, TypeError)):
+			Parser(tokenize("++d20")).parse_program()
+
 	def test_unterminated_strings_raise_syntax_error(self):
 		with self.assertRaises(SyntaxError):
 			tokenize('"unterminated')

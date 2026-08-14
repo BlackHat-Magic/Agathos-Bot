@@ -1008,25 +1008,6 @@ class Parser:
 			op = UnaryOp(peeked.type)
 			self._advance()
 			peeked = self._peek()
-			if op in (UnaryOp.INCREMENT, UnaryOp.DECREMENT) and (
-				peeked is not None and peeked.type == TokenType.DIE_ROLL
-			):
-				sign = UnaryOp.POSITIVE if op == UnaryOp.INCREMENT else UnaryOp.NEGATIVE
-				dice = self._parse_die_mod(dtype)
-				inner = Unary(
-					type="unary",
-					dtype=dice.dtype,
-					operation=sign,
-					operand=dice,
-					operator_loc="before",
-				)
-				return Unary(
-					type="unary",
-					dtype=inner.dtype,
-					operation=sign,
-					operand=inner,
-					operator_loc="before",
-				)
 			if dtype is _NO_EXPECTED_TYPE and op == UnaryOp.LOGICAL_NOT:
 				dtype = bool
 			operand = self._parse_unary(dtype)
