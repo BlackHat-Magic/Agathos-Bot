@@ -32,10 +32,43 @@ class BotHelperTests(unittest.TestCase):
 			with self.subTest(repeat=repeat), self.assertRaises(ValueError):
 				bot.validate_repeat(repeat)
 
-	def test_format_result_uses_roll_result_details(self):
+	def test_format_result_uses_compact_dice_values_and_total(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("+d20")
-		self.assertIn("total=14", bot.format_result(result))
-		self.assertIn("dropped=(13,)", bot.format_result(result))
+
+		formatted = bot.format_result(result)
+
+		self.assertEqual(formatted, "[14 ~~13~~] = **14**")
+		self.assertNotIn("total=", formatted)
+		self.assertNotIn("rerolls=", formatted)
+		self.assertNotIn("clamped=", formatted)
+
+	def test_format_result_shows_active_multiple_dice(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("3d6")
+		self.assertEqual(bot.format_result(result), "[4, 4, 1] = **9**")
+
+	def test_format_result_shows_scalar_as_bold_total(self):
+		self.assertEqual(bot.format_result(3), "**3**")
+
+	def test_build_roll_response_uses_one_header_and_compact_lines(self):
+		results = [
+			Interpreter(rng=random.Random(0)).execute_source("d20"),
+			Interpreter(rng=random.Random(1)).execute_source("d20"),
+		]
+
+		response = bot.build_roll_response(123, "d20", results)
+
+		self.assertEqual(
+			response,
+			"<@123> rolled `d20`:\n1. [13] = **13**\n2. [5] = **5**",
+		)
+
+	def test_build_roll_response_omits_number_for_single_roll(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("d20")
+
+		self.assertEqual(
+			bot.build_roll_response(123, "d20", [result]),
+			"<@123> rolled `d20`:\n[13] = **13**",
+		)
 
 	def test_bonus_expression_builder_uses_interpreter_syntax(self):
 		self.assertEqual(bot.bonus_expression("+d20", 0), "+d20")
@@ -111,7 +144,8 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 		interaction.followup.send.assert_awaited_once()
 		assert interaction.followup.send.await_args is not None
 		message = interaction.followup.send.await_args.args[0]
-		self.assertIn("total=13", message)
+		self.assertIn("[13] = **13**", message)
+		self.assertNotIn("total=", message)
 
 	async def test_expected_roll_error_is_ephemeral_after_deferral(self):
 		interaction = FakeInteraction()
