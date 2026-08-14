@@ -550,6 +550,87 @@ class InterpreterTests(unittest.TestCase):
 		self.assertEqual(interpreter.execute_source("+5"), 5)
 		self.assertEqual(interpreter.execute_source("-5"), -5)
 
+	def test_unary_plus_applies_advantage_to_a_plain_d20(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("+d20")
+
+		self.assertEqual(result.total, 14)
+		self.assertEqual(
+			result.details,
+			(
+				DieRollDetail(
+					sides=20,
+					rolls=(14,),
+					rerolls=((),),
+					dropped=(13,),
+					values=(14,),
+				),
+			),
+		)
+
+	def test_unary_minus_applies_disadvantage_to_a_plain_d20(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("-d20")
+
+		self.assertEqual(result.total, 13)
+		self.assertEqual(result.details[0].dropped, (14,))
+
+	def test_unary_advantage_accepts_explicit_one_d20_spelling(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("+1d20")
+
+		self.assertEqual(result.total, 14)
+		self.assertEqual(result.details[0].dropped, (13,))
+
+	def test_advantage_is_applied_before_following_arithmetic(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("+d20 + 5")
+
+		self.assertEqual(result.total, 19)
+		self.assertEqual(result.details[0].dropped, (13,))
+		self.assertEqual(
+			result.details[1],
+			RollCompositionDetail(operation="+", left=14, right=5, result=19),
+		)
+
+	def test_advantage_detail_works_with_following_dice_modifier(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("+d20m20")
+
+		self.assertEqual(result.total, 20)
+		self.assertEqual(result.details[0].dropped, (13,))
+		self.assertEqual(result.details[0].clamped, (((14, 20),),))
+
+	def test_advantage_is_not_reapplied_to_a_second_unary_operator(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("++d20")
+
+		self.assertEqual(result.total, 14)
+		self.assertEqual(result.details[0].dropped, (13,))
+		self.assertEqual(
+			result.details[-1],
+			RollCompositionDetail(operation="+", left=14, right=0, result=14),
+		)
+
+	def test_unary_signs_remain_ordinary_outside_plain_single_d20(self):
+		for source, expected in (
+			("+d6", 4),
+			("-d6", -4),
+			("+2d20", 27),
+			("-2d20", -27),
+		):
+			with self.subTest(source=source):
+				result = Interpreter(rng=random.Random(0)).execute_source(source)
+				self.assertEqual(result.total, expected)
+
+		for source, expected in (("+5", 5), ("-5", -5)):
+			with self.subTest(source=source):
+				self.assertEqual(Interpreter().execute_source(source), expected)
+
+	def test_grouped_composed_roll_is_not_advantaged(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("+(d20 + 5)")
+
+		self.assertEqual(result.total, 18)
+		self.assertEqual(result.details[0].rolls, (13,))
+		self.assertEqual(
+			result.details[-1],
+			RollCompositionDetail(operation="+", left=18, right=0, result=18),
+		)
+
 	def test_arithmetic_shift_bitwise_and_logical_operations(self):
 		for source, expected in (
 			("1 + 2", 3),
