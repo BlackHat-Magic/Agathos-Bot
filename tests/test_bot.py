@@ -92,6 +92,12 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 			)
 			handle_roll.assert_awaited_once_with(interaction, "-d20-2", 1)
 
+	async def test_quick_roll_delegates_to_d20(self):
+		interaction = FakeInteraction()
+		with patch.object(bot, "handle_roll", new=AsyncMock()) as handle_roll:
+			await bot.quick_roll.callback(cast(discord.Interaction, interaction))
+			handle_roll.assert_awaited_once_with(interaction, "d20", 1)
+
 	async def test_successful_roll_defers_and_sends_formatted_result(self):
 		interaction = FakeInteraction()
 		await bot.handle_roll(
@@ -102,6 +108,7 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 		)
 		interaction.response.defer.assert_awaited_once_with()
 		interaction.followup.send.assert_awaited_once()
+		assert interaction.followup.send.await_args is not None
 		message = interaction.followup.send.await_args.args[0]
 		self.assertIn("total=13", message)
 
@@ -110,6 +117,7 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 		await bot.handle_roll(cast(discord.Interaction, interaction), "1 / 0", 1)
 		interaction.response.defer.assert_awaited_once_with()
 		interaction.followup.send.assert_awaited_once()
+		assert interaction.followup.send.await_args is not None
 		self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
 		self.assertIn("Error:", interaction.followup.send.await_args.args[0])
 
@@ -117,6 +125,7 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 		interaction = FakeInteraction()
 		await bot.handle_roll(cast(discord.Interaction, interaction), "d20", 0)
 		interaction.response.send_message.assert_awaited_once()
+		assert interaction.response.send_message.await_args is not None
 		self.assertTrue(
 			interaction.response.send_message.await_args.kwargs["ephemeral"]
 		)
