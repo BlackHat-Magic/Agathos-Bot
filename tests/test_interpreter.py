@@ -553,12 +553,18 @@ class InterpreterTests(unittest.TestCase):
 	def test_arithmetic_shift_bitwise_and_logical_operations(self):
 		for source, expected in (
 			("1 + 2", 3),
+			("1 + 2.0", 3.0),
 			("5 - 2", 3),
+			("2.0 - 1", 1.0),
 			("2 * 3", 6),
+			("2 * 3.0", 6.0),
 			("5 / 2", 2.5),
 			("5 // 2", 2),
+			("5 // 2.0", 2.0),
 			("5 % 2", 1),
+			("5.0 % 2", 1.0),
 			("2 ** 3", 8),
+			("2 ** 3.0", 8.0),
 			("1 << 3", 8),
 			("8 >> 2", 2),
 			("6 & 3", 2),
@@ -569,6 +575,31 @@ class InterpreterTests(unittest.TestCase):
 		):
 			with self.subTest(source=source):
 				self.assertEqual(Interpreter().execute_source(source), expected)
+
+	def test_mixed_numeric_comparisons_and_compound_assignments(self):
+		for source, expected in (
+			("1 < 1.0", True),
+			("1.0 <= 1", True),
+			("2 > 1.0", True),
+			("2.0 >= 2", True),
+			("1 == 1.0", True),
+			("1.0 != 2", True),
+			("value := 1.0; value += 2; value", 3.0),
+			("value := 5.0; value //= 2; value", 2.0),
+		):
+			with self.subTest(source=source):
+				self.assertEqual(Interpreter().execute_source(source), expected)
+
+	def test_mixed_numeric_roll_arithmetic_preserves_float_total_and_details(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("1d6 + 0.5")
+
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		self.assertEqual(result.total, 4.5)
+		self.assertEqual(
+			result.details[1],
+			RollCompositionDetail(operation="+", left=4, right=0.5, result=4.5),
+		)
 
 	def test_comparisons_equality_and_list_membership(self):
 		for source, expected in (

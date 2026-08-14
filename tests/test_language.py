@@ -1626,6 +1626,53 @@ class LanguageTests(unittest.TestCase):
 		self.assertEqual(expression.operation, BinaryOp.DIVIDE)
 		self.assertEqual(expression.dtype, float)
 
+	def test_mixed_numeric_arithmetic_promotes_to_float(self):
+		for source, operation in (
+			("1 + 2.0", BinaryOp.ADD),
+			("2.0 - 1", BinaryOp.SUBTRACT),
+			("2 * 3.0", BinaryOp.MULTIPLY),
+			("5 // 2.0", BinaryOp.FLOOR_DIVIDE),
+			("5.0 % 2", BinaryOp.MODULO),
+			("2 ** 3.0", BinaryOp.EXPONENT),
+		):
+			with self.subTest(source=source):
+				expression = cast(Binary, Parser(tokenize(source)).parse_program()[0])
+				self.assertEqual(expression.operation, operation)
+				self.assertIs(expression.dtype, float)
+
+	def test_mixed_numeric_comparisons_return_boolean(self):
+		for source in (
+			"1 < 1.0",
+			"1.0 <= 1",
+			"2 > 1.0",
+			"2.0 >= 2",
+			"1 == 1.0",
+			"1.0 != 2",
+		):
+			with self.subTest(source=source):
+				expression = cast(Binary, Parser(tokenize(source)).parse_program()[0])
+				self.assertIs(expression.dtype, bool)
+
+	def test_integer_only_operations_reject_float_operands(self):
+		for source in ("1.0 & 1", "1 << 1.0", "1.0d6"):
+			with self.subTest(source=source), self.assertRaises(TypeError):
+				Parser(tokenize(source)).parse_program()
+
+	def test_mixed_numeric_compound_assignments_follow_result_type(self):
+		for operator in ("+=", "-=", "*=", "/=", "//=", "%=", "**="):
+			with self.subTest(operator=operator):
+				expression = Parser(
+					tokenize(f"value := 1.0; value {operator} 2")
+				).parse_program()[1]
+				self.assertIs(cast(Binary, expression).dtype, float)
+
+		for operator in ("+=", "-=", "*=", "/=", "//=", "%=", "**="):
+			with self.subTest(operator=operator):
+				with self.assertRaises(TypeError):
+					Parser(
+						tokenize(f"value := 1; value {operator} 2.0")
+					).parse_program()
+
 	def test_floor_division_preserves_numeric_operand_type(self):
 		expression = cast(Binary, Parser(tokenize("1 // 2")).parse_program()[0])
 
