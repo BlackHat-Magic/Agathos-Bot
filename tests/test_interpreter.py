@@ -578,7 +578,7 @@ class InterpreterTests(unittest.TestCase):
 
 	def test_mixed_numeric_comparisons_and_compound_assignments(self):
 		for source, expected in (
-			("1 < 1.0", True),
+			("1 < 2.0", True),
 			("1.0 <= 1", True),
 			("2 > 1.0", True),
 			("2.0 >= 2", True),
