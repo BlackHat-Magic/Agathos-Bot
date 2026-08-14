@@ -8,7 +8,14 @@ from language.interpreter import Interpreter, RollResult, RuntimeErrorBase
 
 MAX_REPETITIONS = 20
 DISCORD_MESSAGE_LIMIT = 2000
-EXPECTED_ROLL_ERRORS = (SyntaxError, TypeError, NameError, ValueError, RuntimeErrorBase)
+EXPECTED_ROLL_ERRORS = (
+	SyntaxError,
+	TypeError,
+	NameError,
+	ValueError,
+	RecursionError,
+	RuntimeErrorBase,
+)
 
 
 load_dotenv()

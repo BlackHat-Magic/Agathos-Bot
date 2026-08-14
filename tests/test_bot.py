@@ -121,6 +121,18 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 		self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
 		self.assertIn("Error:", interaction.followup.send.await_args.args[0])
 
+	async def test_parser_recursion_error_is_ephemeral_after_deferral(self):
+		interaction = FakeInteraction()
+		expression = "(" * 100 + "1" + ")" * 100
+
+		await bot.handle_roll(cast(discord.Interaction, interaction), expression, 1)
+
+		interaction.response.defer.assert_awaited_once_with()
+		interaction.followup.send.assert_awaited_once()
+		assert interaction.followup.send.await_args is not None
+		self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
+		self.assertIn("Error:", interaction.followup.send.await_args.args[0])
+
 	async def test_invalid_repeat_is_rejected_before_deferral(self):
 		interaction = FakeInteraction()
 		await bot.handle_roll(cast(discord.Interaction, interaction), "d20", 0)
