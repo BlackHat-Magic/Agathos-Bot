@@ -46,6 +46,15 @@ class BotHelperTests(unittest.TestCase):
 		result = Interpreter(rng=random.Random(0)).execute_source("3d6")
 		self.assertEqual(bot.format_result(result), "[4, 4, 1] = **9**")
 
+	def test_format_result_omits_reroll_and_clamp_history(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("3d6b3m4")
+
+		formatted = bot.format_result(result)
+
+		self.assertEqual(formatted, "[4, 4, 4] = **12**")
+		self.assertNotIn("rerolls=", formatted)
+		self.assertNotIn("clamped=", formatted)
+
 	def test_format_result_shows_scalar_as_bold_total(self):
 		self.assertEqual(bot.format_result(3), "**3**")
 
@@ -143,9 +152,10 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 		interaction.response.defer.assert_awaited_once_with()
 		interaction.followup.send.assert_awaited_once()
 		assert interaction.followup.send.await_args is not None
-		message = interaction.followup.send.await_args.args[0]
-		self.assertIn("[13] = **13**", message)
-		self.assertNotIn("total=", message)
+		self.assertEqual(
+			interaction.followup.send.await_args.args[0],
+			"<@123> rolled `d20`:\n[13] = **13**",
+		)
 
 	async def test_expected_roll_error_is_ephemeral_after_deferral(self):
 		interaction = FakeInteraction()
