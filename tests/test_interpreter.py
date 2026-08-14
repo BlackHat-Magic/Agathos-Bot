@@ -552,6 +552,8 @@ class InterpreterTests(unittest.TestCase):
 
 	def test_unary_plus_applies_advantage_to_a_plain_d20(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("+d20")
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
 
 		self.assertEqual(result.total, 14)
 		self.assertEqual(
@@ -569,21 +571,36 @@ class InterpreterTests(unittest.TestCase):
 
 	def test_unary_minus_applies_disadvantage_to_a_plain_d20(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("-d20")
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		detail = result.details[0]
+		self.assertIsInstance(detail, DieRollDetail)
+		assert isinstance(detail, DieRollDetail)
 
 		self.assertEqual(result.total, 13)
-		self.assertEqual(result.details[0].dropped, (14,))
+		self.assertEqual(detail.dropped, (14,))
 
 	def test_unary_advantage_accepts_explicit_one_d20_spelling(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("+1d20")
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		detail = result.details[0]
+		self.assertIsInstance(detail, DieRollDetail)
+		assert isinstance(detail, DieRollDetail)
 
 		self.assertEqual(result.total, 14)
-		self.assertEqual(result.details[0].dropped, (13,))
+		self.assertEqual(detail.dropped, (13,))
 
 	def test_advantage_is_applied_before_following_arithmetic(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("+d20 + 5")
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		detail = result.details[0]
+		self.assertIsInstance(detail, DieRollDetail)
+		assert isinstance(detail, DieRollDetail)
 
 		self.assertEqual(result.total, 19)
-		self.assertEqual(result.details[0].dropped, (13,))
+		self.assertEqual(detail.dropped, (13,))
 		self.assertEqual(
 			result.details[1],
 			RollCompositionDetail(operation="+", left=14, right=5, result=19),
@@ -591,16 +608,26 @@ class InterpreterTests(unittest.TestCase):
 
 	def test_advantage_detail_works_with_following_dice_modifier(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("+d20m20")
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		detail = result.details[0]
+		self.assertIsInstance(detail, DieRollDetail)
+		assert isinstance(detail, DieRollDetail)
 
 		self.assertEqual(result.total, 20)
-		self.assertEqual(result.details[0].dropped, (13,))
-		self.assertEqual(result.details[0].clamped, (((14, 20),),))
+		self.assertEqual(detail.dropped, (13,))
+		self.assertEqual(detail.clamped, (((14, 20),),))
 
 	def test_advantage_is_not_reapplied_to_a_second_unary_operator(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("++d20")
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		detail = result.details[0]
+		self.assertIsInstance(detail, DieRollDetail)
+		assert isinstance(detail, DieRollDetail)
 
 		self.assertEqual(result.total, 14)
-		self.assertEqual(result.details[0].dropped, (13,))
+		self.assertEqual(detail.dropped, (13,))
 		self.assertEqual(
 			result.details[-1],
 			RollCompositionDetail(operation="+", left=14, right=0, result=14),
@@ -615,6 +642,8 @@ class InterpreterTests(unittest.TestCase):
 		):
 			with self.subTest(source=source):
 				result = Interpreter(rng=random.Random(0)).execute_source(source)
+				self.assertIsInstance(result, RollResult)
+				assert isinstance(result, RollResult)
 				self.assertEqual(result.total, expected)
 
 		for source, expected in (("+5", 5), ("-5", -5)):
@@ -623,9 +652,14 @@ class InterpreterTests(unittest.TestCase):
 
 	def test_grouped_composed_roll_is_not_advantaged(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("+(d20 + 5)")
+		self.assertIsInstance(result, RollResult)
+		assert isinstance(result, RollResult)
+		detail = result.details[0]
+		self.assertIsInstance(detail, DieRollDetail)
+		assert isinstance(detail, DieRollDetail)
 
 		self.assertEqual(result.total, 18)
-		self.assertEqual(result.details[0].rolls, (13,))
+		self.assertEqual(detail.rolls, (13,))
 		self.assertEqual(
 			result.details[-1],
 			RollCompositionDetail(operation="+", left=18, right=0, result=18),
