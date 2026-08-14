@@ -58,6 +58,13 @@ class BotHelperTests(unittest.TestCase):
 	def test_format_result_shows_scalar_as_bold_total(self):
 		self.assertEqual(bot.format_result(3), "**3**")
 
+	def test_format_result_escapes_scalar_discord_markup(self):
+		formatted = bot.format_result("** @everyone `hello`")
+
+		self.assertIn(r"\*\*", formatted)
+		self.assertIn(r"\`hello\`", formatted)
+		self.assertNotIn("@everyone", formatted)
+
 	def test_build_roll_response_uses_one_header_and_compact_lines(self):
 		results = [
 			Interpreter(rng=random.Random(0)).execute_source("d20"),
@@ -78,6 +85,12 @@ class BotHelperTests(unittest.TestCase):
 			bot.build_roll_response(123, "d20", [result]),
 			"<@123> rolled `d20`:\n[13] = **13**",
 		)
+
+	def test_build_roll_response_escapes_expression_display(self):
+		response = bot.build_roll_response(123, "`@everyone`", [3])
+
+		self.assertNotIn("`@everyone`", response)
+		self.assertIn(r"\`@" + "\u200beveryone" + r"\`", response)
 
 	def test_bonus_expression_builder_uses_interpreter_syntax(self):
 		self.assertEqual(bot.bonus_expression("+d20", 0), "+d20")

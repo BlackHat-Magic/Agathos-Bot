@@ -58,9 +58,14 @@ def evaluate_rolls(
 	return [evaluator.execute_source(source) for _ in range(repeat)]
 
 
+def escape_display_text(value: object) -> str:
+	text = str(value).replace("\n", "\\n")
+	return discord.utils.escape_mentions(discord.utils.escape_markdown(text))
+
+
 def format_result(value: object) -> str:
 	if not isinstance(value, RollResult):
-		return f"**{value}**"
+		return f"**{escape_display_text(value)}**"
 
 	active_values: list[str] = []
 	dropped_values: list[str] = []
@@ -86,7 +91,7 @@ def bonus_expression(base: str, bonus: int) -> str:
 
 
 def build_roll_response(user_id: int, expression: str, results: list[object]) -> str:
-	lines = [f"<@{user_id}> rolled `{expression}`:"]
+	lines = [f"<@{user_id}> rolled `{escape_display_text(expression)}`:"]
 	formatted_results = [format_result(result) for result in results]
 	if len(formatted_results) == 1:
 		lines.append(formatted_results[0])
