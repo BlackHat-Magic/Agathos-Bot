@@ -623,7 +623,7 @@ class InterpreterTests(unittest.TestCase):
 		)
 
 	def test_advantage_is_not_reapplied_to_a_second_unary_operator(self):
-		result = Interpreter(rng=random.Random(0)).execute_source("++d20")
+		result = Interpreter(rng=random.Random(0)).execute_source("+(+d20)")
 		self.assertIsInstance(result, RollResult)
 		assert isinstance(result, RollResult)
 		detail = result.details[0]
