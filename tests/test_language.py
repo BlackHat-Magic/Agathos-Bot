@@ -1531,6 +1531,36 @@ class LanguageTests(unittest.TestCase):
 			[TokenType.DIE_ROLL, "literal_number", TokenType.EOF],
 		)
 
+	def test_unary_signs_wrap_complete_dice_expressions(self):
+		for source, operation, count in (
+			("+d20", UnaryOp.POSITIVE, 1),
+			("+1d20", UnaryOp.POSITIVE, 1),
+			("-2d20", UnaryOp.NEGATIVE, 2),
+		):
+			with self.subTest(source=source):
+				expression = cast(Unary, Parser(tokenize(source)).parse_program()[0])
+				self.assertEqual(expression.operation, operation)
+				dice = cast(Binary, expression.operand)
+				self.assertEqual(dice.operation, BinaryOp.DIE_ROLL)
+				self.assertEqual(dice.left, Int(count))
+				self.assertEqual(dice.right, Int(20))
+
+	def test_dice_modifiers_bind_before_unary_signs(self):
+		expression = cast(Unary, Parser(tokenize("+d20m20")).parse_program()[0])
+		modified = cast(Binary, expression.operand)
+
+		self.assertEqual(expression.operation, UnaryOp.POSITIVE)
+		self.assertEqual(modified.operation, BinaryOp.MINIMUM)
+		self.assertEqual(cast(Binary, modified.left).operation, BinaryOp.DIE_ROLL)
+
+	def test_unary_dice_expression_precedes_following_addition(self):
+		expression = cast(Binary, Parser(tokenize("+d20 + 5")).parse_program()[0])
+
+		self.assertEqual(expression.operation, BinaryOp.ADD)
+		self.assertIsInstance(expression.left, Unary)
+		self.assertIsInstance(cast(Unary, expression.left).operand, Binary)
+		self.assertEqual(expression.right, Int(5))
+
 	def test_unterminated_strings_raise_syntax_error(self):
 		with self.assertRaises(SyntaxError):
 			tokenize('"unterminated')

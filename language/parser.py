@@ -1008,6 +1008,25 @@ class Parser:
 			op = UnaryOp(peeked.type)
 			self._advance()
 			peeked = self._peek()
+			if op in (UnaryOp.INCREMENT, UnaryOp.DECREMENT) and (
+				peeked is not None and peeked.type == TokenType.DIE_ROLL
+			):
+				sign = UnaryOp.POSITIVE if op == UnaryOp.INCREMENT else UnaryOp.NEGATIVE
+				dice = self._parse_die_mod(dtype)
+				inner = Unary(
+					type="unary",
+					dtype=dice.dtype,
+					operation=sign,
+					operand=dice,
+					operator_loc="before",
+				)
+				return Unary(
+					type="unary",
+					dtype=inner.dtype,
+					operation=sign,
+					operand=inner,
+					operator_loc="before",
+				)
 			if dtype is _NO_EXPECTED_TYPE and op == UnaryOp.LOGICAL_NOT:
 				dtype = bool
 			operand = self._parse_unary(dtype)
@@ -1074,7 +1093,7 @@ class Parser:
 					operator_loc="after",
 				)
 			return expression
-		return self._parse_postfix(dtype)
+		return self._parse_die_mod(dtype)
 
 	def _parse_die_roll(self, dtype: ExpectedType = _NO_EXPECTED_TYPE) -> Expression:
 		peeked = self._peek()
@@ -1083,11 +1102,11 @@ class Parser:
 		if peeked.type == TokenType.DIE_ROLL:
 			left = Int(1)
 		else:
-			left = self._parse_unary(dtype)
+			left = self._parse_postfix(dtype)
 			peeked = self._peek()
 		while peeked is not None and peeked.type == TokenType.DIE_ROLL:
 			self._advance()
-			right = self._parse_unary(int)
+			right = self._parse_postfix(int)
 			result = self._binary_result_type(
 				BinaryOp.DIE_ROLL, left.dtype, right.dtype
 			)
@@ -1136,7 +1155,7 @@ class Parser:
 		return left
 
 	def _parse_exponent(self, dtype: ExpectedType = _NO_EXPECTED_TYPE) -> Expression:
-		left = self._parse_die_mod(_NO_EXPECTED_TYPE)
+		left = self._parse_unary(_NO_EXPECTED_TYPE)
 		peeked = self._peek()
 		if peeked is not None and peeked.type == TokenType.EXPONENT:
 			self._advance()
