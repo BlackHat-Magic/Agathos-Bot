@@ -18,8 +18,6 @@ EXPECTED_ROLL_ERRORS = (
 )
 
 
-load_dotenv()
-
 intents = discord.Intents.default()
 intents.message_content = True
 
@@ -129,7 +127,13 @@ async def disadvantage(
 	await handle_roll(interaction, bonus_expression("-d20", bonus), repeat)
 
 
-token = os.getenv("DISCORD_CLIENT_TOKEN")
-if token is None:
-	raise RuntimeError("DISCORD_CLIENT_TOKEN environment variable is not set")
-client.run(token)
+def main() -> None:
+	load_dotenv()
+	token = os.getenv("DISCORD_CLIENT_TOKEN")
+	if token is None:
+		raise RuntimeError("DISCORD_CLIENT_TOKEN environment variable is not set")
+	client.run(token)
+
+
+if __name__ == "__main__":
+	main()
