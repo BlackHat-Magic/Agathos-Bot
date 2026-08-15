@@ -17,11 +17,26 @@ N/A
 ### Features
 
 - [X] Arbitrary dice rolling
-- [ ] list comprehension equivalent in custom language
-- [ ] option and result types in custom language
+- [X] list comprehension equivalent in custom language
 - [ ] Clue
+- [ ] Chess
+- [ ] Checkers
+- [ ] Catan?
+- [ ] Risk?
+- [ ] Card Games
 - [ ] TTRPG VTT?
 - [ ] Other classic/popular board games?
+
+### Dice Commands
+
+- `/r` rolls a d20.
+- `/roll expression:<expression>` evaluates a dice expression.
+
+Expressions support dice arithmetic, list comprehensions, arrays, and unary
+d20 advantage/disadvantage. For example,
+`/roll expression:[d20 for i in 0:5]` displays each roll with compact dice
+details instead of exposing the interpreter's internal object representation.
+Unary `+d20` gives advantage, and `-d20` gives disadvantage.
 
 ### Software Stack / Technologies Used
 
