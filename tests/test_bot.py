@@ -12,25 +12,10 @@ from language.interpreter import Interpreter, RollResult
 class BotHelperTests(unittest.TestCase):
 	def test_roll_expression_defaults_blank_input_to_d20(self):
 		interpreter = Interpreter(rng=random.Random(0))
-		result = bot.evaluate_rolls("", 1, interpreter=interpreter)[0]
+		result = bot.evaluate_roll("", interpreter=interpreter)
 		self.assertIsInstance(result, RollResult)
 		assert isinstance(result, RollResult)
 		self.assertEqual(result.total, 13)
-
-	def test_evaluate_rolls_reuses_interpreter_rng_for_repetitions(self):
-		interpreter = Interpreter(rng=random.Random(0))
-		results = bot.evaluate_rolls("d20", 2, interpreter=interpreter)
-		self.assertTrue(all(isinstance(result, RollResult) for result in results))
-		typed_results = cast(list[RollResult], results)
-		self.assertEqual([result.total for result in typed_results], [13, 14])
-
-	def test_repeat_validation_accepts_one_through_twenty_only(self):
-		for repeat in (1, 20):
-			with self.subTest(repeat=repeat):
-				bot.validate_repeat(repeat)
-		for repeat in (0, -1, 21):
-			with self.subTest(repeat=repeat), self.assertRaises(ValueError):
-				bot.validate_repeat(repeat)
 
 	def test_format_result_uses_compact_dice_values_and_total(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("+d20")
@@ -81,62 +66,42 @@ class BotHelperTests(unittest.TestCase):
 		self.assertIn(r"\`hello\`", formatted)
 		self.assertNotIn("@everyone", formatted)
 
-	def test_build_roll_response_uses_one_header_and_compact_lines(self):
-		results = [
-			Interpreter(rng=random.Random(0)).execute_source("d20"),
-			Interpreter(rng=random.Random(1)).execute_source("d20"),
-		]
+	def test_build_roll_response_formats_array_expression_as_one_result(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("[d20 for i in 0:5]")
 
-		response = bot.build_roll_response(123, "d20", results)
+		response = bot.build_roll_response(123, "[d20 for i in 0:5]", result)
 
 		self.assertEqual(
 			response,
-			"<@123> rolled `d20`:\n1. [13] = **13**\n2. [5] = **5**",
-		)
-
-	def test_build_roll_response_formats_repeated_array_results(self):
-		first = Interpreter(rng=random.Random(0)).execute_source("d20")
-		second = Interpreter(rng=random.Random(1)).execute_source("d20")
-
-		response = bot.build_roll_response(
-			123,
-			"d20",
-			[[first, 3], [second, 4]],
-		)
-
-		self.assertEqual(
-			response,
-			"<@123> rolled `d20`:\n1. [[13] = 13, 3]\n2. [[5] = 5, 4]",
+			"<@123> rolled `[d20 for i in 0:5]`:\n"
+			"[[13] = 13, [14] = 14, [2] = 2, [9] = 9, [17] = 17]",
 		)
 		self.assertNotIn("RollResult(", response)
 		self.assertNotIn("DieRollDetail(", response)
 
-	def test_build_roll_response_omits_number_for_single_roll(self):
+	def test_build_roll_response_formats_single_result(self):
 		result = Interpreter(rng=random.Random(0)).execute_source("d20")
 
 		self.assertEqual(
-			bot.build_roll_response(123, "d20", [result]),
+			bot.build_roll_response(123, "d20", result),
 			"<@123> rolled `d20`:\n[13] = **13**",
 		)
 
 	def test_build_roll_response_escapes_expression_display(self):
-		response = bot.build_roll_response(123, "`@everyone`", [3])
+		response = bot.build_roll_response(123, "`@everyone`", 3)
 
 		self.assertNotIn("`@everyone`", response)
 		self.assertIn(r"\`@" + "\u200beveryone" + r"\`", response)
 
-	def test_bonus_expression_builder_uses_interpreter_syntax(self):
-		self.assertEqual(bot.bonus_expression("+d20", 0), "+d20")
-		self.assertEqual(bot.bonus_expression("+d20", 5), "+d20+5")
-		self.assertEqual(bot.bonus_expression("-d20", -2), "-d20-2")
-
-	def test_roll_command_exposes_no_legacy_dice_options(self):
+	def test_roll_command_exposes_expression_only(self):
 		parameter_names = set(inspect.signature(bot.roll.callback).parameters)
-		self.assertEqual(parameter_names, {"interaction", "expression", "repeat"})
+		self.assertEqual(parameter_names, {"interaction", "expression"})
+		self.assertFalse(hasattr(bot, "advantage"))
+		self.assertFalse(hasattr(bot, "disadvantage"))
 
 	def test_cheat_words_are_not_special_cased(self):
 		with self.assertRaises(NameError):
-			bot.evaluate_rolls("cheat", 1)
+			bot.evaluate_roll("cheat")
 
 
 class FakeUser:
@@ -169,30 +134,25 @@ class FakeInteraction:
 
 
 class BotCommandTests(unittest.IsolatedAsyncioTestCase):
-	async def test_convenience_commands_build_interpreter_expressions(self):
-		interaction = FakeInteraction()
-		with patch.object(bot, "handle_roll", new=AsyncMock()) as handle_roll:
-			callback = cast(Any, bot.advantage.callback)
-			await callback(cast(discord.Interaction, interaction), bonus=5, repeat=2)
-			handle_roll.assert_awaited_once_with(interaction, "+d20+5", 2)
-		with patch.object(bot, "handle_roll", new=AsyncMock()) as handle_roll:
-			callback = cast(Any, bot.disadvantage.callback)
-			await callback(cast(discord.Interaction, interaction), bonus=-2, repeat=1)
-			handle_roll.assert_awaited_once_with(interaction, "-d20-2", 1)
-
 	async def test_quick_roll_delegates_to_d20(self):
 		interaction = FakeInteraction()
 		with patch.object(bot, "handle_roll", new=AsyncMock()) as handle_roll:
 			callback = cast(Any, bot.quick_roll.callback)
 			await callback(cast(discord.Interaction, interaction))
-			handle_roll.assert_awaited_once_with(interaction, "d20", 1)
+			handle_roll.assert_awaited_once_with(interaction, "d20")
+
+	async def test_roll_delegates_expression_to_handle_roll(self):
+		interaction = FakeInteraction()
+		with patch.object(bot, "handle_roll", new=AsyncMock()) as handle_roll:
+			callback = cast(Any, bot.roll.callback)
+			await callback(cast(discord.Interaction, interaction), expression="3d6")
+			handle_roll.assert_awaited_once_with(interaction, "3d6")
 
 	async def test_successful_roll_defers_and_sends_formatted_result(self):
 		interaction = FakeInteraction()
 		await bot.handle_roll(
 			cast(discord.Interaction, interaction),
 			"d20",
-			1,
 			interpreter=Interpreter(rng=random.Random(0)),
 		)
 		interaction.response.defer.assert_awaited_once_with()
@@ -205,7 +165,7 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 
 	async def test_expected_roll_error_is_ephemeral_after_deferral(self):
 		interaction = FakeInteraction()
-		await bot.handle_roll(cast(discord.Interaction, interaction), "1 / 0", 1)
+		await bot.handle_roll(cast(discord.Interaction, interaction), "1 / 0")
 		interaction.response.defer.assert_awaited_once_with()
 		interaction.followup.send.assert_awaited_once()
 		assert interaction.followup.send.await_args is not None
@@ -216,23 +176,13 @@ class BotCommandTests(unittest.IsolatedAsyncioTestCase):
 		interaction = FakeInteraction()
 		expression = "(" * 100 + "1" + ")" * 100
 
-		await bot.handle_roll(cast(discord.Interaction, interaction), expression, 1)
+		await bot.handle_roll(cast(discord.Interaction, interaction), expression)
 
 		interaction.response.defer.assert_awaited_once_with()
 		interaction.followup.send.assert_awaited_once()
 		assert interaction.followup.send.await_args is not None
 		self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
 		self.assertIn("Error:", interaction.followup.send.await_args.args[0])
-
-	async def test_invalid_repeat_is_rejected_before_deferral(self):
-		interaction = FakeInteraction()
-		await bot.handle_roll(cast(discord.Interaction, interaction), "d20", 0)
-		interaction.response.send_message.assert_awaited_once()
-		assert interaction.response.send_message.await_args is not None
-		self.assertTrue(
-			interaction.response.send_message.await_args.kwargs["ephemeral"]
-		)
-		interaction.response.defer.assert_not_awaited()
 
 
 class BotStartupTests(unittest.TestCase):

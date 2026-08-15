@@ -11,7 +11,6 @@ from language.interpreter import (
 )
 
 
-MAX_REPETITIONS = 20
 DISCORD_MESSAGE_LIMIT = 2000
 EXPECTED_ROLL_ERRORS = (
 	SyntaxError,
@@ -39,23 +38,14 @@ async def on_ready():
 		print(e)
 
 
-def validate_repeat(repeat: int) -> None:
-	if isinstance(repeat, bool) or not isinstance(repeat, int):
-		raise ValueError("repeat must be an integer")
-	if not 1 <= repeat <= MAX_REPETITIONS:
-		raise ValueError(f"repeat must be between 1 and {MAX_REPETITIONS}")
-
-
-def evaluate_rolls(
+def evaluate_roll(
 	expression: str,
-	repeat: int,
 	*,
 	interpreter: Interpreter | None = None,
-) -> list[object]:
-	validate_repeat(repeat)
+) -> object:
 	source = expression.strip() or "d20"
 	evaluator = interpreter or Interpreter()
-	return [evaluator.execute_source(source) for _ in range(repeat)]
+	return evaluator.execute_source(source)
 
 
 def escape_display_text(value: object) -> str:
@@ -101,21 +91,13 @@ def _format_result(value: object, *, bold_total: bool) -> str:
 	return f"[{body}] = {total}"
 
 
-def bonus_expression(base: str, bonus: int) -> str:
-	return f"{base}{bonus:+d}" if bonus else base
-
-
-def build_roll_response(user_id: int, expression: str, results: list[object]) -> str:
-	lines = [f"<@{user_id}> rolled `{escape_display_text(expression)}`:"]
-	formatted_results = [format_result(result) for result in results]
-	if len(formatted_results) == 1:
-		lines.append(formatted_results[0])
-	else:
-		lines.extend(
-			f"{index}. {result}"
-			for index, result in enumerate(formatted_results, start=1)
-		)
-	response = "\n".join(lines)
+def build_roll_response(user_id: int, expression: str, result: object) -> str:
+	response = "\n".join(
+		[
+			f"<@{user_id}> rolled `{escape_display_text(expression)}`:",
+			format_result(result),
+		]
+	)
 	if len(response) > DISCORD_MESSAGE_LIMIT:
 		raise ValueError("result exceeds Discord's message length limit")
 	return response
@@ -124,23 +106,16 @@ def build_roll_response(user_id: int, expression: str, results: list[object]) ->
 async def handle_roll(
 	interaction: discord.Interaction,
 	expression: str,
-	repeat: int,
 	*,
 	interpreter: Interpreter | None = None,
 ) -> None:
-	try:
-		validate_repeat(repeat)
-	except ValueError as error:
-		await interaction.response.send_message(f"Error: {error}", ephemeral=True)
-		return
-
 	await interaction.response.defer()
 	try:
-		results = evaluate_rolls(expression, repeat, interpreter=interpreter)
+		result = evaluate_roll(expression, interpreter=interpreter)
 		response = build_roll_response(
 			interaction.user.id,
 			expression.strip() or "d20",
-			results,
+			result,
 		)
 	except EXPECTED_ROLL_ERRORS as error:
 		await interaction.followup.send(f"Error: {error}", ephemeral=True)
@@ -151,28 +126,15 @@ async def handle_roll(
 
 @client.tree.command(name="r", description="quickly roll a d20")
 async def quick_roll(interaction: discord.Interaction):
-	await handle_roll(interaction, "d20", 1)
+	await handle_roll(interaction, "d20")
 
 
 @client.tree.command(name="roll", description="evaluate a dice expression")
 async def roll(
 	interaction: discord.Interaction,
 	expression: str,
-	repeat: int = 1,
 ):
-	await handle_roll(interaction, expression, repeat)
-
-
-@client.tree.command(name="advantage", description="roll a d20 with advantage")
-async def advantage(interaction: discord.Interaction, bonus: int = 0, repeat: int = 1):
-	await handle_roll(interaction, bonus_expression("+d20", bonus), repeat)
-
-
-@client.tree.command(name="disadvantage", description="roll a d20 with disadvantage")
-async def disadvantage(
-	interaction: discord.Interaction, bonus: int = 0, repeat: int = 1
-):
-	await handle_roll(interaction, bonus_expression("-d20", bonus), repeat)
+	await handle_roll(interaction, expression)
 
 
 def main() -> None:
