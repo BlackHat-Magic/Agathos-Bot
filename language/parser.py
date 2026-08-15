@@ -419,6 +419,8 @@ class Parser:
 				| BinaryOp.REROLL_ABOVE
 				| BinaryOp.MINIMUM
 				| BinaryOp.MAXIMUM
+				| BinaryOp.DROP_LOWEST
+				| BinaryOp.DROP_HIGHEST
 			):
 				if left is not int or right is not int:
 					raise TypeError  # TODO: better error handling
@@ -1114,6 +1116,8 @@ class Parser:
 				TokenType.REROLL_ABOVE,
 				TokenType.MAXIMUM,
 				TokenType.MINIMUM,
+				TokenType.DROP_LOWEST,
+				TokenType.DROP_HIGHEST,
 			]:
 				op = BinaryOp(peeked.type)
 			else:

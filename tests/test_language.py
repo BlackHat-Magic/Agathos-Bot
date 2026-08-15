@@ -1452,6 +1452,50 @@ class LanguageTests(unittest.TestCase):
 			["1", "20", "10", "5"],
 		)
 
+	def test_drop_dice_modifiers_tokenize_as_dice_tokens(self):
+		self.assertEqual(
+			tokenize("4d6l1h1"),
+			[
+				NumberToken(type="literal_number", literal="4"),
+				SimpleToken(type=TokenType.DIE_ROLL),
+				NumberToken(type="literal_number", literal="6"),
+				SimpleToken(type=TokenType.DROP_LOWEST),
+				NumberToken(type="literal_number", literal="1"),
+				SimpleToken(type=TokenType.DROP_HIGHEST),
+				NumberToken(type="literal_number", literal="1"),
+				SimpleToken(type=TokenType.EOF),
+			],
+		)
+
+	def test_identifier_dice_modifiers_tokenize_as_dice_tokens(self):
+		for modifier in (TokenType.DROP_LOWEST, TokenType.DROP_HIGHEST):
+			with self.subTest(modifier=modifier):
+				tokens = tokenize(f"foo {modifier.value} 1")
+				self.assertIsInstance(tokens[0], IdentifierToken)
+				self.assertEqual(
+					[token.type for token in tokens],
+					[
+						"identifier",
+						modifier,
+						"literal_number",
+						TokenType.EOF,
+					],
+				)
+
+	def test_drop_dice_modifiers_parse_as_left_associative_binary_operations(self):
+		expression = cast(Binary, Parser(tokenize("4d6l1h1")).parse_program()[0])
+
+		self.assertEqual(expression.operation, BinaryOp.DROP_HIGHEST)
+		self.assertIsInstance(expression.left, Binary)
+		assert isinstance(expression.left, Binary)
+		left = expression.left
+		self.assertEqual(left.operation, BinaryOp.DROP_LOWEST)
+		self.assertEqual(left.right, Int(1))
+		self.assertEqual(expression.right, Int(1))
+		dice = cast(Binary, left.left)
+		self.assertEqual(dice.left, Int(4))
+		self.assertEqual(dice.right, Int(6))
+
 	def test_dice_operator_names_are_reserved_identifiers(self):
 		reserved = {
 			"d": TokenType.DIE_ROLL,

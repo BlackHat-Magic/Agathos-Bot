@@ -19,6 +19,8 @@ class BinaryOp(StrEnum):
 	REROLL_ABOVE = "a"
 	MINIMUM = "m"
 	MAXIMUM = "x"
+	DROP_LOWEST = "l"
+	DROP_HIGHEST = "h"
 
 	EXPONENT = "**"
 

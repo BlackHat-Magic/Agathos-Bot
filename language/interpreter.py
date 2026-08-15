@@ -798,17 +798,80 @@ class Interpreter:
 	def _detail_values(detail: DieRollDetail) -> list[int]:
 		return list(detail.values)
 
+	def _drop_dice(
+		self,
+		detail: DieRollDetail,
+		count: int,
+		*,
+		drop_high: bool,
+	) -> tuple[DieRollDetail, int]:
+		if count < 0:
+			raise InvalidDiceError("dice drop count must not be negative")
+		if count == 0:
+			return detail, 0
+		if count >= len(detail.values):
+			raise InvalidDiceError("cannot drop all dice")
+
+		drop_indices = set(
+			sorted(
+				range(len(detail.values)),
+				key=lambda index: detail.values[index],
+				reverse=drop_high,
+			)[:count]
+		)
+		keep_indices = [
+			index for index in range(len(detail.values)) if index not in drop_indices
+		]
+		dropped_values = tuple(detail.values[index] for index in sorted(drop_indices))
+		kept_detail = DieRollDetail(
+			sides=detail.sides,
+			rolls=tuple(detail.rolls[index] for index in keep_indices),
+			rerolls=tuple(
+				detail.rerolls[index] if index < len(detail.rerolls) else ()
+				for index in keep_indices
+			),
+			dropped=(*detail.dropped, *dropped_values),
+			clamped=(
+				tuple(
+					detail.clamped[index] if index < len(detail.clamped) else ()
+					for index in keep_indices
+				)
+				if detail.clamped
+				else ()
+			),
+			values=tuple(detail.values[index] for index in keep_indices),
+			nested=detail.nested,
+		)
+		return kept_detail, -sum(dropped_values)
+
 	def _modify_dice(
 		self, operation: BinaryOp, left: object, right: object
 	) -> RollResult:
 		if not isinstance(left, RollResult):
 			raise InvalidDiceError("dice modifiers require a roll result")
 		threshold = self._dice_integer(right, "dice threshold")
+		if operation in (BinaryOp.DROP_LOWEST, BinaryOp.DROP_HIGHEST) and threshold < 0:
+			raise InvalidDiceError("dice drop count must not be negative")
+		if (
+			operation in (BinaryOp.DROP_LOWEST, BinaryOp.DROP_HIGHEST)
+			and threshold == 0
+		):
+			return left
 		new_details: list[object] = []
 		total_delta = 0
+		found_die_detail = False
 		for detail in left.details:
 			if not isinstance(detail, DieRollDetail):
 				new_details.append(detail)
+				continue
+			found_die_detail = True
+
+			if operation in (BinaryOp.DROP_LOWEST, BinaryOp.DROP_HIGHEST):
+				kept_detail, delta = self._drop_dice(
+					detail, threshold, drop_high=operation == BinaryOp.DROP_HIGHEST
+				)
+				new_details.append(kept_detail)
+				total_delta += delta
 				continue
 
 			previous_values = self._detail_values(detail)
@@ -861,6 +924,13 @@ class Interpreter:
 					nested=detail.nested,
 				)
 			)
+
+		if (
+			operation in (BinaryOp.DROP_LOWEST, BinaryOp.DROP_HIGHEST)
+			and threshold > 0
+			and not found_die_detail
+		):
+			raise InvalidDiceError("cannot drop dice from an empty roll")
 
 		return RollResult(
 			total=left.total + total_delta,
@@ -1038,6 +1108,8 @@ class Interpreter:
 			BinaryOp.REROLL_ABOVE,
 			BinaryOp.MINIMUM,
 			BinaryOp.MAXIMUM,
+			BinaryOp.DROP_LOWEST,
+			BinaryOp.DROP_HIGHEST,
 		):
 			return self._modify_dice(operation, left, right)
 

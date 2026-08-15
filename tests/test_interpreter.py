@@ -858,6 +858,130 @@ class InterpreterTests(unittest.TestCase):
 			DieRollDetail(6, (2, 5, 1), ((), (3,), ()), ()),
 		)
 
+	def test_drop_lowest_and_highest_preserve_active_and_dropped_values(self):
+		lowest = Interpreter(rng=random.Random(0)).execute_source("4d6l1")
+		highest = Interpreter(rng=random.Random(0)).execute_source("4d6h1")
+
+		assert isinstance(lowest, RollResult)
+		assert isinstance(highest, RollResult)
+		lowest_detail = lowest.details[0]
+		highest_detail = highest.details[0]
+		assert isinstance(lowest_detail, DieRollDetail)
+		assert isinstance(highest_detail, DieRollDetail)
+		self.assertEqual(lowest.total, 11)
+		self.assertEqual(
+			lowest_detail,
+			DieRollDetail(6, (4, 4, 3), ((), (), ()), (1,)),
+		)
+		self.assertEqual(highest.total, 8)
+		self.assertEqual(
+			highest_detail,
+			DieRollDetail(6, (4, 1, 3), ((), (), ()), (4,)),
+		)
+
+	def test_drop_zero_is_a_noop(self):
+		expected = Interpreter(rng=random.Random(0)).execute_source("4d6")
+
+		for source in ("4d6l0", "4d6h0"):
+			with self.subTest(source=source):
+				result = Interpreter(rng=random.Random(0)).execute_source(source)
+				self.assertEqual(result, expected)
+
+	def test_invalid_drop_counts_raise_invalid_dice_error(self):
+		roll = Interpreter(rng=random.Random(0)).execute_source("4d6")
+		for operation in (BinaryOp.DROP_LOWEST, BinaryOp.DROP_HIGHEST):
+			with self.subTest(operation=operation):
+				with self.assertRaises(InvalidDiceError):
+					Interpreter()._apply_binary(operation, roll, -1)
+
+		for source in ("4d6l4", "4d6h4"):
+			with self.subTest(source=source):
+				with self.assertRaises(InvalidDiceError):
+					Interpreter(rng=random.Random(0)).execute_source(source)
+
+	def test_drop_modifiers_chain_left_to_right(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("4d6l1h1")
+
+		assert isinstance(result, RollResult)
+		detail = result.details[0]
+		assert isinstance(detail, DieRollDetail)
+		self.assertEqual(result.total, 7)
+		self.assertEqual(detail.values, (4, 3))
+		self.assertEqual(detail.dropped, (1, 4))
+
+	def test_drop_highest_resolves_ties_left_to_right(self):
+		interpreter = Interpreter(rng=random.Random(0))
+		detail = DieRollDetail(
+			sides=6,
+			rolls=(6, 6, 1),
+			rerolls=((2,), (3,), ()),
+			dropped=(),
+			values=(6, 6, 1),
+		)
+		result = RollResult(total=13, details=(detail,))
+
+		modified = interpreter._apply_binary(BinaryOp.DROP_HIGHEST, result, 1)
+
+		assert isinstance(modified, RollResult)
+		modified_detail = modified.details[0]
+		assert isinstance(modified_detail, DieRollDetail)
+		self.assertEqual(modified.total, 7)
+		self.assertEqual(modified_detail.values, (6, 1))
+		self.assertEqual(modified_detail.rolls, (6, 1))
+		self.assertEqual(modified_detail.rerolls, ((3,), ()))
+		self.assertEqual(modified_detail.dropped, (6,))
+
+	def test_drop_lowest_resolves_ties_left_to_right(self):
+		interpreter = Interpreter(rng=random.Random(0))
+		detail = DieRollDetail(
+			sides=6,
+			rolls=(1, 1, 6),
+			rerolls=((2,), (3,), ()),
+			dropped=(),
+			values=(1, 1, 6),
+		)
+		result = RollResult(total=8, details=(detail,))
+
+		modified = interpreter._apply_binary(BinaryOp.DROP_LOWEST, result, 1)
+
+		assert isinstance(modified, RollResult)
+		modified_detail = modified.details[0]
+		assert isinstance(modified_detail, DieRollDetail)
+		self.assertEqual(modified.total, 7)
+		self.assertEqual(modified_detail.values, (1, 6))
+		self.assertEqual(modified_detail.rolls, (1, 6))
+		self.assertEqual(modified_detail.rerolls, ((3,), ()))
+		self.assertEqual(modified_detail.dropped, (1,))
+
+	def test_drop_composes_with_reroll_and_clamp_modifiers(self):
+		rerolled = Interpreter(rng=random.Random(0)).execute_source("3d6b3h1")
+		clamped = Interpreter(rng=random.Random(0)).execute_source("3d6m3h1")
+
+		assert isinstance(rerolled, RollResult)
+		assert isinstance(clamped, RollResult)
+		rerolled_detail = rerolled.details[0]
+		clamped_detail = clamped.details[0]
+		assert isinstance(rerolled_detail, DieRollDetail)
+		assert isinstance(clamped_detail, DieRollDetail)
+		self.assertEqual(rerolled.total, 7)
+		self.assertEqual(rerolled_detail.values, (4, 3))
+		self.assertEqual(rerolled_detail.rerolls, ((), (3,)))
+		self.assertEqual(rerolled_detail.dropped, (4,))
+		self.assertEqual(clamped.total, 7)
+		self.assertEqual(clamped_detail.values, (4, 3))
+		self.assertEqual(clamped_detail.clamped, ((), ((1, 3),)))
+		self.assertEqual(clamped_detail.dropped, (4,))
+
+	def test_drop_detail_format_preserves_dropped_values(self):
+		result = Interpreter(rng=random.Random(0)).execute_source("4d6l1")
+
+		assert isinstance(result, RollResult)
+		self.assertEqual(
+			result.format(),
+			"total=11 details=[d6 rolls=(4, 4, 3) rerolls=((), (), ()) "
+			"values=(4, 4, 3) dropped=(1,)]",
+		)
+
 	def test_minimum_and_maximum_retain_clamp_details(self):
 		minimum = Interpreter(rng=random.Random(0)).execute_source("3d6m3")
 		maximum = Interpreter(rng=random.Random(0)).execute_source("3d6x3")

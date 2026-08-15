@@ -47,6 +47,8 @@ class TokenType(StrEnum):
 	REROLL_ABOVE = "a"  # or "above" to reroll the di(c)e above some amount
 	MINIMUM = "m"  # or "min" to replace rolls below some amount with a minimum
 	MAXIMUM = "x"  # or "max" to replace rolls above some amount with a maximum
+	DROP_LOWEST = "l"
+	DROP_HIGHEST = "h"
 
 	# arithmetic ops
 	EXPONENT = "**"
