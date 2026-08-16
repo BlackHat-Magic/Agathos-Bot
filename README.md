@@ -2,13 +2,16 @@
 
 # Agathos-Bot
 
-Discord bot for tabletop game tools
+Tabletop game tools powered by the Agathos language
 
 </div>
 
 ## Overview
 
-Discord bot for dice rolling and soon (tm) other stuff. Use `/roll` to roll a die.
+Agathos provides a custom dice language for tabletop game tools. Its Discord
+deployment is being migrated to Cloudflare Workers. The Python evaluator Worker
+exists, while the public TypeScript interaction Worker and final deployment
+documentation are still being completed.
 
 ### Goals
 
@@ -27,39 +30,19 @@ N/A
 - [ ] TTRPG VTT?
 - [ ] Other classic/popular board games?
 
-### Dice Commands
-
-- `/r` rolls a d20.
-- `/roll expression:<expression>` evaluates a dice expression.
+### Dice Language
 
 Expressions support dice arithmetic, list comprehensions, arrays, and unary
-d20 advantage/disadvantage. For example,
-`/roll expression:[d20 for i in 0:5]` displays each roll with compact dice
-details instead of exposing the interpreter's internal object representation.
-Unary `+d20` gives advantage, and `-d20` gives disadvantage.
+d20 advantage/disadvantage. For example, `[d20 for i in 0:5]` evaluates five
+rolls with compact dice details. Unary `+d20` gives advantage, and `-d20` gives
+disadvantage.
 Drop modifiers use `l` for lowest and `h` for highest, such as `4d6l1` to
 drop the lowest die or `10d8h2` to drop the highest two dice. Modifiers can be
 chained left to right, with each modifier applying to the remaining active
 dice, for example `4d6l1h1`.
 
-### Software Stack / Technologies Used
+### Deployment
 
-- Language: Python
-- Framework: discord.py
-- Database: N/A (for now?)
-
-## Quickstart
-
-Permissions Integer: 448824461376
-
-To build (moreso a note to self):
-
-```bash
-docker build -t your-dockerhub-username/your-bot-name:latest .
-```
-
-To run:
-
-```bash
-docker run -d --name your-bot-container -e DISCORD_CLIENT_TOKEN="YOUR_BOT_TOKEN" BlackHatMagic/Agathos-Bot:latest
-```
+Cloudflare deployment is in progress. The Python evaluator Worker is available;
+the public TypeScript interaction Worker and final deployment documentation are
+still being completed.
