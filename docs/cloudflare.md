@@ -22,12 +22,14 @@ ID receives a bounded ephemeral response and never reaches the evaluator.
 
 ## Prerequisites
 
-Install `uv`, Node.js 20.6 or newer, and Wrangler. This provides built-in
-`fetch` support and the `--env-file` option used by the registration examples.
-Authenticate Wrangler before deploying:
+Install Bun 1.3 or newer, `uv`, and Node.js 20.6 or newer. Bun manages the
+TypeScript Worker's dependencies and scripts. Node remains required because
+`pywrangler` currently invokes Wrangler through `npx` for Python Worker
+deployments. Authenticate Wrangler before deploying:
 
 ```bash
-npx wrangler login
+cd workers/interactions
+bunx wrangler login
 ```
 
 Run all commands below from the repository root unless a `cd` is shown.
@@ -46,8 +48,8 @@ In a second shell, install and start the interaction Worker:
 
 ```bash
 cd workers/interactions
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 The interaction Worker uses the `AGATHOS_EVALUATOR` Service Binding in local
@@ -67,8 +69,8 @@ Run the interaction Worker tests and type check:
 
 ```bash
 cd workers/interactions
-npm test
-npm run typecheck
+bun run test
+bun run typecheck
 ```
 
 The TypeScript tests use a mock evaluator binding. They do not require a
@@ -80,7 +82,8 @@ The interaction Worker needs the Discord application's public key. Store it
 as a Wrangler secret; do not put it in source control:
 
 ```bash
-npx wrangler secret put DISCORD_PUBLIC_KEY --config workers/interactions/wrangler.jsonc
+cd workers/interactions
+bunx wrangler secret put DISCORD_PUBLIC_KEY
 ```
 
 The evaluator Worker does not need Discord secrets. `DISCORD_APPLICATION_ID`,
@@ -102,7 +105,7 @@ Deploy the public interaction Worker second:
 
 ```bash
 cd workers/interactions
-npx wrangler deploy
+bun run deploy
 ```
 
 The interaction deployment must retain the `AGATHOS_EVALUATOR` service binding
@@ -112,45 +115,43 @@ deployment has no Discord token and no public route.
 
 ## Register Commands
 
-`register_commands.mjs` reads environment variables from the process; it does
-not load `.env` itself. From the repository root, either export the variables:
+`register_commands.mjs` reads environment variables from the process. When run
+from the repository root, Bun automatically loads the local `.env` file. You
+can also export the variables explicitly:
 
 ```bash
 export DISCORD_APPLICATION_ID="..."
 export DISCORD_BOT_TOKEN="..."
 export DISCORD_GUILD_ID="..."
-node scripts/register_commands.mjs
+bun scripts/register_commands.mjs
 ```
 
-Or load the local `.env` file with Node. Guild registration is the development
-default because Discord updates guild commands immediately:
+Guild registration is the development default because Discord updates guild
+commands immediately:
 
 ```bash
-node --env-file=.env scripts/register_commands.mjs
+bun scripts/register_commands.mjs
 ```
 
-When the shell is already in `workers/interactions`, use the corresponding
-path to the root-level script:
+When the shell is already in `workers/interactions`, export the variables in
+that shell before using the corresponding path to the root-level script:
 
 ```bash
-node --env-file=.env ../../scripts/register_commands.mjs
+bun ../../scripts/register_commands.mjs
 ```
-
-The same export-based setup works from `workers/interactions` with
-`node ../../scripts/register_commands.mjs`.
 
 The script sends the exact `/r` and `/roll` definitions to the guild endpoint.
 Use global registration only after the guild deployment has been validated;
 global command updates can take longer to appear:
 
 ```bash
-node --env-file=.env scripts/register_commands.mjs --global
+bun scripts/register_commands.mjs --global
 ```
 
 From `workers/interactions`, run
-`node --env-file=.env ../../scripts/register_commands.mjs --global` instead.
+`bun ../../scripts/register_commands.mjs --global` instead.
 
-The script uses Node's built-in `fetch`, fails on any non-2xx Discord response,
+The script uses Bun's built-in `fetch`, fails on any non-2xx Discord response,
 and never prints the bot token.
 
 ## Discord Interactions Endpoint
@@ -191,8 +192,8 @@ cd workers/evaluator
 uv sync
 uv run pywrangler deploy
 cd ../interactions
-npm ci
-npx wrangler deploy
+bun install --frozen-lockfile
+bun run deploy
 ```
 
 If only one Worker changed, deploy only that Worker's command from the

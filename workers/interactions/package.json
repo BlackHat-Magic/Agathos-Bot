@@ -2,6 +2,7 @@
 	"name": "agathos-interactions",
 	"private": true,
 	"type": "module",
+	"packageManager": "bun@1.3.14",
 	"scripts": {
 		"dev": "wrangler dev",
 		"test": "vitest run --passWithNoTests",

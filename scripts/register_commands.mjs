@@ -21,7 +21,7 @@ const COMMANDS = [
 	},
 ];
 
-const USAGE = `Usage: node scripts/register_commands.mjs [--global]
+const USAGE = `Usage: bun scripts/register_commands.mjs [--global]
 
 Registers /r and /roll with Discord. Without --global, DISCORD_GUILD_ID is
 required and commands are registered for that guild. --global registers the
