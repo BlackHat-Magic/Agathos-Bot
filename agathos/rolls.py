@@ -20,6 +20,7 @@ from language.interpreter import (
 
 
 MAX_SOURCE_LENGTH = 4096
+MAX_SAFE_INTEGER = 2**53 - 1
 
 JSONValue: TypeAlias = (
 	None | bool | int | float | str | list["JSONValue"] | dict[str, "JSONValue"]
@@ -32,7 +33,13 @@ class SerializationError(TypeError):
 
 def serialize_value(value: object) -> JSONValue:
 	"""Convert a supported interpreter value into a JSON-safe value."""
-	if value is None or isinstance(value, (bool, int, str)):
+	if value is None or isinstance(value, (bool, str)):
+		return value
+	if isinstance(value, int):
+		if abs(value) > MAX_SAFE_INTEGER:
+			raise SerializationError(
+				"integer exceeds JavaScript Number.MAX_SAFE_INTEGER"
+			)
 		return value
 	if isinstance(value, float):
 		if not isfinite(value):
@@ -49,7 +56,7 @@ def serialize_value(value: object) -> JSONValue:
 	if isinstance(value, DieRollDetail):
 		return {
 			"kind": "die_roll_detail",
-			"sides": value.sides,
+			"sides": serialize_value(value.sides),
 			"rolls": [serialize_value(roll) for roll in value.rolls],
 			"rerolls": [
 				[serialize_value(roll) for roll in reroll] for reroll in value.rerolls
@@ -95,6 +102,8 @@ def evaluate_source(
 
 def error_code(error: BaseException) -> str:
 	"""Return the stable public code for an evaluation error."""
+	if isinstance(error, SerializationError):
+		return "serialization_error"
 	if isinstance(error, ExecutionLimitError):
 		return "execution_timeout"
 	if isinstance(error, (CallDepthError, RecursionError)):

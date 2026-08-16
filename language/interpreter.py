@@ -70,6 +70,9 @@ class ExecutionLimitError(RuntimeErrorBase):
 	"""Raised when expression execution exceeds its configured limit."""
 
 
+MAX_INTEGER_OPERATION_BITS = 1_000_000
+
+
 class CallDepthError(RuntimeErrorBase):
 	"""Raised when expression calls exceed the configured depth limit."""
 
@@ -762,6 +765,54 @@ class Interpreter:
 			raise InvalidOperationError("expected a numeric operand")
 		return value
 
+	@staticmethod
+	def _check_integer_operation_budget(
+		operation: BinaryOp, left: int | float, right: int | float
+	) -> None:
+		"""Reject integer operations whose result could exceed the bit budget."""
+		if (
+			operation == BinaryOp.MULTIPLY
+			and isinstance(left, int)
+			and isinstance(right, int)
+		):
+			if (
+				left
+				and right
+				and (
+					left.bit_length() + right.bit_length() > MAX_INTEGER_OPERATION_BITS
+				)
+			):
+				raise ExecutionLimitError(
+					"integer operation exceeds maximum bit budget: "
+					f"{MAX_INTEGER_OPERATION_BITS}"
+				)
+			return
+
+		if (
+			operation == BinaryOp.EXPONENT
+			and isinstance(left, int)
+			and isinstance(right, int)
+		):
+			if right > 0 and abs(left) > 1:
+				base_bits = abs(left).bit_length()
+				if right > (MAX_INTEGER_OPERATION_BITS - 1) // base_bits:
+					raise ExecutionLimitError(
+						"integer operation exceeds maximum bit budget: "
+						f"{MAX_INTEGER_OPERATION_BITS}"
+					)
+			return
+
+		if (
+			operation == BinaryOp.LSHIFT
+			and isinstance(left, int)
+			and isinstance(right, int)
+		):
+			if right >= 0 and left.bit_length() + right > MAX_INTEGER_OPERATION_BITS:
+				raise ExecutionLimitError(
+					"integer operation exceeds maximum bit budget: "
+					f"{MAX_INTEGER_OPERATION_BITS}"
+				)
+
 	@classmethod
 	def _matches_return_type(cls, value: object, return_type: object) -> bool:
 		"""Return whether a runtime value satisfies a function return contract."""
@@ -1167,6 +1218,7 @@ class Interpreter:
 				and right_number == 0
 			):
 				raise DivisionByZeroError("division or modulo by zero")
+			self._check_integer_operation_budget(operation, left_number, right_number)
 			try:
 				match operation:
 					case BinaryOp.ADD:
@@ -1196,6 +1248,7 @@ class Interpreter:
 			right_number = self._numeric(right)
 			if not isinstance(left_number, int) or not isinstance(right_number, int):
 				raise InvalidOperationError("shift operands must be integers")
+			self._check_integer_operation_budget(operation, left_number, right_number)
 			try:
 				total = (
 					left_number << right_number
@@ -1271,6 +1324,12 @@ class Interpreter:
 		raise InvalidOperationError(f"operator is not implemented: {operation.value}")
 
 	def _evaluate_binary(self, expression: Binary, environment: RuntimeEnv) -> object:
+		def apply_checked(operation: BinaryOp, left: object, right: object) -> object:
+			self._check_deadline()
+			result = self._apply_binary(operation, left, right)
+			self._check_deadline()
+			return result
+
 		if expression.operation in (
 			BinaryOp.DECLARATION,
 			BinaryOp.ASSIGNMENT,
@@ -1313,7 +1372,7 @@ class Interpreter:
 				BinaryOp.LSHIFT_ASSIGN: BinaryOp.LSHIFT,
 				BinaryOp.RSHIFT_ASSIGN: BinaryOp.RSHIFT,
 			}[expression.operation]
-			value = self._apply_binary(base_operation, current, right)
+			value = apply_checked(base_operation, current, right)
 			environment.assign(expression.left.label, value)
 			return value
 
@@ -1325,15 +1384,17 @@ class Interpreter:
 			if not isinstance(left, bool):
 				raise InvalidOperationError("logical operands must be booleans")
 			if expression.operation == BinaryOp.LOGICAL_AND and not left:
+				self._check_deadline()
 				return False
 			if expression.operation == BinaryOp.LOGICAL_OR and left:
+				self._check_deadline()
 				return True
 			right = self._evaluate(expression.right, environment)
-			return self._apply_binary(expression.operation, left, right)
+			return apply_checked(expression.operation, left, right)
 
 		left = self._evaluate(expression.left, environment)
 		right = self._evaluate(expression.right, environment)
-		return self._apply_binary(expression.operation, left, right)
+		return apply_checked(expression.operation, left, right)
 
 	def _execute(
 		self, expressions: Sequence[Expression], environment: RuntimeEnv

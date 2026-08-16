@@ -7,6 +7,7 @@ import {
 	verifyDiscordRequest,
 } from "./discord";
 import { evaluate, EvaluatorServiceError } from "./evaluator";
+import { claimInteraction, replayResponseMessage, ReplayGuard } from "./replay";
 import {
 	formatErrorMessage,
 	formatRollResponse,
@@ -68,6 +69,7 @@ function isValidRollOptions(
 async function dispatchApplicationCommand(
 	interaction: ApplicationCommandInteraction,
 	evaluator: Fetcher,
+	replayGuard: DurableObjectNamespace,
 ): Promise<Response> {
 	let source: string;
 	const options = getCommandOptions(interaction);
@@ -85,6 +87,9 @@ async function dispatchApplicationCommand(
 
 	const userId = getInteractionUserId(interaction);
 	if (userId === null) return errorResponse("unable to identify the user");
+	if (!(await claimInteraction(replayGuard, interaction.id))) {
+		return errorResponse(replayResponseMessage());
+	}
 
 	try {
 		const result = await evaluate(evaluator, source);
@@ -134,10 +139,16 @@ export default {
 			if (!isApplicationCommand(interaction)) {
 				return jsonResponse({ error: "unsupported_interaction" }, 400);
 			}
-			return dispatchApplicationCommand(interaction, env.AGATHOS_EVALUATOR);
+			return dispatchApplicationCommand(
+				interaction,
+				env.AGATHOS_EVALUATOR,
+				env.REPLAY_GUARD,
+			);
 		} catch (error) {
 			console.error("interaction_request_error", error);
 			return jsonResponse({ error: "internal_error" }, 500);
 		}
 	},
 };
+
+export { ReplayGuard };

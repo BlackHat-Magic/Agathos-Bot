@@ -175,7 +175,7 @@ class EvaluatorWorkerTests(unittest.IsolatedAsyncioTestCase):
 		self.assertEqual(response.status, 200)
 		data = response_data(response)
 		self.assertEqual(data["ok"], False)
-		self.assertEqual(data["error"]["code"], "type_error")
+		self.assertEqual(data["error"]["code"], "serialization_error")
 
 	async def test_unexpected_failure_is_not_exposed_to_caller(self):
 		with self.assertLogs(evaluator_worker.logger, level="ERROR") as logs:

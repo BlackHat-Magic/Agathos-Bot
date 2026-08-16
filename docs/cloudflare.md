@@ -3,12 +3,22 @@
 Agathos runs as two Cloudflare Workers:
 
 - `agathos-evaluator` is a private Python Worker. It evaluates Agathos source
-  and is reached through a Service Binding.
+  and is reached through a Service Binding. Its isolated
+  `workers/evaluator/wrangler.jsonc` sets `workers_dev: false`, so Wrangler does
+  not publish a workers.dev URL for it; the interaction Worker can still call it
+  through `AGATHOS_EVALUATOR`.
 - `agathos-interactions` is the public TypeScript Worker. It verifies Discord
   signatures, handles PING and `/r` or `/roll`, and calls the evaluator.
 
 The evaluator has no public route. Deploy it before the interaction Worker so
-the `AGATHOS_EVALUATOR` Service Binding target exists.
+the `AGATHOS_EVALUATOR` Service Binding target exists. Do not add a route or
+turn `workers_dev` back on: the Service Binding is the evaluator's production
+ingress.
+
+The interaction Worker binds one SQLite-backed Durable Object named
+`ReplayGuard`. It transactionally claims each Discord application-command ID
+before evaluator invocation and retains the claim for ten minutes. A replayed
+ID receives a bounded ephemeral response and never reaches the evaluator.
 
 ## Prerequisites
 
@@ -27,6 +37,7 @@ Run all commands below from the repository root unless a `cd` is shown.
 Install the Python dependencies and start the evaluator Worker:
 
 ```bash
+cd workers/evaluator
 uv sync
 uv run pywrangler dev
 ```
@@ -37,15 +48,6 @@ In a second shell, install and start the interaction Worker:
 cd workers/interactions
 npm install
 npm run dev
-```
-
-To start both Workers through Wrangler's multi-config development command,
-use this from the repository root instead:
-
-```bash
-npx wrangler dev \
-  -c workers/interactions/wrangler.jsonc \
-  -c wrangler.jsonc
 ```
 
 The interaction Worker uses the `AGATHOS_EVALUATOR` Service Binding in local
@@ -91,6 +93,8 @@ in a local `.env` file or export them in the shell. `.env` is ignored by Git.
 Deploy the private evaluator first:
 
 ```bash
+cd workers/evaluator
+uv sync
 uv run pywrangler deploy
 ```
 
@@ -102,8 +106,9 @@ npx wrangler deploy
 ```
 
 The interaction deployment must retain the `AGATHOS_EVALUATOR` service binding
-from `workers/interactions/wrangler.jsonc`. The evaluator deployment has no
-Discord token and no public route.
+from `workers/interactions/wrangler.jsonc`, as well as the `REPLAY_GUARD`
+Durable Object binding and its `new_sqlite_classes` migration. The evaluator
+deployment has no Discord token and no public route.
 
 ## Register Commands
 
@@ -167,15 +172,25 @@ return HTTP 401, and the endpoint must be HTTPS and publicly reachable.
 
 ## Rollback
 
+Never deploy a pre-Durable-Object revision or configuration as a rollback. The
+rollback target must be a known-good revision that includes the SQLite
+`ReplayGuard` migration in `workers/interactions/wrangler.jsonc` with
+`new_sqlite_classes`. If reverting interaction code to an older implementation,
+retain the current post-migration migration configuration while deploying the
+reverted code instead of restoring the old Worker configuration. Commit
+`89eb927` or any earlier revision predates this migration and is not a valid
+post-migration rollback target.
+
 Use a clean checkout of the last known-good revision so the working tree with
 the current deployment changes is not disturbed:
 
 ```bash
 git worktree add ../agathos-rollback <known-good-revision>
 cd ../agathos-rollback
+cd workers/evaluator
 uv sync
 uv run pywrangler deploy
-cd workers/interactions
+cd ../interactions
 npm ci
 npx wrangler deploy
 ```

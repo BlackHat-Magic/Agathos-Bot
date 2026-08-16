@@ -5,6 +5,22 @@ import type {
 	RollResultValue,
 } from "./types";
 
+function makeReplayGuard(): DurableObjectNamespace {
+	const claimed = new Set<string>();
+	return {
+		getByName: () => ({
+			fetch: async (_input: RequestInfo | URL, init?: RequestInit) => {
+				const body = JSON.parse(String(init?.body)) as { id: string };
+				const isNew = !claimed.has(body.id);
+				if (isNew) claimed.add(body.id);
+				return new Response(JSON.stringify({ claimed: isNew }), {
+					headers: { "content-type": "application/json" },
+				});
+			},
+		}),
+	} as unknown as DurableObjectNamespace;
+}
+
 export const TEST_NOW_SECONDS = 1_700_000_000;
 export const FIXED_PUBLIC_KEY_HEX =
 	"d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
@@ -52,10 +68,14 @@ export function makeRequest(
 	});
 }
 
-export function makeEnv(fetcher: Fetcher): Env {
+export function makeEnv(
+	fetcher: Fetcher,
+	replayGuard: DurableObjectNamespace = makeReplayGuard(),
+): Env {
 	return {
 		AGATHOS_EVALUATOR: fetcher,
 		DISCORD_PUBLIC_KEY: FIXED_PUBLIC_KEY_HEX,
+		REPLAY_GUARD: replayGuard,
 	};
 }
 

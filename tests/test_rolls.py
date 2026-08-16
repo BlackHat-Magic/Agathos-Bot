@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from agathos.rolls import (
 	MAX_SOURCE_LENGTH,
+	MAX_SAFE_INTEGER,
 	SerializationError,
 	error_code,
 	evaluate_source,
@@ -126,6 +127,26 @@ class InterpreterBudgetTests(unittest.TestCase):
 		with self.assertRaises(ExecutionLimitError):
 			interpreter.execute_source("[d20 for i in 0:100000]")
 
+	def test_huge_integer_operations_are_rejected_before_evaluation(self):
+		for source in (
+			"2**10000000",
+			"2 << 10000000",
+			"(2**500000) * (2**500000)",
+		):
+			with self.subTest(source=source):
+				with self.assertRaises(ExecutionLimitError):
+					Interpreter().execute_source(source)
+
+	def test_deadline_is_checked_after_binary_operation(self):
+		expressions = Parser(Tokenizer("2 * 3").tokenize()).parse_program()
+		interpreter = Interpreter(
+			max_duration_ms=10,
+			clock=FakeClock(0.000, 0.000, 0.011),
+		)
+
+		with self.assertRaises(ExecutionLimitError):
+			interpreter.execute(expressions)
+
 
 class RollSemanticTests(unittest.TestCase):
 	def test_blank_source_defaults_to_d20(self):
@@ -180,6 +201,33 @@ class SerializationTests(unittest.TestCase):
 		value = [None, True, 3, 2.5, "text", [False, "nested"]]
 
 		self.assertEqual(serialize_value(value), value)
+
+	def test_safe_integers_serialize_losslessly(self):
+		value = [-MAX_SAFE_INTEGER, 0, MAX_SAFE_INTEGER]
+
+		self.assertEqual(serialize_value(value), value)
+
+	def test_unsafe_nested_integer_is_rejected(self):
+		with self.assertRaisesRegex(
+			SerializationError,
+			"integer exceeds JavaScript Number.MAX_SAFE_INTEGER",
+		):
+			serialize_value([9007199254740993])
+
+	def test_unsafe_roll_result_total_is_rejected(self):
+		with self.assertRaises(SerializationError):
+			serialize_value(RollResult(total=9007199254740993, details=()))
+
+	def test_unsafe_roll_detail_integer_is_rejected(self):
+		detail = DieRollDetail(
+			sides=6,
+			rolls=(9007199254740993,),
+			rerolls=(),
+			dropped=(),
+		)
+
+		with self.assertRaises(SerializationError):
+			serialize_value(RollResult(total=1, details=(detail,)))
 
 	def test_roll_result_serializes_as_a_tagged_object(self):
 		die = DieRollDetail(
@@ -273,6 +321,7 @@ class SerializationTests(unittest.TestCase):
 class ErrorCodeTests(unittest.TestCase):
 	def test_error_codes_are_stable(self):
 		cases = (
+			(SerializationError("unsafe integer"), "serialization_error"),
 			(SyntaxError(), "syntax_error"),
 			(TypeError(), "type_error"),
 			(NameError(), "name_error"),

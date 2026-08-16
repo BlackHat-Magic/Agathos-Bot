@@ -89,6 +89,9 @@ export function parseInteraction(rawBody: string): Interaction {
 
 	if (value.type === 1) return { type: 1 };
 	if (value.type !== 2) return { type: value.type };
+	if (typeof value.id !== "string" || value.id.length === 0) {
+		throw new TypeError("application command interaction id is malformed");
+	}
 
 	if (!isRecord(value.data) || typeof value.data.name !== "string") {
 		throw new TypeError("application command data is malformed");
@@ -111,6 +114,7 @@ export function parseInteraction(rawBody: string): Interaction {
 	const user = isRecord(value.user) ? value.user : undefined;
 	return {
 		type: 2,
+		id: value.id,
 		data: { name: value.data.name, options },
 		member: memberUser && typeof memberUser.id === "string"
 			? { user: { id: memberUser.id } }

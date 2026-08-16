@@ -4,6 +4,7 @@ export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue
 export interface Env {
 	AGATHOS_EVALUATOR: Fetcher;
 	DISCORD_PUBLIC_KEY: string;
+	REPLAY_GUARD: DurableObjectNamespace;
 }
 
 export interface DiscordUser {
@@ -31,6 +32,7 @@ export interface PingInteraction {
 
 export interface ApplicationCommandInteraction {
 	type: 2;
+	id: string;
 	data: ApplicationCommandData;
 	member?: DiscordMember;
 	user?: DiscordUser;

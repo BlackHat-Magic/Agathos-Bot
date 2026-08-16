@@ -214,11 +214,23 @@ describe("interaction worker", () => {
 	it("rejects unsupported application commands", async () => {
 		const evaluator = fetcher(async () => evaluatorJson({ ok: true, value: 1 }));
 		const response = await worker.fetch(
-			await signedRequest(JSON.stringify({ type: 2, data: { name: "unknown" } })),
+			await signedRequest(JSON.stringify({ id: "unknown-1", type: 2, data: { name: "unknown" } })),
 			makeEnv(evaluator),
 		);
 		expect(response.status).toBe(400);
 		expect(await bodyOf(response)).toEqual({ error: "unsupported_command" });
+		expect(evaluator.fetch).not.toHaveBeenCalled();
+	});
+
+	it("requires an interaction id for application commands", async () => {
+		const evaluator = fetcher(async () => evaluatorJson({ ok: true, value: 1 }));
+		const response = await worker.fetch(
+			await signedRequest(JSON.stringify({ type: 2, data: { name: "r" } })),
+			makeEnv(evaluator),
+		);
+
+		expect(response.status).toBe(400);
+		expect(await bodyOf(response)).toEqual({ error: "invalid_json" });
 		expect(evaluator.fetch).not.toHaveBeenCalled();
 	});
 
@@ -248,7 +260,7 @@ describe("interaction worker", () => {
 	it("evaluates /r as d20 and sends the expected evaluator request", async () => {
 		const evaluator = fetcher(async () => evaluatorJson({ ok: true, value: makeRollResult(6) }));
 		const response = await worker.fetch(
-			await signedRequest(JSON.stringify({ type: 2, data: { name: "r" }, user: { id: "42" } })),
+			await signedRequest(JSON.stringify({ id: "r-1", type: 2, data: { name: "r" }, user: { id: "42" } })),
 			makeEnv(evaluator),
 		);
 		const payload = await bodyOf(response);
@@ -267,9 +279,36 @@ describe("interaction worker", () => {
 		);
 	});
 
+	it("rejects a replayed application command without evaluating it again", async () => {
+		const evaluator = fetcher(async () => evaluatorJson({ ok: true, value: makeRollResult(6) }));
+		const env = makeEnv(evaluator);
+		const body = JSON.stringify({
+			id: "duplicate-1",
+			type: 2,
+			data: { name: "r" },
+			user: { id: "42" },
+		});
+
+		const first = await worker.fetch(await signedRequest(body), env);
+		const second = await worker.fetch(await signedRequest(body), env);
+
+		expect(first.status).toBe(200);
+		expect(second.status).toBe(200);
+		expect(await bodyOf(second)).toEqual({
+			type: 4,
+			data: {
+				content: "Error: this interaction has already been processed",
+				flags: 64,
+				allowed_mentions: { parse: [] },
+			},
+		});
+		expect(evaluator.fetch).toHaveBeenCalledTimes(1);
+	});
+
 	it("evaluates /roll with its expression option", async () => {
 		const evaluator = fetcher(async () => evaluatorJson({ ok: true, value: 7 }));
 		const body = JSON.stringify({
+			id: "roll-1",
 			type: 2,
 			data: { name: "roll", options: [{ name: "expression", type: 3, value: "2d6" }] },
 			member: { user: { id: "7" } },
@@ -289,14 +328,14 @@ describe("interaction worker", () => {
 	});
 
 	it.each([
-		["malformed options object", { type: 2, data: { name: "roll", options: {} } }, 400, "invalid_json"],
-		["malformed option", { type: 2, data: { name: "roll", options: [{}] } }, 400, "invalid_json"],
-		["duplicate options", { type: 2, data: { name: "roll", options: [
+		["malformed options object", { id: "malformed-options-object", type: 2, data: { name: "roll", options: {} } }, 400, "invalid_json"],
+		["malformed option", { id: "malformed-option", type: 2, data: { name: "roll", options: [{}] } }, 400, "invalid_json"],
+		["duplicate options", { id: "duplicate-options", type: 2, data: { name: "roll", options: [
 			{ name: "expression", type: 3, value: "d20" }, { name: "expression", type: 3, value: "d6" },
 		] }, user: { id: "1" } }, 400, "invalid_command"],
-		["extra option", { type: 2, data: { name: "r", options: [{ name: "expression", type: 3, value: "d20" }] }, user: { id: "1" } }, 400, "invalid_command"],
-		["wrong option type", { type: 2, data: { name: "roll", options: [{ name: "expression", type: 4, value: "d20" }] }, user: { id: "1" } }, 400, "invalid_command"],
-		["too-long option", { type: 2, data: { name: "roll", options: [{ name: "expression", type: 3, value: "x".repeat(4097) }] }, user: { id: "1" } }, 400, "invalid_command"],
+		["extra option", { id: "extra-option", type: 2, data: { name: "r", options: [{ name: "expression", type: 3, value: "d20" }] }, user: { id: "1" } }, 400, "invalid_command"],
+		["wrong option type", { id: "wrong-option-type", type: 2, data: { name: "roll", options: [{ name: "expression", type: 4, value: "d20" }] }, user: { id: "1" } }, 400, "invalid_command"],
+		["too-long option", { id: "too-long-option", type: 2, data: { name: "roll", options: [{ name: "expression", type: 3, value: "x".repeat(4097) }] }, user: { id: "1" } }, 400, "invalid_command"],
 	] as const)("rejects %s", async (_name, command, status, error) => {
 		const evaluator = fetcher(async () => evaluatorJson({ ok: true, value: 1 }));
 		const response = await worker.fetch(await signedRequest(JSON.stringify(command)), makeEnv(evaluator));
@@ -307,7 +346,7 @@ describe("interaction worker", () => {
 
 	it("returns an ephemeral error with mentions disabled when the user is missing", async () => {
 		const evaluator = fetcher(async () => evaluatorJson({ ok: true, value: 1 }));
-		const body = JSON.stringify({ type: 2, data: { name: "r" } });
+		const body = JSON.stringify({ id: "missing-user-1", type: 2, data: { name: "r" } });
 		const data = interactionData(await bodyOf(await worker.fetch(await signedRequest(body), makeEnv(evaluator))));
 		expect(data.content).toBe("Error: unable to identify the user");
 		expect(data.flags).toBe(64);
@@ -317,7 +356,7 @@ describe("interaction worker", () => {
 
 	it("maps evaluator errors to an ephemeral escaped response", async () => {
 		const evaluator = fetcher(async () => evaluatorJson({ ok: false, error: { code: "invalid", message: "bad *input*" } }));
-		const body = JSON.stringify({ type: 2, data: { name: "r" }, user: { id: "1" } });
+		const body = JSON.stringify({ id: "error-1", type: 2, data: { name: "r" }, user: { id: "1" } });
 		const data = interactionData(await bodyOf(await worker.fetch(await signedRequest(body), makeEnv(evaluator))));
 		expect(data.content).toBe("Error: bad \\*input\\*");
 		expect(data.flags).toBe(64);
@@ -329,7 +368,7 @@ describe("interaction worker", () => {
 		const evaluator = fetcher(async () =>
 			new Response("not json", { headers: { "content-type": "application/json" } }),
 		);
-		const body = JSON.stringify({ type: 2, data: { name: "r" }, user: { id: "1" } });
+		const body = JSON.stringify({ id: "malformed-result-1", type: 2, data: { name: "r" }, user: { id: "1" } });
 		const response = await worker.fetch(await signedRequest(body), makeEnv(evaluator));
 
 		expect(response.status).toBe(200);
@@ -341,7 +380,7 @@ describe("interaction worker", () => {
 		const evaluator = fetcher(async () => {
 			throw new Error("binding unavailable");
 		});
-		const body = JSON.stringify({ type: 2, data: { name: "r" }, user: { id: "1" } });
+		const body = JSON.stringify({ id: "binding-error-1", type: 2, data: { name: "r" }, user: { id: "1" } });
 		const response = await worker.fetch(await signedRequest(body), makeEnv(evaluator));
 
 		expect(response.status).toBe(200);
@@ -350,7 +389,7 @@ describe("interaction worker", () => {
 
 	it("caps a successful response and returns a bounded error response", async () => {
 		const evaluator = fetcher(async () => evaluatorJson({ ok: true, value: ["x".repeat(2100)] }));
-		const body = JSON.stringify({ type: 2, data: { name: "r" }, user: { id: "1" } });
+		const body = JSON.stringify({ id: "long-response-1", type: 2, data: { name: "r" }, user: { id: "1" } });
 		const data = interactionData(await bodyOf(await worker.fetch(await signedRequest(body), makeEnv(evaluator))));
 		expect(data.content).toBe("Error: result exceeds Discord's message length limit");
 		expect((data.content as string).length).toBeLessThanOrEqual(2000);

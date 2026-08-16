@@ -1,0 +1,21 @@
+[project]
+name = "agathos-evaluator"
+version = "0.1.0"
+description = "Private Agathos Python Worker"
+requires-python = ">=3.13"
+dependencies = [
+    "workers-runtime-sdk",
+    "agathos-bot",
+]
+
+[dependency-groups]
+dev = [
+    "workers-py",
+]
+
+[tool.uv.sources]
+agathos-bot = { path = "../..", editable = false }
+workers-py = { git = "https://github.com/cloudflare/workers-py", rev = "da951b48f65a39a77c826707de375e039f047228", subdirectory = "packages/cli" }
+
+[tool.uv]
+package = false

@@ -3,6 +3,20 @@
 	"name": "agathos-interactions",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-08-16",
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "REPLAY_GUARD",
+				"class_name": "ReplayGuard"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["ReplayGuard"]
+		}
+	],
 	"services": [
 		{
 			"binding": "AGATHOS_EVALUATOR",
