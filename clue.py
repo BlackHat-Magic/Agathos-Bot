@@ -263,7 +263,7 @@ def _create_human_players(n: int, suspects: list[Suspect], game: Game) -> list[P
 			try:
 				idx = int(inp)
 				suspect = suspects[idx - 1]
-			except ValueError, IndexError:
+			except (ValueError, IndexError):
 				suspect = max(
 					suspects, key=lambda x: fuzz.ratio(inp, x.value.casefold())
 				)
@@ -473,7 +473,7 @@ def _play_game(game: Game) -> None:
 							destination = player.piece.location
 						else:
 							destination = rooms[idx - 1]
-					except ValueError, IndexError:
+					except (ValueError, IndexError):
 						destination = max(
 							rooms,
 							key=lambda x: fuzz.ratio(inp, x.room.value.casefold()),
@@ -510,7 +510,7 @@ def _play_game(game: Game) -> None:
 							destination = player.piece.location
 						else:
 							destination = dests[idx - 1]
-					except ValueError, IndexError:
+					except (ValueError, IndexError):
 						continue
 					dest_conf = "n"
 					if destination == player.piece.location:
@@ -565,7 +565,7 @@ def _play_game(game: Game) -> None:
 					try:
 						idx = int(inp)
 						guess_suspect = [suspect for suspect in Suspect][idx - 1]
-					except ValueError, IndexError:
+					except (ValueError, IndexError):
 						guess_suspect = max(
 							[suspect for suspect in Suspect],
 							key=lambda x: fuzz.ratio(inp, x.value),
@@ -589,7 +589,7 @@ def _play_game(game: Game) -> None:
 					try:
 						idx = int(inp)
 						guess_weapon = [weapon for weapon in Weapon][idx - 1]
-					except ValueError, IndexError:
+					except (ValueError, IndexError):
 						guess_weapon = max(
 							[weapon for weapon in Weapon],
 							key=lambda x: fuzz.ratio(inp, x.value),
@@ -656,7 +656,7 @@ def _play_game(game: Game) -> None:
 						try:
 							idx = int(inp)
 							shown_card = matching_cards[idx - 1]
-						except ValueError, IndexError:
+						except (ValueError, IndexError):
 							shown_card = max(
 								zip(matching_cards, names),
 								key=lambda x: fuzz.ratio(inp, x[1]),
@@ -694,7 +694,7 @@ def _play_game(game: Game) -> None:
 			try:
 				idx = int(inp)
 				accused_suspect = [suspect for suspect in Suspect][idx - 1]
-			except ValueError, IndexError:
+			except (ValueError, IndexError):
 				accused_suspect = max(
 					[suspect for suspect in Suspect],
 					key=lambda x: fuzz.ratio(inp, x.value),
@@ -712,7 +712,7 @@ def _play_game(game: Game) -> None:
 			try:
 				idx = int(inp)
 				accused_weapon = [weapon for weapon in Weapon][idx - 1]
-			except ValueError, IndexError:
+			except (ValueError, IndexError):
 				accused_weapon = max(
 					[weapon for weapon in Weapon],
 					key=lambda x: fuzz.ratio(inp, x.value),
@@ -730,7 +730,7 @@ def _play_game(game: Game) -> None:
 			try:
 				idx = int(inp)
 				accused_room = [room for room in Room][idx - 1]
-			except ValueError, IndexError:
+			except (ValueError, IndexError):
 				accused_room = max(
 					[room for room in Room], key=lambda x: fuzz.ratio(inp, x.value)
 				)

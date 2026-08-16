@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import random
+import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from math import isfinite
-from typing import Any
+from typing import Any, Callable
 
 from .expressions import (
 	Array,
@@ -329,6 +330,8 @@ class Interpreter:
 		rng: random.Random | None = None,
 		max_steps: int = 100_000,
 		max_call_depth: int = 100,
+		max_duration_ms: float | None = None,
+		clock: Callable[[], float] | None = None,
 	) -> None:
 		"""Create an interpreter with optional randomness and execution limits.
 
@@ -341,27 +344,56 @@ class Interpreter:
 		exceed it raises :class:`CallDepthError`, and the depth counter is restored
 		even when a call raises another runtime error.
 
+		``max_duration_ms`` limits wall-clock execution using ``clock``. The
+		deadline is shared by tokenization, parsing, and execution for each source
+		submission. When omitted, execution has no duration limit.
+
 		Raises:
-			ValueError: If either execution limit is negative.
+			ValueError: If an execution limit or duration is negative.
 			TypeError: If a limit is not an integer.
 		"""
 		if not isinstance(max_steps, int) or isinstance(max_steps, bool):
 			raise TypeError("max_steps must be an integer")
 		if not isinstance(max_call_depth, int) or isinstance(max_call_depth, bool):
 			raise TypeError("max_call_depth must be an integer")
+		if max_duration_ms is not None and (
+			not isinstance(max_duration_ms, (int, float))
+			or isinstance(max_duration_ms, bool)
+		):
+			raise TypeError("max_duration_ms must be a number or None")
 		if max_steps < 0:
 			raise ValueError("max_steps must not be negative")
 		if max_call_depth < 0:
 			raise ValueError("max_call_depth must not be negative")
+		if max_duration_ms is not None and (
+			max_duration_ms < 0
+			or (isinstance(max_duration_ms, float) and not isfinite(max_duration_ms))
+		):
+			raise ValueError("max_duration_ms must not be negative")
+		if clock is not None and not callable(clock):
+			raise TypeError("clock must be callable or None")
 
 		self.rng = rng if rng is not None else random.Random()
 		self.max_steps = max_steps
 		self.max_call_depth = max_call_depth
+		self.max_duration_ms = max_duration_ms
+		self._clock = clock if clock is not None else time.perf_counter
 		self._steps = 0
 		self._call_depth = 0
+		self._deadline: float | None = None
 		self._persistent_environment = RuntimeEnv()
 		self._persistent_source = ""
 		self._persistent_expression_count = 0
+
+	def _start_execution(self) -> None:
+		if self.max_duration_ms is not None and self._deadline is None:
+			self._deadline = self._clock() + self.max_duration_ms / 1000
+
+	def _check_deadline(self) -> None:
+		if self._deadline is not None and self._clock() >= self._deadline:
+			raise ExecutionLimitError(
+				f"execution exceeded maximum duration: {self.max_duration_ms} ms"
+			)
 
 	def _tick(self) -> None:
 		"""Consume one step, raising ``ExecutionLimitError`` when exhausted.
@@ -373,6 +405,7 @@ class Interpreter:
 			raise ExecutionLimitError(
 				f"execution exceeded maximum step count: {self.max_steps}"
 			)
+		self._check_deadline()
 		self._steps += 1
 
 	def _evaluate(
@@ -1341,7 +1374,11 @@ class Interpreter:
 			RuntimeErrorBase: For other failures during expression evaluation,
 				including undefined names, invalid operations, and execution limits.
 		"""
-		return self._execute(expressions, RuntimeEnv())
+		self._start_execution()
+		try:
+			return self._execute(expressions, RuntimeEnv())
+		finally:
+			self._deadline = None
 
 	def execute_persistent(self, expressions: Sequence[Expression]) -> object:
 		"""Evaluate expressions while retaining declarations for later calls.
@@ -1349,7 +1386,11 @@ class Interpreter:
 		The step budget and call depth reset for each call, while the root runtime
 		environment is shared with previous persistent executions.
 		"""
-		return self._execute(expressions, self._persistent_environment)
+		self._start_execution()
+		try:
+			return self._execute(expressions, self._persistent_environment)
+		finally:
+			self._deadline = None
 
 	def execute_source(self, source: str) -> object:
 		"""Tokenize, parse, and execute one source program.
@@ -1360,8 +1401,14 @@ class Interpreter:
 		caller. The program itself has no persistent environment or external side
 		effects.
 		"""
-		expressions = Parser(Tokenizer(source).tokenize()).parse_program()
-		return self.execute(expressions)
+		self._start_execution()
+		try:
+			self._check_deadline()
+			expressions = Parser(Tokenizer(source).tokenize()).parse_program()
+			self._check_deadline()
+			return self.execute(expressions)
+		finally:
+			self._deadline = None
 
 	def execute_persistent_source(self, source: str) -> object:
 		"""Tokenize, parse, and execute source in the persistent environment.
@@ -1370,30 +1417,40 @@ class Interpreter:
 		replay metadata are discarded before the original error is propagated.
 		Empty submissions reset execution state but leave replay metadata unchanged.
 		"""
-		persistent_values = self._persistent_environment._values.copy()
-		persistent_source = self._persistent_source
-		persistent_expression_count = self._persistent_expression_count
 		try:
-			separator = ""
-			if self._persistent_source:
-				separator = (
-					"\n" if self._persistent_source.rstrip().endswith(";") else ";\n"
-				)
-			combined_source = self._persistent_source + separator + source
-			expressions = Parser(Tokenizer(combined_source).tokenize()).parse_program()
-			new_expressions = expressions[self._persistent_expression_count :]
-			result = self.execute_persistent(new_expressions)
-			if not new_expressions:
-				return result
-		except BaseException:
-			self._persistent_environment._values.clear()
-			self._persistent_environment._values.update(persistent_values)
-			self._persistent_source = persistent_source
-			self._persistent_expression_count = persistent_expression_count
-			raise
-		self._persistent_source = combined_source
-		self._persistent_expression_count = len(expressions)
-		return result
+			self._start_execution()
+			self._check_deadline()
+			persistent_values = self._persistent_environment._values.copy()
+			persistent_source = self._persistent_source
+			persistent_expression_count = self._persistent_expression_count
+			try:
+				separator = ""
+				if self._persistent_source:
+					separator = (
+						"\n"
+						if self._persistent_source.rstrip().endswith(";")
+						else ";\n"
+					)
+				combined_source = self._persistent_source + separator + source
+				expressions = Parser(
+					Tokenizer(combined_source).tokenize()
+				).parse_program()
+				self._check_deadline()
+				new_expressions = expressions[self._persistent_expression_count :]
+				result = self.execute_persistent(new_expressions)
+				if not new_expressions:
+					return result
+			except BaseException:
+				self._persistent_environment._values.clear()
+				self._persistent_environment._values.update(persistent_values)
+				self._persistent_source = persistent_source
+				self._persistent_expression_count = persistent_expression_count
+				raise
+			self._persistent_source = combined_source
+			self._persistent_expression_count = len(expressions)
+			return result
+		finally:
+			self._deadline = None
 
 
 class _ReturnSignal(Exception):

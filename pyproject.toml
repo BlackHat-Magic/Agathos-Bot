@@ -3,19 +3,22 @@ name = "agathos-bot"
 version = "0.2.0"
 description = "Discord bot for tabletop game tools"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
-    "discord>=2.3.2",
-    "python-dotenv>=1.2.2",
+    "workers-runtime-sdk",
+]
+
+[project.optional-dependencies]
+clue = [
     "rapidfuzz>=3.14.5",
 ]
 
 [dependency-groups]
 dev = [
+    "workers-py",
     "ruff>=0.15.19",
     "ty>=0.0.53",
 ]
 
 [tool.ruff.format]
 indent-style = "tab"
-
