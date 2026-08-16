@@ -9,9 +9,8 @@ Tabletop game tools powered by the Agathos language
 ## Overview
 
 Agathos provides a custom dice language for tabletop game tools. Its Discord
-deployment is being migrated to Cloudflare Workers. The Python evaluator Worker
-exists, while the public TypeScript interaction Worker and final deployment
-documentation are still being completed.
+deployment runs on two Cloudflare Workers: a private Python evaluator and a
+public TypeScript interaction Worker.
 
 ### Goals
 
@@ -43,6 +42,13 @@ dice, for example `4d6l1h1`.
 
 ### Deployment
 
-Cloudflare deployment is in progress. The Python evaluator Worker is available;
-the public TypeScript interaction Worker and final deployment documentation are
-still being completed.
+Agathos is deployed as two Cloudflare Workers: the private Python evaluator
+(`agathos-evaluator`) and the public TypeScript Discord interaction Worker
+(`agathos-interactions`). The evaluator is reached by Service Binding and does
+not need Discord credentials. Deploy the evaluator first, then the interaction
+Worker, and configure Discord's Interactions Endpoint URL to the public Worker
+only after signed PING validation succeeds.
+
+See [docs/cloudflare.md](docs/cloudflare.md) for local development, tests,
+secrets, command registration, endpoint configuration, deployment, and
+rollback instructions.
