@@ -28,7 +28,7 @@ Install the Python dependencies and start the evaluator Worker:
 
 ```bash
 uv sync
-uv run pywrangler dev --config wrangler.evaluator.jsonc
+uv run pywrangler dev
 ```
 
 In a second shell, install and start the interaction Worker:
@@ -45,7 +45,7 @@ use this from the repository root instead:
 ```bash
 npx wrangler dev \
   -c workers/interactions/wrangler.jsonc \
-  -c wrangler.evaluator.jsonc
+  -c wrangler.jsonc
 ```
 
 The interaction Worker uses the `AGATHOS_EVALUATOR` Service Binding in local
@@ -91,7 +91,7 @@ in a local `.env` file or export them in the shell. `.env` is ignored by Git.
 Deploy the private evaluator first:
 
 ```bash
-uv run pywrangler deploy --config wrangler.evaluator.jsonc
+uv run pywrangler deploy
 ```
 
 Deploy the public interaction Worker second:
@@ -174,7 +174,7 @@ the current deployment changes is not disturbed:
 git worktree add ../agathos-rollback <known-good-revision>
 cd ../agathos-rollback
 uv sync
-uv run pywrangler deploy --config wrangler.evaluator.jsonc
+uv run pywrangler deploy
 cd workers/interactions
 npm ci
 npx wrangler deploy
