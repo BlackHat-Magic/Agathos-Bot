@@ -27,6 +27,29 @@ describe('begin', () => {
     expect(totalDealt).toBe(18);
   });
 
+  it('rejects beginning a game without players', () => {
+    const game = createGame([]);
+
+    expect(() => begin(game, () => 0)).toThrow('cannot begin a game without players');
+  });
+
+  it('rejects an unrecognized suspect before dealing', () => {
+    const player = mkPlayer('Miss Scarlett', 0);
+    (player as unknown as { suspect: string }).suspect = 'Unknown Suspect';
+    const game = createGame([player]);
+
+    expect(() => begin(game, () => 0)).toThrow('invalid suspect: Unknown Suspect');
+  });
+
+  it('rejects duplicate suspects before dealing', () => {
+    const game = createGame([
+      mkPlayer('Miss Scarlett', 0),
+      mkPlayer('Miss Scarlett', 1),
+    ]);
+
+    expect(() => begin(game, () => 0)).toThrow('duplicate suspect: Miss Scarlett');
+  });
+
   it('alternates deal across 3 players as evenly as possible', () => {
     const players = [mkPlayer('Miss Scarlett', 0), mkPlayer('Professor Plum', 1), mkPlayer('Mrs. Peacock', 2)];
     const game = createGame(players);
@@ -48,6 +71,7 @@ describe('begin', () => {
       player.movedBySuggestion = true;
       player.enteredRoomThisTurn = true;
     }
+    players[0]!.piece.location = game.board[10]![18]!;
     game.pendingReveal = {
       suggesterIndex: 0,
       suspect: 'Miss Scarlett',
@@ -66,6 +90,7 @@ describe('begin', () => {
     begin(game, () => 0.99);
 
     expect(game.solution).not.toEqual(firstSolution);
+    expect(players[0]!.piece.location).toBe(suspectStart('Miss Scarlett', game.board));
     expect(players.reduce((total, player) => total + player.cards.length, 0)).toBe(18);
     for (const player of players) {
       expect(player.failedAccusation).toBe(false);

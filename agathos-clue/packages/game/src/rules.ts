@@ -1,6 +1,6 @@
 import type { Card, Game, Player, Room, Suspect, Weapon } from './types';
 import { SUSPECTS, WEAPONS, ROOMS } from './types';
-import { buildBoard, spaceAt } from './board';
+import { buildBoard, spaceAt, suspectStart } from './board';
 
 type RNG = () => number;
 
@@ -57,8 +57,24 @@ export function createGame(players: Player[]): Game {
 }
 
 export function begin(game: Game, rng: RNG = Math.random): void {
+  if (game.players.length === 0) {
+    throw new Error('cannot begin a game without players');
+  }
+
+  const seenSuspects = new Set<string>();
+  for (const player of game.players) {
+    if (!(SUSPECTS as readonly string[]).includes(player.suspect)) {
+      throw new Error(`invalid suspect: ${player.suspect}`);
+    }
+    if (seenSuspects.has(player.suspect)) {
+      throw new Error(`duplicate suspect: ${player.suspect}`);
+    }
+    seenSuspects.add(player.suspect);
+  }
+
   game.players.forEach((player, index) => { player.index = index; });
   for (const player of game.players) {
+    player.piece.location = suspectStart(player.suspect, game.board);
     player.cards = [];
     player.failedAccusation = false;
     player.guessedHere = false;

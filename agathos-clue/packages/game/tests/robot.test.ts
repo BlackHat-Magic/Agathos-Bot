@@ -48,7 +48,7 @@ describe('decideRobotIntent', () => {
   });
 
   it('suggests when in a room and not yet guessed this turn', () => {
-    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    const g = createGame([mkRobot('Miss Scarlett', 0), mkRobot('Professor Plum', 1)]);
     g.turnIndex = 0; g.phase = 'playing';
     // Place Scarlett in Hall
     g.players[0].piece.location = spaceAt(g.board, 10, 18);
@@ -56,6 +56,17 @@ describe('decideRobotIntent', () => {
     g.hasMovedThisTurn = true;
     const intent = decideRobotIntent(g, 0, () => 0.5);
     expect(intent.kind).toBe('suggest');
+  });
+
+  it('ends a one-player robot turn instead of suggesting', () => {
+    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    g.turnIndex = 0;
+    g.phase = 'playing';
+    g.players[0]!.piece.location = spaceAt(g.board, 10, 18);
+    g.players[0]!.enteredRoomThisTurn = true;
+    g.hasMovedThisTurn = true;
+
+    expect(decideRobotIntent(g, 0, () => 0.5)).toEqual({ kind: 'endTurn' });
   });
 
   it('ends the turn in a room without room-entry eligibility', () => {
@@ -91,7 +102,7 @@ describe('decideRobotIntent', () => {
   });
 
   it('suggests from a corner room after being moved by a suggestion', () => {
-    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    const g = createGame([mkRobot('Miss Scarlett', 0), mkRobot('Professor Plum', 1)]);
     g.turnIndex = 0;
     g.phase = 'playing';
     g.players[0]!.piece.location = spaceAt(g.board, 2, 1); // Conservatory
@@ -194,7 +205,7 @@ describe('decideRobotIntent', () => {
   });
 
   it('does not request a secret passage after dice movement enters a corner room', () => {
-    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    const g = createGame([mkRobot('Miss Scarlett', 0), mkRobot('Professor Plum', 1)]);
     g.turnIndex = 0;
     g.phase = 'playing';
     g.lastDieRoll = 7;

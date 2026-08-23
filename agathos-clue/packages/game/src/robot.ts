@@ -54,6 +54,7 @@ export function decideRobotIntent(
       !player.guessedHere &&
       (player.enteredRoomThisTurn || player.movedBySuggestion)
     ) {
+      if (game.players.length < 2) return { kind: 'endTurn' };
       return {
         kind: 'suggest',
         suspect: randomOf(SUSPECTS, rng),
@@ -70,6 +71,7 @@ export function decideRobotIntent(
     !player.guessedHere &&
     (player.enteredRoomThisTurn || player.movedBySuggestion)
   ) {
+    if (game.players.length < 2) return { kind: 'endTurn' };
     return {
       kind: 'suggest',
       suspect: randomOf(SUSPECTS, rng),
