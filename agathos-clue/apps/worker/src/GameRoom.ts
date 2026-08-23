@@ -480,6 +480,9 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   private sendPrivateReveal(connection: Connection): void {
+    // This durable map stores each recipient's latest private reveal: reconnecting
+    // the same authenticated recipient replays it, while other identities cannot read it.
+    // A later suggestion clears that recipient's entry; a later reveal replaces it.
     if (connection.viewerIndex === null || this.game === undefined) return;
     const player = this.game.players[connection.viewerIndex];
     if (player?.userId !== connection.userId) return;

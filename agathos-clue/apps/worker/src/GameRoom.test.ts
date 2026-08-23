@@ -599,6 +599,59 @@ describe('GameRoom protocol helpers', () => {
     closeConnections(reloaded.gameRoom);
   });
 
+  it('replays only the recipient latest reveal and replaces it after a later suggestion', async () => {
+    const stored = pendingRevealGame(false, [
+      { type: 'weapon', weapon: 'Lead Pipe' },
+      { type: 'suspect', suspect: 'Professor Plum' },
+    ]);
+    stored.players[0]!.location = 'Hall';
+    stored.players[0]!.enteredRoomThisTurn = true;
+    const { gameRoom, storage } = roomWithStorage(stored);
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+
+    bob.client.send(JSON.stringify({ intent: {
+      kind: 'showCard', card: { type: 'weapon', weapon: 'Lead Pipe' },
+    } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    await expect(alice.messages.next()).resolves.toEqual({
+      type: 'private',
+      reveal: { fromIndex: 1, card: { type: 'weapon', weapon: 'Lead Pipe' } },
+    });
+    closeConnections(gameRoom);
+
+    const aliceReloaded = await connectJoinedPlayer(gameRoom, 'alice');
+    await expect(aliceReloaded.messages.next()).resolves.toEqual({
+      type: 'private',
+      reveal: { fromIndex: 1, card: { type: 'weapon', weapon: 'Lead Pipe' } },
+    });
+    const bobReloaded = await connectJoinedPlayer(gameRoom, 'bob');
+    expect(bobReloaded.messages.received.some(message => message.type === 'private')).toBe(false);
+
+    aliceReloaded.client.send(JSON.stringify({ intent: {
+      kind: 'suggest', suspect: 'Professor Plum', weapon: 'Dagger',
+    } }));
+    await aliceReloaded.messages.next();
+    await bobReloaded.messages.next();
+    expect(storage.privateReveals).toEqual({});
+
+    bobReloaded.client.send(JSON.stringify({ intent: {
+      kind: 'showCard', card: { type: 'suspect', suspect: 'Professor Plum' },
+    } }));
+    await aliceReloaded.messages.next();
+    await bobReloaded.messages.next();
+    await expect(aliceReloaded.messages.next()).resolves.toEqual({
+      type: 'private',
+      reveal: { fromIndex: 1, card: { type: 'suspect', suspect: 'Professor Plum' } },
+    });
+    expect(storage.privateReveals).toEqual({
+      alice: { fromIndex: 1, card: { type: 'suspect', suspect: 'Professor Plum' } },
+    });
+    expect(bobReloaded.messages.received.some(message => message.type === 'private')).toBe(false);
+    closeConnections(gameRoom);
+  });
+
   it('does not broadcast or persist a reveal when game/private persistence fails', async () => {
     const stored = pendingRevealGame(false, [
       { type: 'weapon', weapon: 'Lead Pipe' },
