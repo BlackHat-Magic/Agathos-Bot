@@ -77,6 +77,22 @@ describe('server snapshot validation', () => {
     expect(isGameView({ ...view('finished'), solution: { suspect: { type: 'weapon', weapon: 'Rope' } } })).toBe(false);
   });
 
+  it.each([2, 6, 7, 12])('accepts canonical last die roll total %s', (total) => {
+    expect(isGameView({ ...view(), lastDieRoll: total })).toBe(true);
+    expect(parseServerMessage(JSON.stringify({
+      type: 'state', view: { ...view(), lastDieRoll: total },
+      events: [{ type: 'rolled', playerIndex: 0, result: total }],
+    }))).toMatchObject({ ok: true });
+  });
+
+  it.each([1, 13, 6.5, '7'])('rejects invalid die roll value %s', (value) => {
+    expect(isGameView({ ...view(), lastDieRoll: value })).toBe(false);
+    expect(parseServerMessage(JSON.stringify({
+      type: 'state', view: view(),
+      events: [{ type: 'rolled', playerIndex: 0, result: value }],
+    }))).toMatchObject({ ok: false });
+  });
+
   it('rejects malformed, unknown, and unsafe event frames without throwing', () => {
     expect(parseServerMessage('not json')).toEqual({ ok: false, error: 'malformed JSON message' });
     expect(parseServerMessage(JSON.stringify({ type: 'unknown' }))).toMatchObject({ ok: false });

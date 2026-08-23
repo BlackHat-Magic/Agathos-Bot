@@ -154,7 +154,7 @@ export function validateGameView(value: unknown): GameView {
 
   if (record.lastDieRoll !== null &&
       (typeof record.lastDieRoll !== 'number' || !Number.isInteger(record.lastDieRoll) ||
-       record.lastDieRoll < 1 || record.lastDieRoll > 6)) {
+       record.lastDieRoll < 2 || record.lastDieRoll > 12)) {
     throw new Error('invalid last die roll');
   }
   if (record.solution !== undefined) {
@@ -326,7 +326,7 @@ function validateEvent(value: unknown, index: number, playerCount: number): Even
   switch (event.type) {
     case 'rolled':
       requireKeys(event, ['type', 'playerIndex', 'result']);
-      if (!isBoundedInteger(event.result, 1, 6)) throw new Error(`invalid rolled event at index ${index}`);
+      if (!isBoundedInteger(event.result, 2, 12)) throw new Error(`invalid rolled event at index ${index}`);
       return { type: 'rolled', playerIndex: requireIndex(event.playerIndex, playerCount, 'event player index'), result: event.result };
     case 'moved':
       requireKeys(event, ['type', 'playerIndex', 'destination']);
