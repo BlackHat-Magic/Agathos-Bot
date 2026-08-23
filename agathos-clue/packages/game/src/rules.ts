@@ -1,5 +1,7 @@
 import type { Card, Game, Player, Room, Solution, Suspect, SuspectCard, Weapon, WeaponCard, RoomCard } from './types';
-import { cloneSolution, isCard, isRoom, isSuspect, isWeapon, SUSPECTS, WEAPONS, ROOMS } from './types';
+import {
+  assertCard, cloneSolution, isCard, isRoom, isSuspect, isWeapon, SUSPECTS, WEAPONS, ROOMS,
+} from './types';
 import { buildBoard, spaceAt, suspectStart } from './board';
 
 type RNG = () => number;
@@ -160,6 +162,15 @@ function cardMatchesValidatedSuggestion(card: unknown, guess: SuggestionGuess): 
   );
 }
 
+function cloneHandCard(value: unknown): Card {
+  assertCard(value, 'hand card');
+  switch (value.type) {
+    case 'suspect': return { type: 'suspect', suspect: value.suspect };
+    case 'weapon': return { type: 'weapon', weapon: value.weapon };
+    case 'room': return { type: 'room', room: value.room };
+  }
+}
+
 /** Value-based card matching shared by advisory queries and sequential reveals. */
 export function cardMatchesSuggestion(card: unknown, guess: unknown): card is Card {
   return cardMatchesValidatedSuggestion(card, requireGuess(guess, 'suggestion'));
@@ -182,14 +193,11 @@ export function resolveSuggestion(
   const n = game.players.length;
   for (let off = 1; off < n; off++) {
     const idx = (suggesterIndex + off) % n;
-    const candidate = game.players[idx].cards.find(c => cardMatchesValidatedSuggestion(c, validGuess));
-    if (candidate) {
-      const card: Card = candidate.type === 'suspect'
-        ? { type: 'suspect', suspect: candidate.suspect }
-        : candidate.type === 'weapon'
-          ? { type: 'weapon', weapon: candidate.weapon }
-          : { type: 'room', room: candidate.room };
-      return { revealerIndex: idx, card };
+    for (const rawCard of game.players[idx]!.cards) {
+      const card = cloneHandCard(rawCard);
+      if (cardMatchesValidatedSuggestion(card, validGuess)) {
+        return { revealerIndex: idx, card };
+      }
     }
   }
   return { revealerIndex: null, card: null };

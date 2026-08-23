@@ -161,6 +161,7 @@ export interface GameView {
     location: Room | CellId;
   }>;
   turnIndex: number;
+  winnerIndex: number | null;
   pendingReveal: {
     suggesterIndex: number;
     suspect: Suspect;

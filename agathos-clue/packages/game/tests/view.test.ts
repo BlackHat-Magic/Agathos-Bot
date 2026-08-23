@@ -105,6 +105,27 @@ describe('toView', () => {
     expect(toView(game, 0).solution).toEqual(solution);
   });
 
+  it('projects the winner index in every phase, including an all-human loss', () => {
+    const game = playingGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
+    game.winnerIndex = 1;
+
+    expect(toView(game, 0).winnerIndex).toBe(1);
+
+    game.phase = 'finished';
+    game.solution = solution;
+    game.winnerIndex = null;
+    expect(toView(game, 0).winnerIndex).toBeNull();
+  });
+
+  it('rejects a finished game without a solution', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    game.phase = 'finished';
+
+    expect(() => toView(game, 0)).toThrow(
+      'cannot project finished game without a valid game solution',
+    );
+  });
+
   it('serializes without the cyclic board graph', () => {
     const game = playingGame([player('Miss Scarlett', 0)]);
     const serialized = JSON.stringify(toView(game, 0));

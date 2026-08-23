@@ -39,6 +39,14 @@ export function toView(game: Game, viewerIndex: number): GameView {
     throw new Error(`invalid viewer index: ${viewerIndex}`);
   }
 
+  let finishedSolution: GameView['solution'];
+  if (game.phase === 'finished') {
+    if (game.solution === null || game.solution === undefined) {
+      throw new Error('cannot project finished game without a valid game solution');
+    }
+    finishedSolution = cloneSolution(game.solution, 'game solution');
+  }
+
   const viewer = game.players[viewerIndex]!;
   const pendingReveal = game.pendingReveal === null
     ? null
@@ -69,6 +77,7 @@ export function toView(game: Game, viewerIndex: number): GameView {
       location: projectLocation(weapon.location),
     })),
     turnIndex: game.turnIndex,
+    winnerIndex: game.winnerIndex,
     pendingReveal,
     lastDieRoll: game.lastDieRoll,
     myIndex: viewerIndex,
@@ -81,9 +90,7 @@ export function toView(game: Game, viewerIndex: number): GameView {
       .map(cloneCard);
   }
 
-  if (game.phase === 'finished' && game.solution) {
-    view.solution = cloneSolution(game.solution, 'game solution');
-  }
+  if (finishedSolution !== undefined) view.solution = finishedSolution;
 
   return view;
 }

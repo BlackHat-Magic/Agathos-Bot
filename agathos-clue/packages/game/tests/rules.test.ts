@@ -191,6 +191,18 @@ describe('resolveSuggestion', () => {
     expect(result.card).toBeNull();
   });
 
+  it('rejects malformed runtime hand cards', () => {
+    const malformed: unknown = { type: 'room', room: 'Unknown Room' };
+    const game = createGame([
+      mkPlayer('Colonel Mustard', 0),
+      mkPlayer('Mrs. White', 1, [malformed as Card]),
+    ]);
+
+    expect(() => resolveSuggestion(game, 0, {
+      suspect: 'Miss Scarlett', weapon: 'Candlestick', room: 'Hall',
+    })).toThrow('invalid hand card room: Unknown Room');
+  });
+
   it('rejects malformed runtime suggestion values by field', () => {
     const game = createGame([mkPlayer('Colonel Mustard', 0), mkPlayer('Mrs. White', 1)]);
     const malformed: unknown = {
