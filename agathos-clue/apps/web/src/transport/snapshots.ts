@@ -130,7 +130,8 @@ export function validateGameView(value: unknown): GameView {
     'winnerIndex', 'pendingReveal', 'lastDieRoll', 'myIndex', 'myHand',
   ], 'game view', [
     'myRevealOpportunities', 'myLastShownCard', 'lastSuggestionReveal',
-    'reachableSpacesHints', 'solution',
+    'reachableSpacesHints', 'solution', 'hasRolledThisTurn', 'hasMovedThisTurn',
+    'canSuggest', 'canUseSecretPassage',
   ]);
 
   if (record.phase !== 'lobby' && record.phase !== 'playing' && record.phase !== 'finished') {
@@ -157,6 +158,11 @@ export function validateGameView(value: unknown): GameView {
        record.lastDieRoll < 2 || record.lastDieRoll > 12)) {
     throw new Error('invalid last die roll');
   }
+  for (const key of ['hasRolledThisTurn', 'hasMovedThisTurn', 'canSuggest', 'canUseSecretPassage']) {
+    if (record[key] !== undefined && typeof record[key] !== 'boolean') {
+      throw new Error(`invalid ${key}`);
+    }
+  }
   if (record.solution !== undefined) {
     if (record.phase !== 'finished' || !isSolution(record.solution)) {
       throw new Error('solution is only valid for a finished game');
@@ -176,6 +182,10 @@ export function validateGameView(value: unknown): GameView {
     myIndex,
     myHand,
   };
+  if (record.hasRolledThisTurn !== undefined) view.hasRolledThisTurn = record.hasRolledThisTurn;
+  if (record.hasMovedThisTurn !== undefined) view.hasMovedThisTurn = record.hasMovedThisTurn;
+  if (record.canSuggest !== undefined) view.canSuggest = record.canSuggest;
+  if (record.canUseSecretPassage !== undefined) view.canUseSecretPassage = record.canUseSecretPassage;
   if (record.myRevealOpportunities !== undefined) {
     view.myRevealOpportunities = validateCards(record.myRevealOpportunities, 'reveal opportunities');
   }

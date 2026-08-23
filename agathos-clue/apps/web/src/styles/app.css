@@ -18,3 +18,23 @@ body {
 h1, h2, h3, h4, h5, h6, .font-display {
 	font-family: var(--font-display);
 }
+
+.game-button {
+	@apply inline-flex items-center justify-center rounded-xl border border-mocha-surface1 bg-mocha-surface0 px-3 py-2 text-sm font-semibold text-mocha-text transition hover:border-mocha-mauve hover:bg-mocha-mauve/10 focus:outline-2 focus:outline-offset-2 focus:outline-mocha-mauve disabled:cursor-not-allowed disabled:opacity-40;
+}
+
+.game-button-primary {
+	@apply border-mocha-mauve bg-mocha-mauve text-mocha-crust hover:bg-mocha-pink;
+}
+
+.game-button-end {
+	@apply border-mocha-peach/40 text-mocha-peach hover:bg-mocha-peach/10;
+}
+
+.game-button-danger {
+	@apply border-mocha-red bg-mocha-red text-mocha-crust hover:brightness-110;
+}
+
+.game-select {
+	@apply mt-2 block w-full rounded-xl border border-mocha-surface1 bg-mocha-mantle px-3 py-2.5 font-normal text-mocha-text outline-none focus:border-mocha-mauve focus:ring-2 focus:ring-mocha-mauve/30;
+}

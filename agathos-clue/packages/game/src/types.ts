@@ -170,6 +170,11 @@ export interface GameView {
     revealerIndex: number;
   } | null;
   lastDieRoll: number | null;
+  /** Turn state is public and lets clients gate controls without guessing. */
+  hasRolledThisTurn?: boolean;
+  hasMovedThisTurn?: boolean;
+  canSuggest?: boolean;
+  canUseSecretPassage?: boolean;
   myIndex: number;
   myHand: Card[];
   myRevealOpportunities?: Card[];

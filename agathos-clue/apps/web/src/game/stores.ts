@@ -1,11 +1,13 @@
 import { writable } from 'svelte/store';
-import type { GameView } from '@agathos/game';
+import type { Event, GameView } from '@agathos/game';
 import { session } from '../auth/standalone';
 import { connect, type ConnectionStatus, type Transport } from '../transport/ws';
 import type { ClientIntent } from '../transport/intents';
-import type { LobbySnapshot } from '../transport/snapshots';
+import type { LobbySnapshot, PrivateReveal } from '../transport/snapshots';
 
 export const currentView = writable<GameView | null>(null);
+export const events = writable<readonly Event[]>([]);
+export const privateReveal = writable<PrivateReveal | null>(null);
 export const lobby = writable<LobbySnapshot | null>(null);
 export const gameId = writable<string | null>(null);
 export const connectionStatus = writable<ConnectionStatus | 'idle'>('idle');
@@ -47,6 +49,8 @@ function syncTransport(): void {
   closeTransport();
 
   currentView.set(null);
+  events.set([]);
+  privateReveal.set(null);
   lobby.set(null);
   error.set(null);
   try {
@@ -70,6 +74,8 @@ function subscribeToTransport(nextTransport: Transport): () => void {
         error.set(null);
       }
     }),
+    nextTransport.events.subscribe(value => events.set(value)),
+    nextTransport.privateReveal.subscribe(value => privateReveal.set(value)),
     nextTransport.lobby.subscribe(value => {
       lobby.set(value);
       if (value !== null) {
@@ -104,6 +110,8 @@ function closeTransport(): void {
   connectedGameId = null;
   connectedToken = null;
   currentView.set(null);
+  events.set([]);
+  privateReveal.set(null);
   lobby.set(null);
   connectionStatus.set('idle');
 }

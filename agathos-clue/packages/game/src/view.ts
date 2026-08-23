@@ -85,6 +85,13 @@ export function toView(game: Game, viewerIndex: number): GameView {
     winnerIndex,
     pendingReveal,
     lastDieRoll: game.lastDieRoll,
+    hasRolledThisTurn: game.hasRolledThisTurn,
+    hasMovedThisTurn: game.hasMovedThisTurn,
+    canSuggest: viewer.piece.location.room !== null &&
+      !viewer.guessedHere &&
+      (viewer.enteredRoomThisTurn || viewer.movedBySuggestion),
+    canUseSecretPassage: viewer.piece.location.room !== null &&
+      viewer.piece.location.accesses.some(space => space.room !== null),
     myIndex: viewerIndex,
     myHand: viewer.cards.map(cloneCard),
   };
