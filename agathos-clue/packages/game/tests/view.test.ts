@@ -159,7 +159,7 @@ describe('toView', () => {
     expect(game.pendingReveal!.revealerIndex).toBe(1);
   });
 
-  it('projects only the public pending reveal fields', () => {
+  it('rejects extra pending reveal metadata instead of projecting it', () => {
     const game = playingGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
     const pendingReveal: unknown = {
       suggesterIndex: 0,
@@ -171,19 +171,39 @@ describe('toView', () => {
     };
     game.pendingReveal = pendingReveal as Game['pendingReveal'];
 
-    const view = toView(game, 0);
+    expect(() => toView(game, 0)).toThrow('invalid pending reveal metadata key: secret');
+  });
 
-    expect(view.pendingReveal).toEqual({
+  it('rejects malformed pending reveal metadata before projection', () => {
+    const game = playingGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
+    const base = {
       suggesterIndex: 0,
-      suspect: 'Miss Scarlett',
-      weapon: 'Rope',
-      room: 'Hall',
+      suspect: 'Miss Scarlett' as const,
+      weapon: 'Rope' as const,
+      room: 'Hall' as const,
       revealerIndex: 1,
-    });
-    expect(Object.keys(view.pendingReveal!).sort()).toEqual([
-      'revealerIndex', 'room', 'suggesterIndex', 'suspect', 'weapon',
-    ]);
-    expect(JSON.stringify(view)).not.toContain('runtime metadata');
+    };
+    const cases: Array<[unknown, string]> = [
+      [{ ...base, suggesterIndex: 2 }, 'invalid pending reveal suggester index: 2'],
+      [{ ...base, revealerIndex: 0.5 }, 'invalid pending reveal revealer index: 0.5'],
+      [{ ...base, suspect: 'Unknown Suspect' }, 'invalid pending reveal suspect: Unknown Suspect'],
+      [{ ...base, weapon: 'Unknown Weapon' }, 'invalid pending reveal weapon: Unknown Weapon'],
+      [{ ...base, room: 'Unknown Room' }, 'invalid pending reveal room: Unknown Room'],
+    ];
+
+    for (const [pendingReveal, message] of cases) {
+      game.pendingReveal = pendingReveal as Game['pendingReveal'];
+      expect(() => toView(game, 0)).toThrow(message);
+    }
+  });
+
+  it('rejects invalid winner indexes before projection', () => {
+    const game = playingGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
+
+    for (const winnerIndex of [-1, 2, 0.5, undefined]) {
+      game.winnerIndex = winnerIndex as Game['winnerIndex'];
+      expect(() => toView(game, 0)).toThrow(`invalid winner index: ${String(winnerIndex)}`);
+    }
   });
 
   it('detaches the viewer hand and does not expose other card data', () => {

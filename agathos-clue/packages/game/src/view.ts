@@ -1,6 +1,8 @@
 import { BOARD_HEIGHT, BOARD_WIDTH } from './board';
 import { cardMatchesSuggestion } from './rules';
-import { assertCard, cloneSolution } from './types';
+import {
+  assertCard, cloneSolution, isRoom, isSuspect, isWeapon,
+} from './types';
 import type {
   BoardSpace, Card, CellId, Game, GameView, Room, RoomCard, SuspectCard, WeaponCard,
 } from './types';
@@ -28,6 +30,58 @@ function matchesPendingReveal(card: Card, pending: NonNullable<Game['pendingReve
   return cardMatchesSuggestion(card, pending);
 }
 
+function clonePendingReveal(
+  value: unknown,
+  playerCount: number,
+): NonNullable<Game['pendingReveal']> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('invalid pending reveal metadata: expected an object');
+  }
+  const pending = value as Record<string, unknown>;
+  const expectedKeys = ['revealerIndex', 'room', 'suggesterIndex', 'suspect', 'weapon'];
+  for (const key of Reflect.ownKeys(pending)) {
+    if (typeof key !== 'string' || !expectedKeys.includes(key)) {
+      throw new Error(`invalid pending reveal metadata key: ${String(key)}`);
+    }
+  }
+
+  const suggesterIndex = pending.suggesterIndex;
+  if (typeof suggesterIndex !== 'number' || !Number.isInteger(suggesterIndex) ||
+      suggesterIndex < 0 || suggesterIndex >= playerCount) {
+    throw new Error(`invalid pending reveal suggester index: ${String(suggesterIndex)}`);
+  }
+  const revealerIndex = pending.revealerIndex;
+  if (typeof revealerIndex !== 'number' || !Number.isInteger(revealerIndex) ||
+      revealerIndex < 0 || revealerIndex >= playerCount) {
+    throw new Error(`invalid pending reveal revealer index: ${String(revealerIndex)}`);
+  }
+  if (!isSuspect(pending.suspect)) {
+    throw new Error(`invalid pending reveal suspect: ${String(pending.suspect)}`);
+  }
+  if (!isWeapon(pending.weapon)) {
+    throw new Error(`invalid pending reveal weapon: ${String(pending.weapon)}`);
+  }
+  if (!isRoom(pending.room)) {
+    throw new Error(`invalid pending reveal room: ${String(pending.room)}`);
+  }
+
+  return {
+    suggesterIndex,
+    suspect: pending.suspect,
+    weapon: pending.weapon,
+    room: pending.room,
+    revealerIndex,
+  };
+}
+
+function requireWinnerIndex(value: unknown, playerCount: number): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= playerCount) {
+    throw new Error(`invalid winner index: ${String(value)}`);
+  }
+  return value;
+}
+
 /**
  * Projects server-owned game state into the redacted view for one player.
  *
@@ -50,13 +104,8 @@ export function toView(game: Game, viewerIndex: number): GameView {
   const viewer = game.players[viewerIndex]!;
   const pendingReveal = game.pendingReveal === null
     ? null
-    : {
-        suggesterIndex: game.pendingReveal.suggesterIndex,
-        suspect: game.pendingReveal.suspect,
-        weapon: game.pendingReveal.weapon,
-        room: game.pendingReveal.room,
-        revealerIndex: game.pendingReveal.revealerIndex,
-      };
+    : clonePendingReveal(game.pendingReveal, game.players.length);
+  const winnerIndex = requireWinnerIndex(game.winnerIndex, game.players.length);
 
   const view: GameView = {
     phase: game.phase,
@@ -77,7 +126,7 @@ export function toView(game: Game, viewerIndex: number): GameView {
       location: projectLocation(weapon.location),
     })),
     turnIndex: game.turnIndex,
-    winnerIndex: game.winnerIndex,
+    winnerIndex,
     pendingReveal,
     lastDieRoll: game.lastDieRoll,
     myIndex: viewerIndex,

@@ -143,6 +143,24 @@ describe('decideRobotIntent', () => {
     ]);
   });
 
+  it('rejects malformed cards later in a robot hand while checking a reveal', () => {
+    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    g.phase = 'playing';
+    g.players[0]!.cards = [
+      { type: 'weapon', weapon: 'Rope' },
+      { type: 'room', room: 'Unknown Room' } as never,
+    ];
+    g.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Professor Plum',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 0,
+    };
+
+    expect(() => decideRobotIntent(g, 0, () => 0)).toThrow('invalid card room: Unknown Room');
+  });
+
   it('declines a pending reveal when it has no matching card', () => {
     const g = createGame([mkRobot('Miss Scarlett', 0)]);
     g.phase = 'playing';

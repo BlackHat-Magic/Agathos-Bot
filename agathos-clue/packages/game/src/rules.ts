@@ -1,6 +1,6 @@
 import type { Card, Game, Player, Room, Solution, Suspect, SuspectCard, Weapon, WeaponCard, RoomCard } from './types';
 import {
-  assertCard, cloneSolution, isCard, isRoom, isSuspect, isWeapon, SUSPECTS, WEAPONS, ROOMS,
+  assertCard, cloneSolution, isRoom, isSuspect, isWeapon, SUSPECTS, WEAPONS, ROOMS,
 } from './types';
 import { buildBoard, spaceAt, suspectStart } from './board';
 
@@ -154,7 +154,7 @@ function requireGuess(value: unknown, label: 'suggestion' | 'accusation'): Sugge
 }
 
 function cardMatchesValidatedSuggestion(card: unknown, guess: SuggestionGuess): card is Card {
-  if (!isCard(card)) return false;
+  assertCard(card);
   return (
     (card.type === 'suspect' && card.suspect === guess.suspect) ||
     (card.type === 'weapon' && card.weapon === guess.weapon) ||
@@ -193,8 +193,8 @@ export function resolveSuggestion(
   const n = game.players.length;
   for (let off = 1; off < n; off++) {
     const idx = (suggesterIndex + off) % n;
-    for (const rawCard of game.players[idx]!.cards) {
-      const card = cloneHandCard(rawCard);
+    const hand = game.players[idx]!.cards.map(cloneHandCard);
+    for (const card of hand) {
       if (cardMatchesValidatedSuggestion(card, validGuess)) {
         return { revealerIndex: idx, card };
       }
