@@ -134,9 +134,6 @@ export function hydrateGame(value: unknown): Game {
     if (!Array.isArray(player.cards)) {
       throw new Error(`invalid persisted player cards at index ${index}: expected an array`);
     }
-    for (const [cardIndex, card] of player.cards.entries()) {
-      assertCard(card, `persisted player ${index} card ${cardIndex}`);
-    }
     if (Object.hasOwn(player, 'userId')) {
       if (typeof player.userId !== 'string') {
         throw new Error(`invalid persisted player userId at index ${index}`);
@@ -163,7 +160,9 @@ export function hydrateGame(value: unknown): Game {
         suspect: player.suspect,
         location: hydrateLocation(board, player.location),
       },
-      cards: player.cards.map(cloneCard),
+      cards: player.cards.map((card, cardIndex) => cloneCard(
+        requirePersistedCard(card, `player ${index} card ${cardIndex}`),
+      )),
       failedAccusation,
       guessedHere,
       movedBySuggestion,
@@ -213,7 +212,7 @@ export function hydrateGame(value: unknown): Game {
        persisted.finishedAt < 0)) {
     throw new Error(`invalid persisted finishedAt: ${String(persisted.finishedAt)}`);
   }
-  const solution = persisted.solution === null ? null : cloneSolution(persisted.solution);
+  const solution = persisted.solution === null ? null : clonePersistedSolution(persisted.solution);
   const pendingReveal = persisted.pendingReveal === null
     ? null
     : clonePendingReveal(persisted.pendingReveal, players.length);
@@ -284,6 +283,22 @@ function cloneCard(value: unknown): Card {
   if (value.type === 'suspect') return { type: 'suspect', suspect: value.suspect };
   if (value.type === 'weapon') return { type: 'weapon', weapon: value.weapon };
   return { type: 'room', room: value.room };
+}
+
+function requirePersistedCard(value: unknown, label: string): Card {
+  const card = requireRecord(value, label);
+  assertCard(card, `persisted ${label}`);
+  requireKeys(card, ['type', card.type], label);
+  return card;
+}
+
+function clonePersistedSolution(value: unknown): Solution {
+  const solution = requireRecord(value, 'solution');
+  requireKeys(solution, ['suspect', 'weapon', 'room'], 'solution');
+  requirePersistedCard(solution.suspect, 'solution suspect');
+  requirePersistedCard(solution.weapon, 'solution weapon');
+  requirePersistedCard(solution.room, 'solution room');
+  return cloneSolution(solution);
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

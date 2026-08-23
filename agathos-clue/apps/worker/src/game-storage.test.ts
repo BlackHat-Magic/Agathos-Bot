@@ -112,6 +112,13 @@ describe('game persistence codec', () => {
     })).toThrow('invalid persisted player 0 card 0 weapon: Not a weapon');
     expect(() => hydrateGame({
       ...persisted,
+      players: [{
+        ...persisted.players[0]!,
+        cards: [{ type: 'weapon', weapon: 'Rope', extra: true }],
+      }, persisted.players[1]],
+    })).toThrow('invalid persisted player 0 card 0: unexpected or missing fields');
+    expect(() => hydrateGame({
+      ...persisted,
       players: [{ ...persisted.players[0]!, location: '99,99' }, persisted.players[1]],
     })).toThrow('invalid persisted location: 99,99');
   });
@@ -156,6 +163,13 @@ describe('game persistence codec', () => {
         revealerIndex: 0,
       },
     };
+    expect(() => hydrateGame({
+      ...playing,
+      solution: {
+        ...playing.solution!,
+        room: { ...playing.solution!.room, extra: true },
+      },
+    })).toThrow('invalid persisted solution room: unexpected or missing fields');
     expect(() => hydrateGame(playing)).toThrow(
       'invalid pending reveal: suggester and revealer must be distinct',
     );
