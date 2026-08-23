@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { buildBoard, spaceAt, suspectStart } from '../src/board';
 import { applyIntent } from '../src/reducer';
+import { decideRobotIntent } from '../src/robot';
 import { createGame } from '../src/rules';
 import type { Card, Player, Suspect } from '../src/types';
 
@@ -46,6 +47,69 @@ describe('applyIntent', () => {
     game.phase = 'finished';
 
     expect(() => applyIntent(game, 0, { kind: 'roll' })).toThrow('game is not in the playing phase');
+  });
+
+  it('allows failed accusers to end their turn but rejects other gameplay intents', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1),
+    ]);
+    game.players[0]!.failedAccusation = true;
+    game.solution = {
+      suspect: { type: 'suspect', suspect: 'Mrs. Peacock' },
+      weapon: { type: 'weapon', weapon: 'Rope' },
+      room: { type: 'room', room: 'Library' },
+    };
+
+    const forbiddenIntents = [
+      { kind: 'roll' as const },
+      { kind: 'moveTo' as const, destination: '17,18' as const },
+      { kind: 'useSecretPassage' as const },
+      { kind: 'suggest' as const, suspect: 'Professor Plum' as const, weapon: 'Rope' as const },
+      { kind: 'accuse' as const, suspect: 'Miss Scarlett' as const, weapon: 'Rope' as const, room: 'Library' as const },
+    ];
+
+    for (const intent of forbiddenIntents) {
+      expect(() => applyIntent(game, 0, intent)).toThrow(
+        'players with failed accusations may only end their turn',
+      );
+    }
+
+    expect(applyIntent(game, 0, { kind: 'endTurn' })).toEqual([
+      { type: 'turnEnded', playerIndex: 0 },
+    ]);
+    expect(game.turnIndex).toBe(1);
+  });
+
+  it('still lets a failed accuser reveal a matching card when required', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1, [{ type: 'suspect', suspect: 'Miss Scarlett' }]),
+    ]);
+    game.players[1]!.failedAccusation = true;
+    game.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Miss Scarlett',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+    };
+
+    expect(applyIntent(game, 1, {
+      kind: 'showCard',
+      card: { type: 'suspect', suspect: 'Miss Scarlett' },
+    })).toEqual([{ type: 'revealed', revealerIndex: 1, cardHint: 'private' }]);
+    expect(game.pendingReveal).toBeNull();
+  });
+
+  it('rejects a second roll until the current roll is moved or ended', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    applyIntent(game, 0, { kind: 'roll' }, () => 0.5);
+
+    expect(() => applyIntent(game, 0, { kind: 'roll' }, () => 0)).toThrow(
+      'player must move or end their turn before rolling again',
+    );
+    expect(game.lastDieRoll).toBe(8);
   });
 
   it('rejects gameplay intents while a reveal is pending', () => {
@@ -121,6 +185,30 @@ describe('applyIntent', () => {
       { type: 'suggested', playerIndex: 0, suspect: 'Professor Plum', weapon: 'Rope', room: 'Hall' },
       { type: 'revealRequested', revealerIndex: 1 },
     ]);
+  });
+
+  it('accepts a robot suggestion for a suspect absent from a partial game', () => {
+    const players = [
+      player('Miss Scarlett', 0, [], true),
+      player('Professor Plum', 1),
+    ];
+    const game = playingGame(players);
+    game.players[0]!.piece.location = spaceAt(game.board, 10, 18);
+    const otherPlayerStart = game.players[1]!.piece.location;
+
+    const intent = decideRobotIntent(game, 0, () => 0.5);
+    expect(intent).toEqual({ kind: 'suggest', suspect: 'Colonel Mustard', weapon: 'Revolver' });
+
+    expect(() => applyIntent(game, 0, intent)).not.toThrow();
+    expect(game.players[1]!.piece.location).toBe(otherPlayerStart);
+    expect(game.players[1]!.movedBySuggestion).toBe(false);
+    expect(game.pendingReveal).toMatchObject({
+      suggesterIndex: 0,
+      suspect: 'Colonel Mustard',
+      weapon: 'Revolver',
+      room: 'Hall',
+      revealerIndex: 1,
+    });
   });
 
   it('accepts only a matching card owned by the pending revealer', () => {

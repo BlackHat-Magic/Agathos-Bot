@@ -106,10 +106,16 @@ export function applyIntent(
     requireRevealTurn(game, playerIndex);
   } else {
     requireGameplayTurn(game, playerIndex);
+    if (player.failedAccusation && intent.kind !== 'endTurn') {
+      throw new Error('players with failed accusations may only end their turn');
+    }
   }
 
   switch (intent.kind) {
     case 'roll': {
+      if (game.lastDieRoll !== null) {
+        throw new Error('player must move or end their turn before rolling again');
+      }
       const result = Math.floor(rng() * 6) + 1 + Math.floor(rng() * 6) + 1;
       game.lastDieRoll = result;
       return [{ type: 'rolled', playerIndex, result }];
@@ -143,12 +149,12 @@ export function applyIntent(
       if (!room) throw new Error('suggestions can only be made in a room');
       if (player.guessedHere) throw new Error('player has already suggested in this room');
 
-      const suspectPlayer = game.players.find(p => p.suspect === intent.suspect);
-      if (!suspectPlayer) throw new Error(`suspect is not in the game: ${intent.suspect}`);
-
       player.guessedHere = true;
-      suspectPlayer.piece.location = player.piece.location;
-      suspectPlayer.movedBySuggestion = true;
+      const suspectPlayer = game.players.find(p => p !== player && p.suspect === intent.suspect);
+      if (suspectPlayer) {
+        suspectPlayer.piece.location = player.piece.location;
+        suspectPlayer.movedBySuggestion = true;
+      }
       const weaponPiece = game.weapons.find(piece => piece.weapon === intent.weapon);
       if (weaponPiece) weaponPiece.location = player.piece.location;
 
