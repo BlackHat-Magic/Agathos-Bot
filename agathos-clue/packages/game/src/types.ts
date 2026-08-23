@@ -60,6 +60,33 @@ export interface Solution {
   room: RoomCard;
 }
 
+function isSolutionCard(
+  value: unknown,
+  type: 'suspect' | 'weapon' | 'room',
+  isValue: (value: unknown) => boolean,
+): boolean {
+  if (!isRecord(value) || value.type !== type) return false;
+  const field = type;
+  return isValue(value[field]);
+}
+
+export function isSolution(value: unknown): value is Solution {
+  return isRecord(value) &&
+    isSolutionCard(value.suspect, 'suspect', isSuspect) &&
+    isSolutionCard(value.weapon, 'weapon', isWeapon) &&
+    isSolutionCard(value.room, 'room', isRoom);
+}
+
+/** Validate and detach a solution while enforcing each slot's card category. */
+export function cloneSolution(value: unknown, label = 'solution'): Solution {
+  if (!isSolution(value)) throw new Error(`invalid ${label}`);
+  return {
+    suspect: { type: 'suspect', suspect: value.suspect.suspect },
+    weapon: { type: 'weapon', weapon: value.weapon.weapon },
+    room: { type: 'room', room: value.room.room },
+  };
+}
+
 export type CellId = string;           // `${col},${row}` format
 export type BoardSpaceId = CellId | Room;  // rooms are their own id
 

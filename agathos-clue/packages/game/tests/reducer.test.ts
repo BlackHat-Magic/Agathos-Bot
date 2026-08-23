@@ -49,6 +49,30 @@ describe('applyIntent', () => {
     expect(game.pendingReveal).not.toBeNull();
   });
 
+  it('rejects unknown runtime intent kinds instead of returning no events', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    const bogus: unknown = { kind: 'bogus' };
+
+    expect(() => applyIntent(game, 0, bogus as Intent)).toThrow('unknown intent kind: bogus');
+  });
+
+  it('rejects lobby lifecycle intents during active play', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    const lifecycleIntents: Intent[] = [
+      { kind: 'join', userId: 'user', name: 'Player' },
+      { kind: 'claimSuspect', suspect: 'Miss Scarlett' },
+      { kind: 'start' },
+      { kind: 'setOrder', order: ['Miss Scarlett'] },
+      { kind: 'leave' },
+    ];
+
+    for (const intent of lifecycleIntents) {
+      expect(() => applyIntent(game, 0, intent)).toThrow(
+        `${intent.kind} intent is only valid in the lobby`,
+      );
+    }
+  });
+
   it('rolls two dice, stores the positive result, and emits an event', () => {
     const game = playingGame([player('Miss Scarlett', 0)]);
     const events = applyIntent(game, 0, { kind: 'roll' }, () => 0.5);

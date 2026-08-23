@@ -1,6 +1,6 @@
 import { BOARD_HEIGHT, BOARD_WIDTH } from './board';
 import { cardMatchesSuggestion } from './rules';
-import { assertCard } from './types';
+import { assertCard, cloneSolution } from './types';
 import type {
   BoardSpace, Card, CellId, Game, GameView, Room, RoomCard, SuspectCard, WeaponCard,
 } from './types';
@@ -82,11 +82,7 @@ export function toView(game: Game, viewerIndex: number): GameView {
   }
 
   if (game.phase === 'finished' && game.solution) {
-    view.solution = {
-      suspect: cloneCard(game.solution.suspect),
-      weapon: cloneCard(game.solution.weapon),
-      room: cloneCard(game.solution.room),
-    };
+    view.solution = cloneSolution(game.solution, 'game solution');
   }
 
   return view;

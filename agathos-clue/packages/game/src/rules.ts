@@ -1,5 +1,5 @@
 import type { Card, Game, Player, Room, Solution, Suspect, SuspectCard, Weapon, WeaponCard, RoomCard } from './types';
-import { isCard, isRoom, isSuspect, isWeapon, SUSPECTS, WEAPONS, ROOMS } from './types';
+import { cloneSolution, isCard, isRoom, isSuspect, isWeapon, SUSPECTS, WEAPONS, ROOMS } from './types';
 import { buildBoard, spaceAt, suspectStart } from './board';
 
 type RNG = () => number;
@@ -148,14 +148,18 @@ function requireGuess(value: unknown, label: 'suggestion' | 'accusation'): Sugge
   return { suspect: guess.suspect, weapon: guess.weapon, room: guess.room };
 }
 
-/** Value-based card matching shared by advisory queries and sequential reveals. */
-export function cardMatchesSuggestion(card: unknown, guess: SuggestionGuess): card is Card {
+function cardMatchesValidatedSuggestion(card: unknown, guess: SuggestionGuess): card is Card {
   if (!isCard(card)) return false;
   return (
     (card.type === 'suspect' && card.suspect === guess.suspect) ||
     (card.type === 'weapon' && card.weapon === guess.weapon) ||
     (card.type === 'room' && card.room === guess.room)
   );
+}
+
+/** Value-based card matching shared by advisory queries and sequential reveals. */
+export function cardMatchesSuggestion(card: unknown, guess: unknown): card is Card {
+  return cardMatchesValidatedSuggestion(card, requireGuess(guess, 'suggestion'));
 }
 
 /**
@@ -175,7 +179,7 @@ export function resolveSuggestion(
   const n = game.players.length;
   for (let off = 1; off < n; off++) {
     const idx = (suggesterIndex + off) % n;
-    const candidate = game.players[idx].cards.find(c => cardMatchesSuggestion(c, validGuess));
+    const candidate = game.players[idx].cards.find(c => cardMatchesValidatedSuggestion(c, validGuess));
     if (candidate) {
       const card: Card = candidate.type === 'suspect'
         ? { type: 'suspect', suspect: candidate.suspect }
@@ -188,42 +192,12 @@ export function resolveSuggestion(
   return { revealerIndex: null, card: null };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function isValidSolutionCard(
-  value: unknown,
-  type: 'suspect' | 'weapon' | 'room',
-  field: 'suspect' | 'weapon' | 'room',
-  validValues: readonly string[],
-): boolean {
-  return isRecord(value) && value.type === type &&
-    typeof value[field] === 'string' && validValues.includes(value[field]);
-}
-
-function isValidSolution(value: unknown): value is Solution {
-  return (
-    isRecord(value) &&
-    isValidSolutionCard(value.suspect, 'suspect', 'suspect', SUSPECTS) &&
-    isValidSolutionCard(value.weapon, 'weapon', 'weapon', WEAPONS) &&
-    isValidSolutionCard(value.room, 'room', 'room', ROOMS)
-  );
-}
-
 export function requireAccusationSolution(game: Game): Solution {
   const solution: unknown = game.solution;
   if (solution === null || solution === undefined) {
     throw new Error('cannot evaluate accusation without a game solution');
   }
-  if (!isValidSolution(solution)) {
-    throw new Error('invalid game solution');
-  }
-  return {
-    suspect: { type: 'suspect', suspect: solution.suspect.suspect },
-    weapon: { type: 'weapon', weapon: solution.weapon.weapon },
-    room: { type: 'room', room: solution.room.room },
-  };
+  return cloneSolution(solution, 'game solution');
 }
 
 export function evaluateAccusation(

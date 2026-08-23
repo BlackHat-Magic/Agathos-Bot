@@ -226,6 +226,19 @@ describe('toView', () => {
     expect(() => toView(game, 0)).toThrow('invalid card room: Unknown Room');
   });
 
+  it('rejects a finished solution whose slots contain the wrong card categories', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    const malformed: unknown = {
+      suspect: { type: 'weapon', weapon: 'Rope' },
+      weapon: { type: 'weapon', weapon: 'Dagger' },
+      room: { type: 'room', room: 'Library' },
+    };
+    game.solution = malformed as Game['solution'];
+    game.phase = 'finished';
+
+    expect(() => toView(game, 0)).toThrow('invalid game solution');
+  });
+
   it('reveals the finished solution only in the finished phase', () => {
     const game = playingGame([player('Miss Scarlett', 0)]);
     game.solution = solution;

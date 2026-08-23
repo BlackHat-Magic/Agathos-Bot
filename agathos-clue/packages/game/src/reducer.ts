@@ -19,6 +19,22 @@ export type Event =
 export type RNG = () => number;
 
 const COORDINATE = /^\d+,\d+$/;
+const INTENT_KINDS = [
+  'wait', 'join', 'claimSuspect', 'start', 'setOrder', 'useSecretPassage',
+  'roll', 'moveTo', 'suggest', 'showCard', 'declineReveal', 'accuse', 'endTurn', 'leave',
+] as const;
+
+function requireIntentKind(intent: Intent): Intent['kind'] {
+  const value = intent as unknown;
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('invalid intent: expected an object');
+  }
+  const kind = (value as { kind?: unknown }).kind;
+  if (typeof kind !== 'string' || !(INTENT_KINDS as readonly string[]).includes(kind)) {
+    throw new Error(`unknown intent kind: ${String(kind)}`);
+  }
+  return kind as Intent['kind'];
+}
 
 function playerAt(game: Game, playerIndex: number): Player {
   const player = game.players[playerIndex];
@@ -93,6 +109,7 @@ export function applyIntent(
   intent: Intent,
   rng: RNG = Math.random,
 ): Event[] {
+  requireIntentKind(intent);
   if (intent.kind === 'wait') return [];
 
   if (intent.kind === 'suggest') {
@@ -120,6 +137,9 @@ export function applyIntent(
 
   if (intent.kind === 'join' || intent.kind === 'claimSuspect' || intent.kind === 'start' ||
       intent.kind === 'setOrder' || intent.kind === 'leave') {
+    if (game.phase !== 'lobby') {
+      throw new Error(`${intent.kind} intent is only valid in the lobby`);
+    }
     return [];
   }
 
@@ -280,5 +300,8 @@ export function applyIntent(
       game.turnIndex = next;
       return [{ type: 'turnEnded', playerIndex }];
     }
+
+    default:
+      throw new Error(`unknown intent kind: ${String((intent as never as { kind?: unknown }).kind)}`);
   }
 }

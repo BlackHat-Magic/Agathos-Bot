@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test';
 import {
   createGame,
   begin,
+  cardMatchesSuggestion,
   evaluateAccusation,
   requireAccusationSolution,
   resolveSuggestion,
@@ -191,6 +192,15 @@ describe('resolveSuggestion', () => {
     expect(() => resolveSuggestion(game, -1, guess)).toThrow('invalid suggester index: -1');
     expect(() => resolveSuggestion(game, 0.5, guess)).toThrow('invalid suggester index: 0.5');
     expect(() => resolveSuggestion(game, 2, guess)).toThrow('invalid suggester index: 2');
+  });
+});
+
+describe('cardMatchesSuggestion', () => {
+  it('rejects malformed runtime guesses with a validation error', () => {
+    const malformed: unknown = null;
+
+    expect(() => cardMatchesSuggestion({ type: 'room', room: 'Hall' }, malformed))
+      .toThrow('invalid suggestion: expected an object');
   });
 });
 
