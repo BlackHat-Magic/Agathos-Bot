@@ -173,7 +173,14 @@ export function resolveSuggestion(
   for (let off = 1; off < n; off++) {
     const idx = (suggesterIndex + off) % n;
     const candidate = game.players[idx].cards.find(c => cardMatchesSuggestion(c, validGuess));
-    if (candidate) return { revealerIndex: idx, card: candidate };
+    if (candidate) {
+      const card: Card = candidate.type === 'suspect'
+        ? { type: 'suspect', suspect: candidate.suspect }
+        : candidate.type === 'weapon'
+          ? { type: 'weapon', weapon: candidate.weapon }
+          : { type: 'room', room: candidate.room };
+      return { revealerIndex: idx, card };
+    }
   }
   return { revealerIndex: null, card: null };
 }
@@ -217,6 +224,15 @@ export function evaluateAccusation(
   playerIndex: number,
   guess: { suspect: Suspect; weapon: Weapon; room: Room },
 ): boolean {
+  if (!Number.isInteger(playerIndex) || playerIndex < 0 || playerIndex >= game.players.length) {
+    throw new Error(`invalid player index: ${String(playerIndex)}`);
+  }
+  if (game.phase !== 'playing') throw new Error('game is not in the playing phase');
+  if (game.turnIndex !== playerIndex) throw new Error(`it is not player ${playerIndex}'s turn`);
+  if (game.players[playerIndex]!.failedAccusation) {
+    throw new Error('players with failed accusations may only end their turn');
+  }
+
   const validGuess = requireGuess(guess, 'accusation');
   const sol = requireAccusationSolution(game);
   const ok =

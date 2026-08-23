@@ -1,6 +1,7 @@
-import type { Card, Game, Intent, Suspect, Weapon } from './types';
+import type { Game, Intent, Suspect, Weapon } from './types';
 import { SUSPECTS, WEAPONS } from './types';
 import { reachable } from './pathfind';
+import { cardMatchesSuggestion } from './rules';
 
 type RNG = () => number;
 
@@ -33,7 +34,7 @@ export function decideRobotIntent(
   if (pending) {
     if (pending.revealerIndex !== robotIndex) return { kind: 'wait' };
 
-    const matches = player.cards.filter(card => matchesPendingReveal(card, pending));
+    const matches = player.cards.filter(card => cardMatchesSuggestion(card, pending));
     return matches.length
       ? { kind: 'showCard', card: randomOf(matches, rng) }
       : { kind: 'declineReveal' };
@@ -115,14 +116,6 @@ export function decideRobotIntent(
 
   // Robots never accuse (clue.py:632-737).
   return { kind: 'endTurn' };
-}
-
-function matchesPendingReveal(card: Card, pending: NonNullable<Game['pendingReveal']>): boolean {
-  return (
-    (card.type === 'suspect' && card.suspect === pending.suspect) ||
-    (card.type === 'weapon' && card.weapon === pending.weapon) ||
-    (card.type === 'room' && card.room === pending.room)
-  );
 }
 
 function randomOf<T>(arr: readonly T[], rng: RNG): T {

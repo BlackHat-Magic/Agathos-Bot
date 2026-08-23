@@ -137,6 +137,22 @@ describe('resolveSuggestion', () => {
     });
     expect(result.revealerIndex).toBe(1);
     expect(result.card).toEqual(cards[0]);
+    expect(result.card).not.toBe(cards[0]);
+  });
+
+  it('does not expose a mutable hand card through the result', () => {
+    const handCard: Card = { type: 'weapon', weapon: 'Rope' };
+    const g = createGame([
+      mkPlayer('Colonel Mustard', 0),
+      mkPlayer('Mrs. White', 1, [handCard]),
+    ]);
+
+    const result = resolveSuggestion(g, 0, {
+      suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Hall',
+    });
+    (result.card as { weapon: Weapon }).weapon = 'Dagger';
+
+    expect(handCard).toEqual({ type: 'weapon', weapon: 'Rope' });
   });
 
   it('returns null when nobody has any matching card', () => {
@@ -172,11 +188,15 @@ describe('evaluateAccusation', () => {
       weapon: { type: 'weapon', weapon: 'Rope' },
       room: { type: 'room', room: 'Library' },
     };
+    g.phase = 'playing';
+    g.turnIndex = 0;
     expect(evaluateAccusation(g, 0, { suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' })).toBe(true);
   });
 
   it('rejects an accusation when the solution is missing', () => {
     const g = createGame([mkPlayer('Miss Scarlett', 0)]);
+    g.phase = 'playing';
+    g.turnIndex = 0;
 
     expect(() => evaluateAccusation(g, 0, {
       suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library',
@@ -185,6 +205,8 @@ describe('evaluateAccusation', () => {
 
   it('rejects malformed runtime solution cards', () => {
     const g = createGame([mkPlayer('Miss Scarlett', 0)]);
+    g.phase = 'playing';
+    g.turnIndex = 0;
     const malformedSolutions: unknown[] = [
       {
         suspect: { type: 'weapon', suspect: 'Miss Scarlett' },
@@ -214,6 +236,8 @@ describe('evaluateAccusation', () => {
       weapon: { type: 'weapon', weapon: 'Rope' },
       room: { type: 'room', room: 'Library' },
     };
+    g.phase = 'playing';
+    g.turnIndex = 0;
     expect(evaluateAccusation(g, 0, { suspect: 'Professor Plum', weapon: 'Rope', room: 'Library' })).toBe(false);
     expect(players[0].failedAccusation).toBe(true);
   });
@@ -225,6 +249,8 @@ describe('evaluateAccusation', () => {
       weapon: { type: 'weapon', weapon: 'Rope' },
       room: { type: 'room', room: 'Library' },
     };
+    g.phase = 'playing';
+    g.turnIndex = 0;
     const malformed: unknown = {
       suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Unknown Room',
     };
@@ -246,6 +272,7 @@ describe('evaluateAccusation', () => {
       room: { type: 'room', room: 'Library' },
     };
     g.phase = 'playing';
+    g.turnIndex = 0;
     // Human 1 fails — game continues (human 2 still in)
     const r1 = evaluateAccusation(g, 0, { suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' });
     expect(r1).toBe(false);
@@ -253,10 +280,47 @@ describe('evaluateAccusation', () => {
     expect(g.phase as string).toBe('playing');
     expect(g.finishedAt).toBeNull();
     // Human 2 fails — all humans failed, game ends (robot state doesn't matter)
+    g.turnIndex = 1;
     const r2 = evaluateAccusation(g, 1, { suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' });
     expect(r2).toBe(false);
     expect(human2.failedAccusation).toBe(true);
     expect(g.phase as string).toBe('finished');
     expect(g.finishedAt).not.toBeNull();
+  });
+
+  it('rejects accusation calls outside the reducer action boundary before mutation', () => {
+    const g = createGame([mkPlayer('Miss Scarlett', 0), mkPlayer('Professor Plum', 1)]);
+    g.solution = {
+      suspect: { type: 'suspect', suspect: 'Miss Scarlett' },
+      weapon: { type: 'weapon', weapon: 'Rope' },
+      room: { type: 'room', room: 'Library' },
+    };
+    const guess = { suspect: 'Professor Plum' as Suspect, weapon: 'Rope' as Weapon, room: 'Library' as Room };
+    const invalidCalls: Array<[number, string]> = [
+      [-1, 'invalid player index: -1'],
+      [1.5, 'invalid player index: 1.5'],
+      [2, 'invalid player index: 2'],
+    ];
+
+    for (const [playerIndex, message] of invalidCalls) {
+      expect(() => evaluateAccusation(g, playerIndex, guess)).toThrow(message);
+    }
+    g.phase = 'lobby';
+    expect(() => evaluateAccusation(g, 0, guess)).toThrow('game is not in the playing phase');
+    g.phase = 'finished';
+    expect(() => evaluateAccusation(g, 0, guess)).toThrow('game is not in the playing phase');
+    g.phase = 'playing';
+    g.turnIndex = 1;
+    expect(() => evaluateAccusation(g, 0, guess)).toThrow("it is not player 0's turn");
+    g.turnIndex = 0;
+    g.players[0]!.failedAccusation = true;
+    expect(() => evaluateAccusation(g, 0, guess)).toThrow(
+      'players with failed accusations may only end their turn',
+    );
+
+    expect(g.phase).toBe('playing');
+    expect(g.turnIndex).toBe(0);
+    expect(g.players[0]!.failedAccusation).toBe(true);
+    expect(g.players[1]!.failedAccusation).toBe(false);
   });
 });
