@@ -75,6 +75,23 @@ describe('Canvas2DRenderer', () => {
     expect(clicked).toEqual([]);
   });
 
+  it('accepts clicks on canvas edges and ignores nonfinite coordinates', () => {
+    const canvas = new FakeCanvas(240, 250, 240, 250);
+    const renderer = new Canvas2DRenderer();
+    const clicked: string[] = [];
+    renderer.onUserClickCell(location => clicked.push(location));
+    renderer.attach(canvas as unknown as HTMLCanvasElement);
+
+    canvas.click(0, 125); // left edge, Billiard Room
+    canvas.click(90, 0); // top edge, canonical corridor (9, 0)
+    canvas.click(Number.NaN, 125);
+    canvas.click(Number.POSITIVE_INFINITY, 125);
+    canvas.click(90, Number.NaN);
+    canvas.click(90, Number.NEGATIVE_INFINITY);
+
+    expect(clicked).toEqual(['Billiard Room', '9,0']);
+  });
+
   it('does not duplicate listeners and detaches safely', () => {
     const canvas = new FakeCanvas(240, 250, 240, 250);
     const renderer = new Canvas2DRenderer();

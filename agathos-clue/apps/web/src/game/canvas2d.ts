@@ -163,7 +163,7 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     const rect = this.canvas.getBoundingClientRect();
     if (!Number.isFinite(rect.width) || !Number.isFinite(rect.height) ||
         !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY) ||
-        rect.width <= 0 || rect.height <= 0 || event.clientX <= 0 || event.clientY <= 0) {
+        rect.width <= 0 || rect.height <= 0) {
       return;
     }
 
