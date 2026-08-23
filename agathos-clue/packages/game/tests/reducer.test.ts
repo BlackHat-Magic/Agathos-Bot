@@ -34,6 +34,36 @@ describe('applyIntent', () => {
     expect(events).toEqual([{ type: 'rolled', playerIndex: 0, result: 8 }]);
   });
 
+  it('rejects gameplay intents from the wrong player turn', () => {
+    const game = playingGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
+    game.turnIndex = 1;
+
+    expect(() => applyIntent(game, 0, { kind: 'roll' })).toThrow("it is not player 0's turn");
+  });
+
+  it('rejects gameplay intents after the game has finished', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    game.phase = 'finished';
+
+    expect(() => applyIntent(game, 0, { kind: 'roll' })).toThrow('game is not in the playing phase');
+  });
+
+  it('rejects gameplay intents while a reveal is pending', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1),
+    ]);
+    game.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Professor Plum',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+    };
+
+    expect(() => applyIntent(game, 0, { kind: 'endTurn' })).toThrow('a card reveal is pending');
+  });
+
   it('moves to a reachable cell and emits an event', () => {
     const game = playingGame([player('Miss Scarlett', 0)]);
     const start = spaceAt(game.board, 16, 24);
@@ -71,10 +101,13 @@ describe('applyIntent', () => {
     const players = [player('Miss Scarlett', 0), player('Professor Plum', 1), player('Mrs. Peacock', 2)];
     const game = playingGame(players);
     game.players[0]!.piece.location = spaceAt(game.board, 10, 18);
+    const rope = { weapon: 'Rope' as const, location: spaceAt(game.board, 16, 24) };
+    game.weapons.push(rope);
 
     const events = applyIntent(game, 0, { kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope' });
 
     expect(game.players[1]!.piece.location).toBe(game.players[0]!.piece.location);
+    expect(rope.location).toBe(game.players[0]!.piece.location);
     expect(game.players[1]!.movedBySuggestion).toBe(true);
     expect(game.players[0]!.guessedHere).toBe(true);
     expect(game.pendingReveal).toMatchObject({
@@ -121,6 +154,7 @@ describe('applyIntent', () => {
     game.players[0]!.piece.location = spaceAt(game.board, 10, 18);
     applyIntent(game, 0, { kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope' });
 
+    expect(() => applyIntent(game, 2, { kind: 'declineReveal' })).toThrow('player is not the current revealer');
     expect(applyIntent(game, 1, { kind: 'declineReveal' })).toEqual([
       { type: 'declinedReveal', revealerIndex: 1 },
       { type: 'revealRequested', revealerIndex: 2 },
@@ -143,6 +177,17 @@ describe('applyIntent', () => {
     expect(() => applyIntent(game, 0, { kind: 'useSecretPassage' })).toThrow();
   });
 
+  it('rejects a secret passage after the player has rolled', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    game.players[0]!.piece.location = game.board[2]![1]!;
+    game.lastDieRoll = 6;
+
+    expect(() => applyIntent(game, 0, { kind: 'useSecretPassage' })).toThrow(
+      'secret passages can only be used before rolling',
+    );
+    expect(game.lastDieRoll).toBe(6);
+  });
+
   it('marks wrong accusations failed, finishes when all humans fail, and emits gameWon on success', () => {
     const players = [player('Miss Scarlett', 0), player('Professor Plum', 1)];
     const game = playingGame(players);
@@ -158,6 +203,7 @@ describe('applyIntent', () => {
     expect(players[0]!.failedAccusation).toBe(true);
     expect(game.phase).toBe('playing');
 
+    game.turnIndex = 1;
     expect(applyIntent(game, 1, { kind: 'accuse', suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' })).toEqual([
       { type: 'accused', playerIndex: 1, correct: false },
     ]);
@@ -191,5 +237,16 @@ describe('applyIntent', () => {
     expect(game.players[0]!.guessedHere).toBe(false);
     expect(game.players[0]!.movedBySuggestion).toBe(false);
     expect(game.turnIndex).toBe(2);
+  });
+
+  it('wraps from the final player to the first active player', () => {
+    const players = [player('Miss Scarlett', 0), player('Professor Plum', 1), player('Mrs. Peacock', 2)];
+    const game = playingGame(players);
+    game.turnIndex = 2;
+    game.players[1]!.failedAccusation = true;
+
+    applyIntent(game, 2, { kind: 'endTurn' });
+
+    expect(game.turnIndex).toBe(0);
   });
 });

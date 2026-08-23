@@ -26,6 +26,20 @@ function playerAt(game: Game, playerIndex: number): Player {
   return player;
 }
 
+function requireGameplayTurn(game: Game, playerIndex: number): void {
+  if (game.phase !== 'playing') throw new Error('game is not in the playing phase');
+  if (game.turnIndex !== playerIndex) throw new Error(`it is not player ${playerIndex}'s turn`);
+  if (game.pendingReveal) throw new Error('a card reveal is pending');
+}
+
+function requireRevealTurn(game: Game, playerIndex: number): void {
+  if (game.phase !== 'playing') throw new Error('game is not in the playing phase');
+  if (!game.pendingReveal) throw new Error('there is no pending reveal');
+  if (game.pendingReveal.revealerIndex !== playerIndex) {
+    throw new Error('player is not the current revealer');
+  }
+}
+
 function isRoom(value: string): value is Room {
   return (ROOMS as readonly string[]).includes(value);
 }
@@ -81,12 +95,18 @@ export function applyIntent(
   intent: Intent,
   rng: RNG = Math.random,
 ): Event[] {
+  const player = playerAt(game, playerIndex);
+
   if (intent.kind === 'join' || intent.kind === 'claimSuspect' || intent.kind === 'start' ||
       intent.kind === 'setOrder' || intent.kind === 'leave') {
     return [];
   }
 
-  const player = playerAt(game, playerIndex);
+  if (intent.kind === 'showCard' || intent.kind === 'declineReveal') {
+    requireRevealTurn(game, playerIndex);
+  } else {
+    requireGameplayTurn(game, playerIndex);
+  }
 
   switch (intent.kind) {
     case 'roll': {
@@ -107,6 +127,9 @@ export function applyIntent(
     }
 
     case 'useSecretPassage': {
+      if (game.lastDieRoll !== null) {
+        throw new Error('secret passages can only be used before rolling');
+      }
       const destination = player.piece.location.accesses.find(space => space.room != null);
       if (!player.piece.location.room || !destination?.room) {
         throw new Error('no secret passage from the current location');
@@ -126,6 +149,8 @@ export function applyIntent(
       player.guessedHere = true;
       suspectPlayer.piece.location = player.piece.location;
       suspectPlayer.movedBySuggestion = true;
+      const weaponPiece = game.weapons.find(piece => piece.weapon === intent.weapon);
+      if (weaponPiece) weaponPiece.location = player.piece.location;
 
       const revealerIndex = nextPlayerIndex(game, playerIndex);
       game.pendingReveal = {
@@ -145,7 +170,6 @@ export function applyIntent(
     case 'showCard': {
       const pending = game.pendingReveal;
       if (!pending) throw new Error('there is no pending reveal');
-      if (pending.revealerIndex !== playerIndex) throw new Error('player is not the current revealer');
       if (!player.cards.some(card => sameCard(card, intent.card))) {
         throw new Error('revealer does not own that card');
       }
@@ -160,7 +184,6 @@ export function applyIntent(
     case 'declineReveal': {
       const pending = game.pendingReveal;
       if (!pending) throw new Error('there is no pending reveal');
-      if (pending.revealerIndex !== playerIndex) throw new Error('player is not the current revealer');
 
       const events: Event[] = [{ type: 'declinedReveal', revealerIndex: playerIndex }];
       const next = nextPlayerIndex(game, playerIndex);
