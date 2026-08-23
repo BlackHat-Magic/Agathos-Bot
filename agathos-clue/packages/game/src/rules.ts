@@ -68,7 +68,15 @@ export function begin(game: Game, rng: RNG = Math.random): void {
 }
 
 export interface SuggestionResult {
+  /** Player index who must reveal, or null if no player has any matching card. */
   revealerIndex: number | null;
+  /**
+   * The first matching card found in the revealer's hand, or null if none.
+   * This is a HINT for who-can-reveal and what cards qualify; the actual
+   * revealed card is chosen by the player (via `showCard` intent — Task 11)
+   * or, for robots, by the robot policy in Task 10's `decideRobotIntent`
+   * (which may pick a different matching card).
+   */
   card: Card | null;
 }
 
