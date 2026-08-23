@@ -33,7 +33,7 @@ import {
   parseIntentEnvelope,
   resolveViewerIndex,
 } from './game-room-protocol';
-import { runRobotScheduler } from './robots/scheduler';
+import { hasRobotActionableState, runRobotScheduler } from './robots/scheduler';
 export {
   assertIntentAuthority,
   authenticateDevProtocol,
@@ -43,6 +43,9 @@ export {
 } from './game-room-protocol';
 
 const STORAGE_KEY = 'game';
+const ROBOT_RETRY_INITIAL_DELAY_MS = 1_000;
+const ROBOT_RETRY_MAX_DELAY_MS = 60_000;
+const ROBOT_RETRY_MAX_ATTEMPT = 6;
 
 interface Connection {
   ws: WebSocket;
@@ -56,6 +59,8 @@ export class GameRoom extends DurableObject<Env> {
   private gameLoad: Promise<Game> | undefined;
   private messageQueue: Promise<void> = Promise.resolve();
   private robotRun: Promise<void> | undefined;
+  private robotRetryAttempt = 0;
+  private robotAlarmScheduled = false;
   private readonly connections = new Map<WebSocket, Connection>();
   private gameId = '';
 
@@ -128,7 +133,34 @@ export class GameRoom extends DurableObject<Env> {
     }
   }
 
-  async maybeRunRobot(): Promise<void> {
+  async alarm(alarmInfo?: AlarmInvocationInfo): Promise<void> {
+    if (alarmInfo !== undefined && !isAlarmInvocationInfo(alarmInfo)) {
+      console.error('robot alarm received malformed invocation');
+    }
+    this.robotAlarmScheduled = false;
+    try {
+      await this.enqueueRoomTask(async () => {
+        await this.loadGame();
+        if (this.game === undefined || !hasRobotActionableState(this.game)) {
+          this.resetRobotRetry();
+          return;
+        }
+        await this.maybeRunRobot(true);
+      });
+    } catch (error) {
+      console.error(`robot alarm failed: ${errorMessage(error)}`);
+    }
+  }
+
+  async maybeRunRobot(alreadyQueued = false): Promise<void> {
+    if (alreadyQueued) {
+      await this.runRobotIfNeeded();
+      return;
+    }
+    await this.enqueueRoomTask(() => this.runRobotIfNeeded());
+  }
+
+  private async runRobotIfNeeded(): Promise<void> {
     if (this.robotRun !== undefined) return this.robotRun;
 
     const run = this.runRobotScheduler();
@@ -144,18 +176,33 @@ export class GameRoom extends DurableObject<Env> {
 
   private async runRobotScheduler(): Promise<void> {
     await this.loadGame();
-    await runRobotScheduler({
-      getGame: () => {
-        if (this.game === undefined) throw new Error('game state is not loaded');
-        return this.game;
-      },
-      snapshot: serializeGame,
-      restore: snapshot => { this.game = hydrateGame(snapshot); },
-      persist: async game => {
-        await this.ctx.storage.put(STORAGE_KEY, serializeGame(game));
-      },
-      broadcast: events => this.broadcast(events),
-    });
+    try {
+      await runRobotScheduler({
+        getGame: () => {
+          if (this.game === undefined) throw new Error('game state is not loaded');
+          return this.game;
+        },
+        snapshot: serializeGame,
+        restore: snapshot => { this.game = hydrateGame(snapshot); },
+        persist: async game => {
+          await this.ctx.storage.put(STORAGE_KEY, serializeGame(game));
+        },
+        broadcast: events => this.broadcast(events),
+        onActionPersisted: () => { this.robotRetryAttempt = 0; },
+      });
+      this.resetRobotRetry();
+    } catch (error) {
+      if (this.game !== undefined && hasRobotActionableState(this.game)) {
+        try {
+          await this.scheduleRobotRetry();
+        } catch (scheduleError) {
+          console.error(`robot retry scheduling failed: ${errorMessage(scheduleError)}`);
+        }
+      } else {
+        this.resetRobotRetry();
+      }
+      throw error;
+    }
   }
 
   private async loadGame(): Promise<Game> {
@@ -186,7 +233,7 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   private enqueueMessage(connection: Connection, data: string | ArrayBuffer | null): void {
-    this.messageQueue = this.messageQueue.then(async () => {
+    void this.enqueueRoomTask(async () => {
       try {
         if (data === null) throw new Error('unsupported WebSocket message');
         await this.handleMessage(connection, data);
@@ -194,6 +241,14 @@ export class GameRoom extends DurableObject<Env> {
         this.sendError(connection, error);
       }
     });
+  }
+
+  private enqueueRoomTask(task: () => Promise<void>): Promise<void> {
+    const queued = this.messageQueue.then(task);
+    this.messageQueue = queued.catch(error => {
+      console.error(`room queue failed: ${errorMessage(error)}`);
+    });
+    return queued;
   }
 
   private async handleMessage(connection: Connection, data: string | ArrayBuffer): Promise<void> {
@@ -216,7 +271,7 @@ export class GameRoom extends DurableObject<Env> {
       throw error;
     }
     this.broadcast(events);
-    await this.maybeRunRobot();
+    await this.maybeRunRobot(true);
   }
 
   private async handleLobbyIntent(
@@ -261,7 +316,7 @@ export class GameRoom extends DurableObject<Env> {
         this.game = nextGame;
         this.lobby = nextLobby;
         this.broadcast([]);
-        await this.maybeRunRobot();
+        await this.maybeRunRobot(true);
         return;
       }
     }
@@ -293,6 +348,32 @@ export class GameRoom extends DurableObject<Env> {
       this.lobby = hydrateLobby(previousPersistedLobby);
       throw error;
     }
+  }
+
+  private async scheduleRobotRetry(): Promise<void> {
+    if (this.game === undefined || !hasRobotActionableState(this.game)) {
+      this.resetRobotRetry();
+      return;
+    }
+    if (this.robotAlarmScheduled) return;
+
+    const existingAlarm = await this.ctx.storage.getAlarm();
+    if (existingAlarm !== null) {
+      this.robotAlarmScheduled = true;
+      return;
+    }
+
+    const delay = Math.min(
+      ROBOT_RETRY_INITIAL_DELAY_MS * 2 ** this.robotRetryAttempt,
+      ROBOT_RETRY_MAX_DELAY_MS,
+    );
+    await this.ctx.storage.setAlarm(Date.now() + delay);
+    this.robotAlarmScheduled = true;
+    this.robotRetryAttempt = Math.min(this.robotRetryAttempt + 1, ROBOT_RETRY_MAX_ATTEMPT);
+  }
+
+  private resetRobotRetry(): void {
+    this.robotRetryAttempt = 0;
   }
 
   private broadcast(events: ReturnType<typeof applyIntent>): void {
@@ -373,4 +454,11 @@ function isLobbyIntent(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'internal error';
+}
+
+function isAlarmInvocationInfo(value: unknown): value is AlarmInvocationInfo {
+  if (typeof value !== 'object' || value === null) return false;
+  const info = value as Record<string, unknown>;
+  return typeof info.isRetry === 'boolean' && typeof info.retryCount === 'number' &&
+    typeof info.scheduledTime === 'number';
 }

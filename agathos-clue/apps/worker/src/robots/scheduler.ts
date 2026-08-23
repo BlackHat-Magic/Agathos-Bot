@@ -10,6 +10,7 @@ export interface RobotSchedulerOptions<Snapshot> {
   restore: (snapshot: Snapshot) => void;
   persist: (game: Game) => Promise<void>;
   broadcast: (events: Event[]) => void;
+  onActionPersisted?: () => void;
   rng?: RNG;
 }
 
@@ -30,11 +31,16 @@ export async function runRobotScheduler<Snapshot>(
       const events = applyIntent(game, robotIndex, intent, options.rng);
       await options.persist(game);
       options.broadcast(events);
+      options.onActionPersisted?.();
     } catch (error) {
       options.restore(previous);
       throw error;
     }
   }
+}
+
+export function hasRobotActionableState(game: Game): boolean {
+  return nextRobotIndex(game) !== null;
 }
 
 function nextRobotIndex(game: Game): number | null {
