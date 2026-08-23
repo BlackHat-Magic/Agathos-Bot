@@ -46,10 +46,24 @@ CREATE TABLE _d1_lobby_migration_suspect_guard (
 INSERT INTO _d1_lobby_migration_suspect_guard (ok)
 SELECT 0
 FROM game_players
-WHERE suspect IS NOT NULL
-GROUP BY game_id, suspect
+WHERE NULLIF(suspect, '') IS NOT NULL
+GROUP BY game_id, NULLIF(suspect, '')
 HAVING COUNT(*) > 1;
 DROP TABLE _d1_lobby_migration_suspect_guard;
+
+CREATE TABLE _d1_lobby_migration_suspect_domain_guard (
+  ok INTEGER NOT NULL,
+  CONSTRAINT d1_lobby_membership_valid_suspect CHECK (ok = 1)
+);
+INSERT INTO _d1_lobby_migration_suspect_domain_guard (ok)
+SELECT 0
+FROM game_players
+WHERE NULLIF(suspect, '') IS NOT NULL
+  AND NULLIF(suspect, '') NOT IN (
+    'Miss Scarlett', 'Professor Plum', 'Mrs. Peacock',
+    'Colonel Mustard', 'Mr. Green', 'Mrs. White'
+  );
+DROP TABLE _d1_lobby_migration_suspect_domain_guard;
 
 CREATE TABLE game_players_migration (
   game_id TEXT NOT NULL REFERENCES games(id),
@@ -71,12 +85,64 @@ SELECT player.game_id,
          WHERE prior.game_id = player.game_id
            AND prior.user_id < player.user_id
        ),
-       player.user_id, player.suspect, player.is_bot, player.finished_rank
+       player.user_id, NULLIF(player.suspect, ''), player.is_bot, player.finished_rank
 FROM game_players AS player
 ORDER BY player.game_id, player.user_id;
 
 DROP TABLE game_players;
 ALTER TABLE game_players_migration RENAME TO game_players;
+
+CREATE TABLE _d1_lobby_migration_host_slot_guard (
+  ok INTEGER NOT NULL,
+  CONSTRAINT d1_lobby_membership_host_slot_available CHECK (ok = 1)
+);
+INSERT INTO _d1_lobby_migration_host_slot_guard (ok)
+WITH slots(player_index) AS (
+  VALUES (0), (1), (2), (3), (4), (5)
+)
+SELECT 0
+FROM games AS game
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM game_players AS host
+    WHERE host.game_id = game.id AND host.user_id = game.host_user_id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM slots AS slot
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM game_players AS player
+      WHERE player.game_id = game.id AND player.player_index = slot.player_index
+    )
+  );
+DROP TABLE _d1_lobby_migration_host_slot_guard;
+
+WITH slots(player_index) AS (
+  VALUES (0), (1), (2), (3), (4), (5)
+)
+INSERT INTO game_players (game_id, player_index, user_id, suspect, is_bot)
+SELECT game.id, MIN(slot.player_index), game.host_user_id, NULL, 0
+FROM games AS game
+JOIN slots AS slot
+  ON NOT EXISTS (
+    SELECT 1
+    FROM game_players AS player
+    WHERE player.game_id = game.id AND player.player_index = slot.player_index
+  )
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM game_players AS host
+    WHERE host.game_id = game.id AND host.user_id = game.host_user_id
+  )
+GROUP BY game.id, game.host_user_id;
+
+UPDATE games
+SET player_count = (
+  SELECT COUNT(*)
+  FROM game_players AS player
+  WHERE player.game_id = games.id AND player.is_bot = 0
+);
 
 CREATE UNIQUE INDEX IF NOT EXISTS game_players_suspect
   ON game_players(game_id, suspect) WHERE suspect IS NOT NULL;
