@@ -15,6 +15,7 @@ const OPEN = 1;
 const MAX_RECONNECT_DELAY_MS = 15_000;
 const DEFAULT_RECONNECT_DELAY_MS = 1_000;
 const DEFAULT_QUEUE_SIZE = 32;
+const MAX_EVENT_LOG = 64;
 
 export type ConnectionStatus = 'connecting' | 'open' | 'reconnecting' | 'closed';
 
@@ -87,6 +88,7 @@ export function connect(gameId: string, token: string, options: TransportOptions
   let isOpen = false;
   let currentView: GameView | null = null;
   let currentPrivateReveal: PrivateReveal | null = null;
+  let currentEvents: Event[] = [];
 
   const transport: Transport = {
     view: viewStore,
@@ -240,7 +242,8 @@ export function connect(gameId: string, token: string, options: TransportOptions
         privateRevealStore.set(null);
         setView(frame.view);
         lobbyStore.set(null);
-        eventsStore.set(frame.events);
+        currentEvents = [...currentEvents, ...frame.events].slice(-MAX_EVENT_LOG);
+        eventsStore.set(currentEvents);
         errorStore.set(null);
         return;
       case 'private':
@@ -253,7 +256,8 @@ export function connect(gameId: string, token: string, options: TransportOptions
         privateRevealStore.set(null);
         setView(null);
         lobbyStore.set(frame);
-        eventsStore.set([]);
+        currentEvents = [];
+        eventsStore.set(currentEvents);
         errorStore.set(null);
         return;
       case 'ready':
@@ -261,7 +265,6 @@ export function connect(gameId: string, token: string, options: TransportOptions
         privateRevealStore.set(null);
         setView(null);
         lobbyStore.set(null);
-        eventsStore.set([]);
         errorStore.set(null);
         return;
       case 'error':

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { BoardRenderer } from '../BoardRenderer';
+  import type { BoardLocation, BoardRenderer } from '../BoardRenderer';
   import { Canvas2DRenderer } from '../canvas2d';
   import { canClickMove } from '../movement-gating';
   import { finishedGameMessage } from '../result-message';
@@ -16,6 +16,12 @@
   let boardFrame: HTMLDivElement;
   let renderer: BoardRenderer<CanvasRenderingContext2D> | null = null;
   let accuseOpen = false;
+
+  function moveTo(destination: BoardLocation): void {
+    if ($currentView !== null && canClickMove($currentView, destination)) {
+      send(createMoveToIntent(destination));
+    }
+  }
 
   function resizeBoard(nextRenderer: BoardRenderer<CanvasRenderingContext2D>): void {
     const width = boardFrame.clientWidth;
@@ -86,6 +92,18 @@
           <div bind:this={boardFrame} class="aspect-[24/25] w-full overflow-hidden rounded-2xl bg-mocha-void">
             <canvas bind:this={canvas} width="960" height="1000" class="block h-full w-full" aria-label="Clue game board"></canvas>
           </div>
+          {#if $currentView.reachableSpacesHints?.length}
+            <div class="mt-3 rounded-2xl border border-mocha-mauve/30 bg-mocha-mauve/10 p-3" aria-labelledby="reachable-moves-title">
+              <p id="reachable-moves-title" class="text-xs font-semibold uppercase tracking-[0.16em] text-mocha-mauve">Keyboard moves</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                {#each $currentView.reachableSpacesHints as destination}
+                  <button class="game-button" type="button" aria-label={`Move to ${destination}`} onclick={() => moveTo(destination)}>
+                    {destination}
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
         </section>
 
         <aside class="space-y-4">

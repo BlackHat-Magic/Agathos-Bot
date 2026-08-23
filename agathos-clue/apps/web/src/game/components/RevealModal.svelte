@@ -1,15 +1,26 @@
 <script lang="ts">
+  import { onMount, tick } from 'svelte';
   import type { Card, GameView } from '@agathos/game';
   import { currentView, send } from '../stores';
   import { createDeclineRevealIntent, createShowCardIntent } from '../../transport/intents';
+  import { focusDialog, trapDialogFocus } from '../modal-focus';
 
   export let onClose: () => void = () => {};
 
   let selectedIndex = -1;
+  let dialog: HTMLDivElement;
 
   $: view = $currentView;
   $: opportunities = validOpportunities(view);
   $: if (selectedIndex >= opportunities.length) selectedIndex = -1;
+
+  onMount(() => {
+    const restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    void tick().then(() => {
+      if (dialog !== undefined) focusDialog(dialog);
+    });
+    return () => restoreFocus?.focus();
+  });
 
   function validOpportunities(nextView: GameView | null): Card[] {
     if (nextView === null || nextView.pendingReveal?.revealerIndex !== nextView.myIndex ||
@@ -44,12 +55,13 @@
 
   function handleKey(event: KeyboardEvent): void {
     if (event.key === 'Escape' && opportunities.length === 0) decline();
+    trapDialogFocus(event, dialog);
   }
 </script>
 
 {#if view !== null && view.pendingReveal?.revealerIndex === view.myIndex && view.myRevealOpportunities !== undefined}
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-mocha-crust/80 p-4" role="presentation">
-    <div class="w-full max-w-lg rounded-2xl border border-mocha-peach/45 bg-mocha-base p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="reveal-title" onkeydown={handleKey} tabindex="-1">
+     <div bind:this={dialog} class="w-full max-w-lg rounded-2xl border border-mocha-peach/45 bg-mocha-base p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="reveal-title" onkeydown={handleKey} tabindex="-1">
       <p class="text-xs font-semibold uppercase tracking-[0.18em] text-mocha-peach">Private response</p>
       <h2 id="reveal-title" class="mt-1 font-display text-2xl font-semibold">Show one matching card</h2>
       <p class="mt-3 text-sm leading-6 text-mocha-subtext1">

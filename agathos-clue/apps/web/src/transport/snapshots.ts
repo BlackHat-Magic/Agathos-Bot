@@ -270,7 +270,7 @@ function validateViewPlayer(value: unknown, index: number): GameView['players'][
   requireKeys(player, [
     'name', 'suspect', 'location', 'handCount', 'failedAccusation', 'guessedHere', 'isRobot',
     'movedBySuggestion',
-  ], 'view player', ['userId']);
+  ], 'view player');
   const guessedHere = player.guessedHere;
   if (typeof player.name !== 'string' || player.name.length === 0 || player.name.length > 32 ||
       !isSuspect(player.suspect) || !isLocation(player.location) ||
@@ -289,10 +289,6 @@ function validateViewPlayer(value: unknown, index: number): GameView['players'][
     isRobot: player.isRobot,
     movedBySuggestion: player.movedBySuggestion,
   };
-  if (player.userId !== undefined) {
-    if (!isSafeUserId(player.userId)) throw new Error(`invalid view player user id at index ${index}`);
-    result.userId = player.userId;
-  }
   return result;
 }
 
@@ -430,10 +426,6 @@ function optionalBoolean(value: unknown, label: string): boolean | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== 'boolean') throw new Error(`invalid ${label}`);
   return value;
-}
-
-function isSafeUserId(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= 128 && !/\s/.test(value);
 }
 
 function invalid(error: string): ParseResult {

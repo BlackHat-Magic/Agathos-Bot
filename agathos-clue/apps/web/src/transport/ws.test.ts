@@ -218,4 +218,43 @@ describe('typed WebSocket transport', () => {
     expect(get(transport.error)).toBeNull();
     transport.close();
   });
+
+  it('appends event deltas, caps the log, and keeps it across ready frames', () => {
+    const socket = new FakeSocket();
+    const transport = connect('game', 'jwt', {
+      origin: 'https://example.test',
+      socketFactory: () => socket,
+    });
+    socket.open();
+    const baseView = {
+      phase: 'playing', boardWidth: 24, boardHeight: 25,
+      players: [{ name: 'Alice', suspect: 'Miss Scarlett', location: '16,24', handCount: 0,
+        failedAccusation: false, guessedHere: false, isRobot: false, movedBySuggestion: false }],
+      weaponLocations: [], turnIndex: 0, winnerIndex: null, pendingReveal: null,
+      lastDieRoll: null, myIndex: 0, myHand: [],
+    };
+    socket.message(JSON.stringify({ type: 'state', view: baseView, events: [
+      { type: 'turnEnded', playerIndex: 0 },
+    ] }));
+    socket.message(JSON.stringify({ type: 'state', view: baseView, events: [
+      { type: 'rolled', playerIndex: 0, result: 7 },
+    ] }));
+    expect(get(transport.events)).toEqual([
+      { type: 'turnEnded', playerIndex: 0 },
+      { type: 'rolled', playerIndex: 0, result: 7 },
+    ]);
+    for (let index = 0; index < 64; index += 1) {
+      socket.message(JSON.stringify({ type: 'state', view: baseView, events: [
+        { type: 'turnEnded', playerIndex: 0 },
+      ] }));
+    }
+    expect(get(transport.events)).toHaveLength(64);
+    socket.message(JSON.stringify({ type: 'ready' }));
+    expect(get(transport.events)).toHaveLength(64);
+    socket.message(JSON.stringify({
+      type: 'lobby', gameId: 'game', isHost: false, players: [],
+    }));
+    expect(get(transport.events)).toEqual([]);
+    transport.close();
+  });
 });

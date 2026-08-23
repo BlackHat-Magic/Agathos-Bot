@@ -51,8 +51,10 @@ describe('toView', () => {
     const view = toView(game, 0);
 
     expect(view.myHand).toEqual([{ type: 'suspect', suspect: 'Professor Plum' }]);
-    expect(view.players[0]).toMatchObject({ handCount: 1, guessedHere: true, userId: 'user-0' });
-    expect(view.players[1]).toMatchObject({ handCount: 1, userId: 'user-1' });
+     expect(view.players[0]).toMatchObject({ handCount: 1, guessedHere: true });
+     expect(view.players[1]).toMatchObject({ handCount: 1 });
+     expect(view.players[0]).not.toHaveProperty('userId');
+     expect(view.players[1]).not.toHaveProperty('userId');
     expect('cards' in view.players[0]!).toBe(false);
     expect('cards' in view.players[1]!).toBe(false);
     expect(JSON.stringify(view)).not.toContain('Lead Pipe');
@@ -68,7 +70,8 @@ describe('toView', () => {
 
     expect(view.myIndex).toBe(1);
     expect(view.myHand).toEqual([{ type: 'weapon', weapon: 'Lead Pipe' }]);
-    expect(view.players[0]).toMatchObject({ handCount: 1, userId: 'user-0' });
+     expect(view.players[0]).toMatchObject({ handCount: 1 });
+     expect(view.players[0]).not.toHaveProperty('userId');
     expect('cards' in view.players[0]!).toBe(false);
     expect(JSON.stringify(view)).not.toContain('"room":"Library"');
   });

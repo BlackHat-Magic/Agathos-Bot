@@ -76,9 +76,8 @@ export function toView(game: Game, viewerIndex: number): GameView {
        failedAccusation: player.failedAccusation,
        guessedHere: player.guessedHere,
        isRobot: player.isRobot,
-      movedBySuggestion: player.movedBySuggestion,
-      ...(player.userId === undefined ? {} : { userId: player.userId }),
-    })),
+       movedBySuggestion: player.movedBySuggestion,
+     })),
     weaponLocations: game.weapons.map(weapon => ({
       weapon: weapon.weapon,
       location: projectLocation(weapon.location),

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy, tick } from 'svelte';
   import {
     SUSPECTS,
     WEAPONS,
@@ -13,10 +14,13 @@
     createSuggestIntent,
     createUseSecretPassageIntent,
   } from '../../transport/intents';
+  import { focusDialog, trapDialogFocus } from '../modal-focus';
 
   export let onAccuse: () => void = () => {};
 
   let suggestOpen = false;
+  let suggestDialog: HTMLDivElement;
+  let suggestRestoreFocus: HTMLElement | null = null;
   let suggestSuspect: Suspect = SUSPECTS[0];
   let suggestWeapon: Weapon = WEAPONS[0];
 
@@ -30,13 +34,27 @@
     if (send(createSuggestIntent(suggestSuspect, suggestWeapon))) suggestOpen = false;
   }
 
+  function openSuggestion(): void {
+    suggestRestoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    suggestOpen = true;
+    void tick().then(() => {
+      if (suggestDialog !== undefined) focusDialog(suggestDialog);
+    });
+  }
+
   function closeSuggestion(): void {
     suggestOpen = false;
+    const restoreFocus = suggestRestoreFocus;
+    suggestRestoreFocus = null;
+    restoreFocus?.focus();
   }
 
   function handleDialogKey(event: KeyboardEvent): void {
     if (event.key === 'Escape') closeSuggestion();
+    trapDialogFocus(event, suggestDialog);
   }
+
+  onDestroy(closeSuggestion);
 </script>
 
 <section class="rounded-2xl border border-mocha-surface1 bg-mocha-mantle p-4" aria-labelledby="intent-title">
@@ -71,7 +89,7 @@
   <div class="mt-4 flex flex-wrap gap-2">
     <button class="game-button game-button-primary" type="button" disabled={!actions.canRoll} onclick={() => send(createRollIntent())}>Roll dice</button>
     <button class="game-button" type="button" disabled={!actions.canUseSecretPassage} onclick={() => send(createUseSecretPassageIntent())}>Secret passage</button>
-    <button class="game-button" type="button" disabled={!actions.canSuggest} onclick={() => (suggestOpen = true)}>Suggest</button>
+     <button class="game-button" type="button" disabled={!actions.canSuggest} onclick={openSuggestion}>Suggest</button>
     <button class="game-button" type="button" disabled={!actions.canAccuse} onclick={onAccuse}>Accuse</button>
     <button class="game-button game-button-end" type="button" disabled={!actions.canEndTurn} onclick={() => send(createEndTurnIntent())}>End turn</button>
   </div>
@@ -79,7 +97,7 @@
 
 {#if suggestOpen}
   <div class="fixed inset-0 z-40 flex items-center justify-center bg-mocha-crust/75 p-4" role="presentation" onclick={closeSuggestion}>
-    <div class="w-full max-w-md rounded-2xl border border-mocha-surface1 bg-mocha-base p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="suggest-title" onclick={(event) => event.stopPropagation()} onkeydown={handleDialogKey} tabindex="-1">
+     <div bind:this={suggestDialog} class="w-full max-w-md rounded-2xl border border-mocha-surface1 bg-mocha-base p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="suggest-title" onclick={(event) => event.stopPropagation()} onkeydown={handleDialogKey} tabindex="-1">
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="text-xs font-semibold uppercase tracking-[0.18em] text-mocha-mauve">Room suggestion</p>

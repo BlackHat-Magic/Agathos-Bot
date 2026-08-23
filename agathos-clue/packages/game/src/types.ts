@@ -155,7 +155,6 @@ export interface GameView {
     guessedHere: boolean;
     isRobot: boolean;
     movedBySuggestion: boolean;
-    userId?: string;
   }>;
   weaponLocations: Array<{
     weapon: Weapon;

@@ -18,9 +18,8 @@ function view(phase: 'playing' | 'finished' = 'playing'): Record<string, unknown
        failedAccusation: false,
        guessedHere: false,
        isRobot: false,
-      movedBySuggestion: false,
-      userId: 'alice',
-    }],
+       movedBySuggestion: false,
+     }],
     weaponLocations: [{ weapon: 'Rope', location: 'Kitchen' }],
     turnIndex: 0,
     winnerIndex: null,
@@ -69,8 +68,15 @@ describe('server snapshot validation', () => {
   it('validates local cards but rejects arbitrary public payloads', () => {
     expect(isGameView(view())).toBe(true);
     expect(isGameView({ ...view(), myHand: [{ type: 'room', room: 'secret' }] })).toBe(false);
-    const player = view().players[0];
-    expect(isGameView({ ...view(), players: [{ ...(player as Record<string, unknown>), location: { card: 'secret' } }] })).toBe(false);
+    const player = (view().players as unknown[])[0] as Record<string, unknown>;
+    expect(isGameView({ ...view(), players: [{ ...player, location: { card: 'secret' } }] })).toBe(false);
+  });
+
+  it('rejects player user identities from public views', () => {
+    expect(isGameView({
+      ...view(),
+      players: [{ ...(view().players as unknown[])[0] as Record<string, unknown>, userId: 'alice' }],
+    })).toBe(false);
   });
 
   it('permits a solution only in a finished view', () => {
@@ -119,8 +125,9 @@ describe('server snapshot validation', () => {
   });
 
   it('requires an authoritative guessedHere boolean for every player', () => {
-    expect(isGameView({ ...view(), players: [{ ...view().players[0]!, guessedHere: undefined }] })).toBe(false);
-    expect(isGameView({ ...view(), players: [{ ...view().players[0]!, guessedHere: 'false' }] })).toBe(false);
+    const player = (view().players as unknown[])[0] as Record<string, unknown>;
+    expect(isGameView({ ...view(), players: [{ ...player, guessedHere: undefined }] })).toBe(false);
+    expect(isGameView({ ...view(), players: [{ ...player, guessedHere: 'false' }] })).toBe(false);
     expect(validateGameView(view()).players[0]!.guessedHere).toBe(false);
   });
 
