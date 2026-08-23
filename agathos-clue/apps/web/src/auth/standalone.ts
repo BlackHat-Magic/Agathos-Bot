@@ -1,3 +1,5 @@
+import { writable } from 'svelte/store';
+
 /**
  * The token is intentionally returned only from an explicit same-origin
  * session fetch. Task 20 can offer it as the `bearer.<token>` WebSocket
@@ -8,6 +10,8 @@ export interface StandaloneSession {
   userId: string;
   token: string;
 }
+
+export const session = writable<StandaloneSession | null>(null);
 
 export async function loadStandaloneSession(
   fetcher: typeof fetch = fetch,
