@@ -171,6 +171,9 @@ export function applyIntent(
     }
 
     case 'suggest': {
+      if (game.players.length < 2) {
+        throw new Error('suggestions require at least two players');
+      }
       const room = player.piece.location.room;
       if (!room) throw new Error('suggestions can only be made in a room');
       if (player.guessedHere) throw new Error('player has already suggested in this room');

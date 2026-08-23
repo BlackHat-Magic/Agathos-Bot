@@ -237,7 +237,10 @@ describe('applyIntent', () => {
   });
 
   it('allows a corridor-to-room entry to enable a suggestion', () => {
-    const game = playingGame([player('Miss Scarlett', 0)]);
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1),
+    ]);
     applyIntent(game, 0, { kind: 'roll' }, () => 0.5);
     applyIntent(game, 0, { kind: 'moveTo', destination: 'Lounge' });
 
@@ -247,11 +250,25 @@ describe('applyIntent', () => {
     })).not.toThrow();
   });
 
-  it('does not allow a player who ended in a room to suggest next turn without re-entering', () => {
+  it('rejects a suggestion in a one-player game without creating a pending reveal', () => {
     const game = playingGame([player('Miss Scarlett', 0)]);
+    putInHall(game);
+
+    expect(() => applyIntent(game, 0, {
+      kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope',
+    })).toThrow('suggestions require at least two players');
+    expect(game.pendingReveal).toBeNull();
+  });
+
+  it('does not allow a player who ended in a room to suggest next turn without re-entering', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1),
+    ]);
     applyIntent(game, 0, { kind: 'roll' }, () => 0.5);
     applyIntent(game, 0, { kind: 'moveTo', destination: 'Lounge' });
     applyIntent(game, 0, { kind: 'endTurn' });
+    applyIntent(game, 1, { kind: 'endTurn' });
 
     expect(game.players[0]!.piece.location.room).toBe('Lounge');
     expect(game.players[0]!.enteredRoomThisTurn).toBe(false);
