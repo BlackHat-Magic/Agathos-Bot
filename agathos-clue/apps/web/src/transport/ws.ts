@@ -1,7 +1,7 @@
 import { writable } from 'svelte/store';
 import type { Readable } from 'svelte/store';
 import type { Event, GameView } from '@agathos/game';
-import type { ClientIntent } from './intents';
+import { createJoinIntent, type ClientIntent } from './intents';
 import {
   parseServerMessage,
 } from './snapshots';
@@ -86,6 +86,8 @@ export function connect(gameId: string, token: string, options: TransportOptions
   let reconnectAttempt = 0;
   let isClosed = false;
   let isOpen = false;
+  let replayJoinOnOpen = false;
+  let lastJoinIntent: Extract<ClientIntent, { kind: 'join' }> | undefined;
   let currentView: GameView | null = null;
   let currentPrivateReveal: PrivateReveal | null = null;
   let currentEvents: Event[] = [];
@@ -125,6 +127,11 @@ export function connect(gameId: string, token: string, options: TransportOptions
     isOpen = true;
     statusStore.set('open');
     errorStore.set(null);
+    if (replayJoinOnOpen && lastJoinIntent !== undefined) {
+      replayJoinOnOpen = false;
+      removeQueuedJoinIntents();
+      if (!sendImmediately(openedSocket, lastJoinIntent)) return;
+    }
     flushQueue(openedSocket);
   }
 
@@ -140,15 +147,20 @@ export function connect(gameId: string, token: string, options: TransportOptions
 
   function handleClose(closedSocket: WebSocketLike): void {
     if (socket !== closedSocket) return;
+    const wasOpen = isOpen;
     socket = undefined;
     isOpen = false;
     if (isClosed) return;
+    replayJoinOnOpen = (wasOpen || replayJoinOnOpen) && lastJoinIntent !== undefined;
     statusStore.set('reconnecting');
     scheduleReconnect();
   }
 
   function handleSocketError(errorSocket: WebSocketLike): void {
     if (isClosed || socket !== errorSocket) return;
+    replayJoinOnOpen = (isOpen || replayJoinOnOpen) && lastJoinIntent !== undefined;
+    isOpen = false;
+    statusStore.set('reconnecting');
     setTransportError('WebSocket connection error');
   }
 
@@ -196,26 +208,31 @@ export function connect(gameId: string, token: string, options: TransportOptions
       setTransportError('transport is closed');
       return false;
     }
+    const acceptedIntent = intent.kind === 'join' ? createJoinIntent(intent.name) : intent;
     if (socket?.readyState === OPEN && isOpen) {
-      try {
-        socket.send(JSON.stringify({ intent }));
-        return true;
-      } catch (error) {
-        setTransportError(errorMessage(error));
-        return false;
-      }
+      if (!sendImmediately(socket, acceptedIntent)) return false;
+      rememberAcceptedIntent(acceptedIntent);
+      return true;
+    }
+    if (acceptedIntent.kind === 'join' && replaceQueuedJoin(acceptedIntent)) return true;
+    if (acceptedIntent.kind === 'leave') {
+      removeQueuedJoinIntents();
+      replayJoinOnOpen = false;
     }
     if (queue.length >= maxQueueSize) {
       setTransportError(`send queue is full (${maxQueueSize} intents)`);
       return false;
     }
-    queue.push(intent);
+    queue.push(acceptedIntent);
+    rememberAcceptedIntent(acceptedIntent);
     return true;
   }
 
   function close(): void {
     if (isClosed) return;
     isClosed = true;
+    clearRememberedJoin();
+    queue.length = 0;
     if (reconnectTimer !== undefined) {
       clearTimer(reconnectTimer);
       reconnectTimer = undefined;
@@ -268,6 +285,7 @@ export function connect(gameId: string, token: string, options: TransportOptions
         errorStore.set(null);
         return;
       case 'error':
+        clearRememberedJoin();
         setTransportError(frame.message);
         return;
     }
@@ -294,6 +312,49 @@ export function connect(gameId: string, token: string, options: TransportOptions
 
   function setTransportError(message: string): void {
     errorStore.set(message);
+  }
+
+  function sendImmediately(openedSocket: WebSocketLike, intent: ClientIntent): boolean {
+    try {
+      openedSocket.send(JSON.stringify({ intent }));
+      return true;
+    } catch (error) {
+      setTransportError(errorMessage(error));
+      try {
+        openedSocket.close(1011, 'transport send failed');
+      } catch {
+        handleClose(openedSocket);
+      }
+      return false;
+    }
+  }
+
+  function rememberAcceptedIntent(intent: ClientIntent): void {
+    if (intent.kind === 'join') {
+      lastJoinIntent = { ...intent };
+      return;
+    }
+    if (intent.kind === 'leave') clearRememberedJoin();
+  }
+
+  function clearRememberedJoin(): void {
+    lastJoinIntent = undefined;
+    replayJoinOnOpen = false;
+    removeQueuedJoinIntents();
+  }
+
+  function replaceQueuedJoin(intent: Extract<ClientIntent, { kind: 'join' }>): boolean {
+    const index = queue.findIndex(queuedIntent => queuedIntent.kind === 'join');
+    if (index < 0) return false;
+    queue[index] = intent;
+    rememberAcceptedIntent(intent);
+    return true;
+  }
+
+  function removeQueuedJoinIntents(): void {
+    for (let index = queue.length - 1; index >= 0; index -= 1) {
+      if (queue[index]?.kind === 'join') queue.splice(index, 1);
+    }
   }
 
 }

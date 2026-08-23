@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRollIntent } from './intents';
+import { createJoinIntent, createLeaveIntent, createRollIntent } from './intents';
 import { connect, buildWebSocketUrl } from './ws';
 import type { WebSocketLike } from './ws';
 
@@ -23,6 +23,10 @@ class FakeSocket implements WebSocketLike {
   close(): void {
     this.readyState = 3;
     this.dispatch('close', {});
+  }
+
+  fail(): void {
+    this.dispatch('error', {});
   }
 
   open(): void {
@@ -147,6 +151,122 @@ describe('typed WebSocket transport', () => {
     vi.advanceTimersByTime(60_000);
     expect(sockets).toHaveLength(1);
     expect(get(transport.status)).toBe('closed');
+  });
+
+  it('replays the accepted normalized join once before queued intents after reconnect', () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const transport = connect('game', 'jwt', {
+      origin: 'https://example.test',
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    sockets[0]!.open();
+    expect(transport.send({ kind: 'join', name: '  Alice  ' })).toBe(true);
+    expect(sockets[0]!.sent).toEqual(['{"intent":{"kind":"join","name":"Alice"}}']);
+    sockets[0]!.close();
+    expect(transport.send(createRollIntent())).toBe(true);
+    vi.advanceTimersByTime(1_000);
+    sockets[1]!.open();
+    sockets[1]!.open();
+
+    expect(sockets[1]!.sent).toEqual([
+      '{"intent":{"kind":"join","name":"Alice"}}',
+      '{"intent":{"kind":"roll"}}',
+    ]);
+    expect(JSON.stringify(sockets[1]!.sent)).not.toContain('jwt');
+    transport.close();
+  });
+
+  it('queues actions after a socket error and preserves replay ordering', () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const transport = connect('game', 'jwt', {
+      origin: 'https://example.test',
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    sockets[0]!.open();
+    transport.send(createJoinIntent('Alice'));
+    sockets[0]!.fail();
+    expect(transport.send(createRollIntent())).toBe(true);
+    sockets[0]!.close();
+    vi.advanceTimersByTime(1_000);
+    sockets[1]!.open();
+    expect(sockets[1]!.sent).toEqual([
+      '{"intent":{"kind":"join","name":"Alice"}}',
+      '{"intent":{"kind":"roll"}}',
+    ]);
+    transport.close();
+  });
+
+  it('does not replay after an explicit close or an accepted leave', () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const transport = connect('game', 'jwt', {
+      origin: 'https://example.test',
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    sockets[0]!.open();
+    transport.send(createJoinIntent('Alice'));
+    transport.close();
+    vi.advanceTimersByTime(60_000);
+    expect(sockets).toHaveLength(1);
+
+    const nextSockets: FakeSocket[] = [];
+    const nextTransport = connect('game', 'jwt', {
+      origin: 'https://example.test',
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        nextSockets.push(socket);
+        return socket;
+      },
+    });
+    nextSockets[0]!.open();
+    nextTransport.send(createJoinIntent('Alice'));
+    nextSockets[0]!.close();
+    expect(nextTransport.send(createLeaveIntent())).toBe(true);
+    vi.advanceTimersByTime(1_000);
+    nextSockets[1]!.open();
+    expect(nextSockets[1]!.sent).toEqual(['{"intent":{"kind":"leave"}}']);
+    nextTransport.close();
+  });
+
+  it('clears replay state after a rejected join and ignores stale callbacks', () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const transport = connect('game', 'jwt', {
+      origin: 'https://example.test',
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    sockets[0]!.open();
+    transport.send(createJoinIntent('Alice'));
+    sockets[0]!.close();
+    sockets[0]!.message(JSON.stringify({ type: 'error', message: 'stale rejection' }));
+    vi.advanceTimersByTime(1_000);
+    sockets[1]!.open();
+    expect(sockets[1]!.sent).toEqual(['{"intent":{"kind":"join","name":"Alice"}}']);
+    sockets[1]!.message(JSON.stringify({ type: 'error', message: 'join rejected' }));
+    sockets[1]!.close();
+    vi.advanceTimersByTime(1_000);
+    sockets[2]!.open();
+    expect(sockets[2]!.sent).toEqual([]);
+    transport.close();
   });
 
   it('isolates private reveal cards in the local view and rejects malformed frames', () => {

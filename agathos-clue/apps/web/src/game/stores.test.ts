@@ -1,11 +1,13 @@
 import { get } from 'svelte/store';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { session } from '../auth/standalone';
-import { error, events, gameId, privateReveal } from './stores';
+import { createJoinIntent } from '../transport/intents';
+import { error, events, gameId, privateReveal, send, lobby, connectionStatus } from './stores';
 import type { WebSocketLike } from '../transport/ws';
 
 class FakeSocket implements WebSocketLike {
   readyState = 0;
+  readonly sent: string[] = [];
   private readonly listeners = new Map<string, Array<(event: unknown) => void>>();
 
   addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: unknown) => void): void {
@@ -14,7 +16,9 @@ class FakeSocket implements WebSocketLike {
     this.listeners.set(type, listeners);
   }
 
-  send(): void {}
+  send(data: string): void {
+    this.sent.push(data);
+  }
 
   close(): void {
     this.readyState = 3;
@@ -43,6 +47,7 @@ const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location')
 const originalWebSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
 
 afterEach(() => {
+  vi.useRealTimers();
   gameId.set(null);
   session.set(null);
   restoreGlobal('location', originalLocation);
@@ -114,6 +119,64 @@ describe('global game stores', () => {
     }));
     expect(get(events)).toEqual([]);
     expect(get(privateReveal)).toBeNull();
+  });
+
+  it('retains the lobby snapshot during reconnect and replays the join on the replacement socket', () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      value: { origin: 'https://example.test' },
+    });
+    Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: class {
+      constructor() {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      }
+    } });
+
+    gameId.set('game');
+    session.set({ authenticated: true, userId: 'alice', token: 'jwt' });
+    sockets[0]!.open();
+    const lobbyFrame = { type: 'lobby', gameId: 'game', isHost: true, players: [] } as const;
+    sockets[0]!.message(JSON.stringify(lobbyFrame));
+    expect(send(createJoinIntent('Alice'))).toBe(true);
+    sockets[0]!.close();
+    expect(get(connectionStatus)).toBe('reconnecting');
+    expect(get(lobby)).toEqual(lobbyFrame);
+
+    vi.advanceTimersByTime(1_000);
+    sockets[1]!.open();
+    expect(sockets[1]!.sent).toEqual(['{"intent":{"kind":"join","name":"Alice"}}']);
+    expect(get(lobby)).toEqual(lobbyFrame);
+  });
+
+  it('drops replay state when the selected room or session token changes', () => {
+    const sockets: FakeSocket[] = [];
+    Object.defineProperty(globalThis, 'location', {
+      configurable: true,
+      value: { origin: 'https://example.test' },
+    });
+    Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: class {
+      constructor() {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      }
+    } });
+
+    gameId.set('game');
+    session.set({ authenticated: true, userId: 'alice', token: 'jwt' });
+    sockets[0]!.open();
+    expect(send(createJoinIntent('Alice'))).toBe(true);
+    sockets[0]!.close();
+
+    gameId.set('other-game');
+    session.set({ authenticated: true, userId: 'alice', token: 'new-jwt' });
+    sockets[2]!.open();
+    expect(sockets[2]!.sent).toEqual([]);
+    expect(get(connectionStatus)).toBe('open');
   });
 });
 

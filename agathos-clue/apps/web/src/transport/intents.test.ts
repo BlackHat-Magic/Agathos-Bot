@@ -16,8 +16,12 @@ import {
 } from './intents';
 
 describe('typed intent creators', () => {
+  it('normalizes join names before they can be queued or replayed', () => {
+    expect(createJoinIntent('  Alice  ')).toEqual({ kind: 'join', name: 'Alice' });
+  });
+
   it('creates every supported lobby and game intent shape', () => {
-    expect(createJoinIntent(' Alice ')).toEqual({ kind: 'join', name: ' Alice ' });
+    expect(createJoinIntent(' Alice ')).toEqual({ kind: 'join', name: 'Alice' });
     expect(createClaimSuspectIntent('Miss Scarlett')).toEqual({
       kind: 'claimSuspect', suspect: 'Miss Scarlett',
     });

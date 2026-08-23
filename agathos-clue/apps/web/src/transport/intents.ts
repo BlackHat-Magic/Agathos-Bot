@@ -29,10 +29,11 @@ export type ClientIntent =
 export type Intent = ClientIntent;
 
 export function createJoinIntent(name: string): Extract<ClientIntent, { kind: 'join' }> {
-  if (typeof name !== 'string' || name.trim().length === 0) {
+  const trimmedName = typeof name === 'string' ? name.trim() : '';
+  if (trimmedName.length === 0) {
     throw new TypeError('join name must be a non-empty string');
   }
-  return { kind: 'join', name };
+  return { kind: 'join', name: trimmedName };
 }
 
 export function createClaimSuspectIntent(

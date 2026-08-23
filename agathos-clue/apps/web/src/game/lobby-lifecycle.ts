@@ -9,9 +9,8 @@ export function shouldResetJoinedState(
   hasLobby: boolean,
 ): boolean {
   return hasJoined && (
-    status === 'reconnecting' ||
     status === 'closed' ||
-    transportError !== null ||
+    (transportError !== null && status !== 'reconnecting') ||
     !hasLobby
   );
 }

@@ -10,7 +10,8 @@ import {
 describe('lobby connection lifecycle', () => {
   it('resets optimistic membership after server rejection or transport loss', () => {
     expect(shouldResetJoinedState(true, 'open', 'game is full', true)).toBe(true);
-    expect(shouldResetJoinedState(true, 'reconnecting', null, true)).toBe(true);
+    expect(shouldResetJoinedState(true, 'reconnecting', null, true)).toBe(false);
+    expect(shouldResetJoinedState(true, 'reconnecting', 'WebSocket connection error', true)).toBe(false);
     expect(shouldResetJoinedState(true, 'closed', null, true)).toBe(true);
     expect(shouldResetJoinedState(true, 'open', null, false)).toBe(true);
     expect(shouldResetJoinedState(true, 'open', null, true)).toBe(false);
