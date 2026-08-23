@@ -9,6 +9,7 @@
     type Weapon,
   } from '@agathos/game';
   import { currentView, error, events, send } from '../stores';
+  import { enqueueAccusation } from '../accusation-lifecycle';
   import { actionsFor } from '../intent-gating';
   import {
     shouldCloseAfterAccusation,
@@ -56,7 +57,10 @@
     if (!actions.canAccuse || accusationPending) return;
     const viewBeforeAccusation = $currentView;
     const eventsBeforeSubmit = [...$events];
-    if (send(createAccuseIntent(suspect, weapon, room))) {
+    if (enqueueAccusation(
+      () => error.set(null),
+      () => send(createAccuseIntent(suspect, weapon, room)),
+    )) {
       eventsBeforeAccusation = eventsBeforeSubmit;
       accusationBaseline = viewBeforeAccusation === null ? null : {
         phase: viewBeforeAccusation.phase,
