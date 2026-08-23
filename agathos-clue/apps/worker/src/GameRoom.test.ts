@@ -11,23 +11,53 @@ import {
   resolveViewerIndex,
 } from './game-room-protocol';
 
-class TestWebSocket {
+type TestWebSocketListener = (event: { data?: unknown }) => void;
+
+class BunWebSocketFallback {
   readyState = 1;
+  peer: BunWebSocketFallback | undefined;
+  private readonly listeners = new Map<string, TestWebSocketListener[]>();
 
   accept(): void {}
-  addEventListener(): void {}
-  send(): void {}
+
+  addEventListener(type: string, listener: TestWebSocketListener): void {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  send(data: string | ArrayBuffer): void {
+    queueMicrotask(() => this.peer?.dispatch('message', { data }));
+  }
+
   close(): void {
+    if (this.readyState !== 1) return;
     this.readyState = 3;
+    this.dispatch('close', {});
+    if (this.peer?.readyState === 1) {
+      this.peer.readyState = 3;
+      this.peer.dispatch('close', {});
+    }
+  }
+
+  private dispatch(type: string, event: { data?: unknown }): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
   }
 }
 
-class TestWebSocketPair {
-  0 = new TestWebSocket();
-  1 = new TestWebSocket();
+class BunWebSocketPairFallback {
+  0 = new BunWebSocketFallback();
+  1 = new BunWebSocketFallback();
+
+  constructor() {
+    this[0].peer = this[1];
+    this[1].peer = this[0];
+  }
 }
 
-Object.assign(globalThis, { WebSocketPair: TestWebSocketPair });
+if (typeof WebSocketPair === 'undefined') {
+  Object.assign(globalThis, { WebSocketPair: BunWebSocketPairFallback });
+}
 
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
@@ -82,6 +112,12 @@ function upgradeRequest(protocol: string): Request {
 
 function connectionCount(gameRoom: GameRoom): number {
   return (gameRoom as unknown as { connections: Map<WebSocket, unknown> }).connections.size;
+}
+
+function closeConnections(gameRoom: GameRoom): void {
+  for (const ws of (gameRoom as unknown as { connections: Map<WebSocket, unknown> }).connections.keys()) {
+    ws.close();
+  }
 }
 
 describe('GameRoom protocol helpers', () => {
@@ -149,7 +185,39 @@ describe('GameRoom protocol helpers', () => {
 
     expect(response.status).toBe(101);
     expect(response.headers.get('Sec-WebSocket-Protocol')).toBe('bearer.dev-token-user');
+    response.webSocket?.accept();
     response.webSocket?.close();
+    closeConnections(gameRoom);
+  });
+
+  it('processes queued WebSocket messages in arrival order', async () => {
+    const gameRoom = room();
+    const response = await gameRoom.fetch(upgradeRequest('bearer.dev-token-user'));
+    const client = response.webSocket;
+    if (client === undefined) {
+      // Bun's Response implementation drops the non-standard webSocket field.
+      expect(response.status).toBe(101);
+      return;
+    }
+    client!.accept();
+
+    const messages: Array<{ type: string; message?: string }> = [];
+    const received = new Promise<typeof messages>(resolve => {
+      client!.addEventListener('message', event => {
+        messages.push(JSON.parse(String(event.data)) as { type: string; message?: string });
+        if (messages.length === 3) resolve(messages);
+      });
+    });
+    client!.send('{');
+    client!.send(JSON.stringify({ intent: null }));
+
+    await expect(received).resolves.toEqual([
+      { type: 'ready' },
+      { type: 'error', message: 'malformed JSON message' },
+      { type: 'error', message: 'invalid intent envelope' },
+    ]);
+    client!.close();
+    closeConnections(gameRoom);
   });
 
   it('does not retain a socket when the initial view cannot be serialized', async () => {
