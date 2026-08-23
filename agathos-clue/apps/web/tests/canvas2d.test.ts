@@ -63,6 +63,18 @@ describe('Canvas2DRenderer', () => {
     expect(clicked).toEqual(['Ballroom', '13,12']);
   });
 
+  it('ignores clicks with an invalid canvas DOMRect', () => {
+    const canvas = new FakeCanvas(480, 250, Number.NaN, 500);
+    const renderer = new Canvas2DRenderer();
+    const clicked: string[] = [];
+    renderer.onUserClickCell(location => clicked.push(location));
+    renderer.attach(canvas as unknown as HTMLCanvasElement);
+
+    canvas.click(410, 50);
+
+    expect(clicked).toEqual([]);
+  });
+
   it('does not duplicate listeners and detaches safely', () => {
     const canvas = new FakeCanvas(240, 250, 240, 250);
     const renderer = new Canvas2DRenderer();

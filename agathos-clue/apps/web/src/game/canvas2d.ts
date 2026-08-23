@@ -161,7 +161,11 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
   private onClick = (event: MouseEvent): void => {
     if (!this.canvas || !this.layout || !this.clickCb) return;
     const rect = this.canvas.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
+    if (!Number.isFinite(rect.width) || !Number.isFinite(rect.height) ||
+        !Number.isFinite(event.clientX) || !Number.isFinite(event.clientY) ||
+        rect.width <= 0 || rect.height <= 0 || event.clientX <= 0 || event.clientY <= 0) {
+      return;
+    }
 
     const x = (event.clientX - rect.left) * this.canvas.width / rect.width;
     const y = (event.clientY - rect.top) * this.canvas.height / rect.height;
