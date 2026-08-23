@@ -38,10 +38,16 @@ export async function loadStandaloneSession(
   return value;
 }
 
-export function beginStandaloneAuth(
-  redirect: (path: string) => void = path => window.location.assign(path),
-): void {
-  redirect('/auth/begin');
+/**
+ * Svelte event attributes invoke handlers with the DOM event as the first
+ * argument, so a non-function first argument (e.g. a MouseEvent) must fall
+ * back to the default navigation instead of being called.
+ */
+export function beginStandaloneAuth(redirect?: unknown): void {
+  const navigate = typeof redirect === 'function'
+    ? redirect as (path: string) => void
+    : path => window.location.assign(path);
+  navigate('/auth/begin');
 }
 
 function isStandaloneSession(value: unknown): value is StandaloneSession {

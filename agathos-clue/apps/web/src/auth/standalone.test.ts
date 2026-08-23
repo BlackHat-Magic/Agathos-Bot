@@ -32,4 +32,22 @@ describe('standalone auth helper', () => {
     beginStandaloneAuth(redirect);
     expect(redirect).toHaveBeenCalledWith('/auth/begin');
   });
+
+  it('falls back to default navigation when invoked with a DOM event like Svelte does', () => {
+    const assign = vi.fn();
+    const originalWindow = globalThis.window;
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { location: { assign } },
+    });
+    try {
+      expect(() => beginStandaloneAuth({ clientY: 12 })).not.toThrow();
+      expect(assign).toHaveBeenCalledWith('/auth/begin');
+    } finally {
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: originalWindow,
+      });
+    }
+  });
 });

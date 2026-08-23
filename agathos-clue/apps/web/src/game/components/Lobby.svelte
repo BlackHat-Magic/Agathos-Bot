@@ -112,7 +112,7 @@
           <button
             class="mt-5 inline-flex items-center gap-2 rounded-xl bg-mocha-mauve px-4 py-3 font-semibold text-mocha-crust transition hover:bg-mocha-pink focus:outline-2 focus:outline-offset-2 focus:outline-mocha-mauve"
             type="button"
-            onclick={beginStandaloneAuth}
+            onclick={() => beginStandaloneAuth()}
           >
             <Icon icon="hugeicons:discord" width="20" height="20" aria-hidden="true" />
             Sign in with Discord
