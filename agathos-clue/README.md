@@ -27,7 +27,7 @@ persist that token. Task 20 can offer the returned token as the
 
 When the SPA runs as a Discord Activity, it detects the embedded iframe, lazily
 loads `@discord/embedded-app-sdk`, authorizes the `identify` scope, and posts the
-short-lived authorization code to `/auth/embedded`. The Worker exchanges that
+short-lived authorization code to `/auth/embedded-exchange`. The Worker exchanges that
 code server-side, returns the app session and a transient Discord access token,
 and the browser passes that access token directly to the SDK's `authenticate`
 command. The access token is not stored in the app session or persistent browser

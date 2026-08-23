@@ -31,7 +31,7 @@ describe('embedded auth adapter', () => {
       return discord;
     });
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      expect(input).toBe('/auth/embedded');
+      expect(input).toBe('/auth/embedded-exchange');
       expect(init).toMatchObject({
         method: 'POST',
         credentials: 'same-origin',

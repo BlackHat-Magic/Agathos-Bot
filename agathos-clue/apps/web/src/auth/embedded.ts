@@ -44,7 +44,7 @@ export async function loadEmbeddedSession(
   });
   if (!isBoundedString(code, 4_096)) throw new Error('embedded authorization returned an invalid code');
 
-  const response = await (options.fetcher ?? fetch)('/auth/embedded', {
+  const response = await (options.fetcher ?? fetch)('/auth/embedded-exchange', {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify({ code }),
