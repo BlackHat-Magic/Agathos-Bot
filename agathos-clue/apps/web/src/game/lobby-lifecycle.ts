@@ -27,11 +27,14 @@ export function enqueueJoin(
   name: string,
   clearError: () => void,
   send: (intent: ClientIntent) => boolean,
+  onAccepted?: (normalizedName: string) => void,
 ): boolean {
   const trimmedName = name.trim();
   if (trimmedName.length === 0) return false;
   clearError();
-  return send(createJoinIntent(trimmedName));
+  const accepted = send(createJoinIntent(trimmedName));
+  if (accepted) onAccepted?.(trimmedName);
+  return accepted;
 }
 
 export function enqueueLeave(send: (intent: ClientIntent) => boolean): boolean {

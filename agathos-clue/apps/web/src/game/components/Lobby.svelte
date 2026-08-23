@@ -52,7 +52,9 @@
   }
 
   function joinLobby(): void {
-    if (enqueueJoin(playerName, () => error.set(null), send)) hasJoined = true;
+    if (enqueueJoin(playerName, () => error.set(null), send, normalizedName => {
+      playerName = normalizedName;
+    })) hasJoined = true;
   }
 
   function claimSuspect(): void {

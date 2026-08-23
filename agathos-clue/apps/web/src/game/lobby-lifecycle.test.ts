@@ -42,6 +42,20 @@ describe('lobby connection lifecycle', () => {
     expect(sent).toEqual([{ kind: 'join', name: 'Alice' }]);
   });
 
+  it('reports the normalized name only after a join is accepted', () => {
+    let displayedName = '  Alice  ';
+
+    expect(enqueueJoin('  Alice  ', () => {}, () => true, normalizedName => {
+      displayedName = normalizedName;
+    })).toBe(true);
+    expect(displayedName).toBe('Alice');
+
+    expect(enqueueJoin('  Bob  ', () => {}, () => false, normalizedName => {
+      displayedName = normalizedName;
+    })).toBe(false);
+    expect(displayedName).toBe('Alice');
+  });
+
   it('does not clear an error when the join name is blank', () => {
     let visibleError: string | null = 'previous failure';
 
