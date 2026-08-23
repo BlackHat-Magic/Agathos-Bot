@@ -104,7 +104,7 @@
 	--color-primary-900: #4f3e9c;
 	--color-primary-950: #2e2466;
 	--color-primary-contrast-dark: var(--color-mocha-base);
-	--color-primary-contrast-light: var(--color-mocha-base);
+	--color-primary-contrast-light: var(--color-mocha-text);
 	--color-primary-contrast-50: var(--color-primary-contrast-dark);
 	--color-primary-contrast-100: var(--color-primary-contrast-dark);
 	--color-primary-contrast-200: var(--color-primary-contrast-dark);
