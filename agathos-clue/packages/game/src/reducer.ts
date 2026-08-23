@@ -131,9 +131,11 @@ export function applyIntent(
       if (!destinations.spaces.includes(destination)) {
         throw new Error('destination is not reachable with the current roll');
       }
+      const enteredRoom = !player.piece.location.room && destination.room != null;
       player.piece.location = destination;
       game.lastDieRoll = null;
       game.hasMovedThisTurn = true;
+      if (enteredRoom) player.enteredRoomThisTurn = true;
       return [{ type: 'moved', playerIndex, destination: intent.destination }];
     }
 
@@ -150,6 +152,7 @@ export function applyIntent(
       }
       player.piece.location = destination;
       game.hasMovedThisTurn = true;
+      player.enteredRoomThisTurn = true;
       return [{ type: 'usedSecretPassage', playerIndex, to: destination.room }];
     }
 
@@ -157,11 +160,15 @@ export function applyIntent(
       const room = player.piece.location.room;
       if (!room) throw new Error('suggestions can only be made in a room');
       if (player.guessedHere) throw new Error('player has already suggested in this room');
+      if (!player.enteredRoomThisTurn && !player.movedBySuggestion) {
+        throw new Error('player must enter a room before suggesting');
+      }
 
       player.guessedHere = true;
       const suspectPlayer = game.players.find(p => p !== player && p.suspect === intent.suspect);
       if (suspectPlayer) {
         suspectPlayer.piece.location = player.piece.location;
+        suspectPlayer.enteredRoomThisTurn = false;
         suspectPlayer.movedBySuggestion = true;
       }
       const weaponPiece = game.weapons.find(piece => piece.weapon === intent.weapon);
@@ -228,6 +235,7 @@ export function applyIntent(
     case 'endTurn': {
       player.guessedHere = false;
       player.movedBySuggestion = false;
+      player.enteredRoomThisTurn = false;
       game.lastDieRoll = null;
       game.hasRolledThisTurn = false;
       game.hasMovedThisTurn = false;

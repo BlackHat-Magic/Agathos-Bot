@@ -17,8 +17,23 @@ function pick<T>(arr: T[], rng: RNG): T {
   return arr[Math.floor(rng() * arr.length)];
 }
 
+function canonicalLocation(game: Game, player: Player) {
+  const source = player.piece.location;
+  if (source.room) {
+    for (const column of game.board) {
+      for (const space of column) {
+        if (space.room === source.room) return space;
+      }
+    }
+    throw new Error(`room is not on the board: ${source.room}`);
+  }
+  if (source.pos) return spaceAt(game.board, ...source.pos);
+  throw new Error('player location is not a room or board cell');
+}
+
+/** Create a game whose player indexes are always their Game.players offsets. */
 export function createGame(players: Player[]): Game {
-  return {
+  const game: Game = {
     players,
     solution: null,
     board: buildBoard(),
@@ -32,9 +47,17 @@ export function createGame(players: Player[]): Game {
     winnerIndex: null,
     finishedAt: null,
   };
+
+  for (const [index, player] of game.players.entries()) {
+    player.index = index;
+    player.piece.location = canonicalLocation(game, player);
+    player.enteredRoomThisTurn = false;
+  }
+  return game;
 }
 
 export function begin(game: Game, rng: RNG = Math.random): void {
+  game.players.forEach((player, index) => { player.index = index; });
   const suspectCards: Card[] = SUSPECTS.map(suspect => ({ type: 'suspect', suspect }));
   const weaponCards: Card[] = WEAPONS.map(weapon => ({ type: 'weapon', weapon }));
   const roomCards: Card[] = ROOMS.map(room => ({ type: 'room', room }));
@@ -66,7 +89,7 @@ export function begin(game: Game, rng: RNG = Math.random): void {
     i++;
   }
   game.phase = 'playing';
-  game.turnIndex = game.players.slice().sort((a, b) => a.index - b.index)[0]?.index ?? 0;
+  game.turnIndex = 0;
 }
 
 export interface SuggestionResult {

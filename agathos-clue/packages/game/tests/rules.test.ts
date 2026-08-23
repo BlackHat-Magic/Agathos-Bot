@@ -8,6 +8,7 @@ function mkPlayer(suspect: Suspect, idx: number, cards: Card[] = [], isRobot = t
     name: suspect, index: idx, suspect,
     piece: { suspect, location: suspectStart(suspect, buildBoard()) },
     cards, failedAccusation: false, guessedHere: false, movedBySuggestion: false,
+    enteredRoomThisTurn: false,
     isRobot,
   };
 }

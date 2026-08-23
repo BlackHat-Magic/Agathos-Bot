@@ -9,7 +9,7 @@ function mkRobot(suspect: any, idx: number): Player {
     name: suspect, index: idx, suspect,
     piece: { suspect, location: spaceAt(buildBoard(), 16, 24) },
     cards: [], failedAccusation: false, guessedHere: false,
-    movedBySuggestion: false, isRobot: true,
+    movedBySuggestion: false, enteredRoomThisTurn: false, isRobot: true,
   };
 }
 
@@ -26,7 +26,8 @@ describe('decideRobotIntent', () => {
     const g = createGame([mkRobot('Miss Scarlett', 0)]);
     g.turnIndex = 0; g.phase = 'playing';
     // Place Scarlett in Hall
-    g.players[0].piece.location = buildBoard()[10][18];
+    g.players[0].piece.location = spaceAt(g.board, 10, 18);
+    g.players[0].enteredRoomThisTurn = true;
     const intent = decideRobotIntent(g, 0, () => 0.5);
     expect(intent.kind).toBe('suggest');
   });

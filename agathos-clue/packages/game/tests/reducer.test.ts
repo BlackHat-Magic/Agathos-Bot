@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { buildBoard, spaceAt, suspectStart } from '../src/board';
 import { applyIntent } from '../src/reducer';
 import { decideRobotIntent } from '../src/robot';
-import { createGame } from '../src/rules';
+import { begin, createGame } from '../src/rules';
 import type { Card, Player, Suspect } from '../src/types';
 
 function player(suspect: Suspect, index: number, cards: Card[] = [], isRobot = false): Player {
@@ -16,6 +16,7 @@ function player(suspect: Suspect, index: number, cards: Card[] = [], isRobot = f
     failedAccusation: false,
     guessedHere: false,
     movedBySuggestion: false,
+    enteredRoomThisTurn: false,
     isRobot,
   };
 }
@@ -24,6 +25,11 @@ function playingGame(players: Player[]): ReturnType<typeof createGame> {
   const game = createGame(players);
   game.phase = 'playing';
   return game;
+}
+
+function putInHall(game: ReturnType<typeof createGame>, playerIndex = 0): void {
+  game.players[playerIndex]!.piece.location = spaceAt(game.board, 10, 18);
+  game.players[playerIndex]!.enteredRoomThisTurn = true;
 }
 
 describe('applyIntent', () => {
@@ -166,7 +172,108 @@ describe('applyIntent', () => {
     applyIntent(game, 0, { kind: 'moveTo', destination: 'Lounge' });
 
     expect(game.players[0]!.piece.location.room).toBe('Lounge');
+    expect(game.players[0]!.enteredRoomThisTurn).toBe(true);
     expect(game.hasMovedThisTurn).toBe(true);
+  });
+
+  it('normalizes a separately built starting board before beginning and moving', () => {
+    const p = player('Miss Scarlett', 17);
+    const sourceLocation = p.piece.location;
+    const game = createGame([p]);
+
+    expect(sourceLocation).not.toBe(game.players[0]!.piece.location);
+    expect(game.players[0]!.piece.location).toBe(spaceAt(game.board, 16, 24));
+
+    begin(game, () => 0);
+    applyIntent(game, 0, { kind: 'roll' }, () => 0.5);
+    applyIntent(game, 0, { kind: 'moveTo', destination: '17,18' });
+
+    expect(game.players[0]!.piece.location).toBe(spaceAt(game.board, 17, 18));
+  });
+
+  it('normalizes player indexes and uses array offsets for turns and reveals', () => {
+    const game = createGame([
+      player('Miss Scarlett', 17),
+      player('Professor Plum', 4),
+      player('Mrs. Peacock', 99),
+    ]);
+    begin(game, () => 0);
+    for (const p of game.players) p.cards = [];
+
+    expect(game.players.map(p => p.index)).toEqual([0, 1, 2]);
+    expect(game.turnIndex).toBe(0);
+
+    putInHall(game);
+    expect(applyIntent(game, 0, {
+      kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope',
+    })).toEqual([
+      { type: 'suggested', playerIndex: 0, suspect: 'Professor Plum', weapon: 'Rope', room: 'Hall' },
+      { type: 'revealRequested', revealerIndex: 1 },
+    ]);
+    expect(game.pendingReveal!.revealerIndex).toBe(1);
+    applyIntent(game, 1, { kind: 'declineReveal' });
+    expect(game.pendingReveal!.revealerIndex).toBe(2);
+    applyIntent(game, 2, { kind: 'declineReveal' });
+    expect(game.pendingReveal).toBeNull();
+
+    applyIntent(game, 0, { kind: 'endTurn' });
+    expect(game.turnIndex).toBe(1);
+  });
+
+  it('allows a corridor-to-room entry to enable a suggestion', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    applyIntent(game, 0, { kind: 'roll' }, () => 0.5);
+    applyIntent(game, 0, { kind: 'moveTo', destination: 'Lounge' });
+
+    expect(game.players[0]!.enteredRoomThisTurn).toBe(true);
+    expect(() => applyIntent(game, 0, {
+      kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope',
+    })).not.toThrow();
+  });
+
+  it('does not allow a player who ended in a room to suggest next turn without re-entering', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    applyIntent(game, 0, { kind: 'roll' }, () => 0.5);
+    applyIntent(game, 0, { kind: 'moveTo', destination: 'Lounge' });
+    applyIntent(game, 0, { kind: 'endTurn' });
+
+    expect(game.players[0]!.piece.location.room).toBe('Lounge');
+    expect(game.players[0]!.enteredRoomThisTurn).toBe(false);
+    expect(() => applyIntent(game, 0, {
+      kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope',
+    })).toThrow('player must enter a room before suggesting');
+  });
+
+  it('allows a suspect moved by suggestion to suggest on their next turn', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1),
+    ]);
+    putInHall(game);
+    applyIntent(game, 0, { kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope' });
+    applyIntent(game, 1, { kind: 'declineReveal' });
+    applyIntent(game, 0, { kind: 'endTurn' });
+
+    expect(game.turnIndex).toBe(1);
+    expect(game.players[1]!.enteredRoomThisTurn).toBe(false);
+    expect(game.players[1]!.movedBySuggestion).toBe(true);
+    expect(() => applyIntent(game, 1, {
+      kind: 'suggest', suspect: 'Miss Scarlett', weapon: 'Dagger',
+    })).not.toThrow();
+  });
+
+  it('rejects a repeated suggestion in the same turn', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1),
+    ]);
+    putInHall(game);
+    applyIntent(game, 0, { kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope' });
+    applyIntent(game, 1, { kind: 'declineReveal' });
+
+    expect(() => applyIntent(game, 0, {
+      kind: 'suggest', suspect: 'Professor Plum', weapon: 'Dagger',
+    })).toThrow('player has already suggested in this room');
   });
 
   it('rejects malformed coordinates and illegal moves without mutating position', () => {
@@ -183,7 +290,7 @@ describe('applyIntent', () => {
   it('suggests, moves the named suspect, and creates a pending reveal', () => {
     const players = [player('Miss Scarlett', 0), player('Professor Plum', 1), player('Mrs. Peacock', 2)];
     const game = playingGame(players);
-    game.players[0]!.piece.location = spaceAt(game.board, 10, 18);
+    putInHall(game);
     const rope = { weapon: 'Rope' as const, location: spaceAt(game.board, 16, 24) };
     game.weapons.push(rope);
 
@@ -212,7 +319,7 @@ describe('applyIntent', () => {
       player('Professor Plum', 1),
     ];
     const game = playingGame(players);
-    game.players[0]!.piece.location = spaceAt(game.board, 10, 18);
+    putInHall(game);
     const otherPlayerStart = game.players[1]!.piece.location;
 
     const intent = decideRobotIntent(game, 0, () => 0.5);
@@ -240,7 +347,7 @@ describe('applyIntent', () => {
       player('Professor Plum', 1, cards),
       player('Mrs. Peacock', 2),
     ]);
-    game.players[0]!.piece.location = spaceAt(game.board, 10, 18);
+    putInHall(game);
     applyIntent(game, 0, { kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope' });
 
     expect(() => applyIntent(game, 1, { kind: 'showCard', card: { type: 'weapon', weapon: 'Rope' } })).toThrow();
@@ -258,7 +365,7 @@ describe('applyIntent', () => {
       player('Professor Plum', 1),
       player('Mrs. Peacock', 2),
     ]);
-    game.players[0]!.piece.location = spaceAt(game.board, 10, 18);
+    putInHall(game);
     applyIntent(game, 0, { kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope' });
 
     expect(() => applyIntent(game, 2, { kind: 'declineReveal' })).toThrow('player is not the current revealer');
@@ -300,6 +407,7 @@ describe('applyIntent', () => {
       { type: 'usedSecretPassage', playerIndex: 0, to: 'Lounge' },
     ]);
     expect(game.players[0]!.piece.location.room).toBe('Lounge');
+    expect(game.players[0]!.enteredRoomThisTurn).toBe(true);
     expect(game.hasMovedThisTurn).toBe(true);
     expect(() => applyIntent(game, 0, { kind: 'roll' })).toThrow(
       'player must move or end their turn before rolling again',
@@ -385,6 +493,7 @@ describe('applyIntent', () => {
     const game = playingGame(players);
     game.players[0]!.guessedHere = true;
     game.players[0]!.movedBySuggestion = true;
+    game.players[0]!.enteredRoomThisTurn = true;
     game.lastDieRoll = 8;
     game.hasRolledThisTurn = true;
     game.hasMovedThisTurn = true;
@@ -398,6 +507,7 @@ describe('applyIntent', () => {
     expect(game.hasMovedThisTurn).toBe(false);
     expect(game.players[0]!.guessedHere).toBe(false);
     expect(game.players[0]!.movedBySuggestion).toBe(false);
+    expect(game.players[0]!.enteredRoomThisTurn).toBe(false);
     expect(game.turnIndex).toBe(2);
   });
 

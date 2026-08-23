@@ -36,6 +36,7 @@ export type GamePiece = SuspectPiece | WeaponPiece;
 
 export interface Player {
   name: string;
+  /** Canonical array offset in Game.players. */
   index: number;
   suspect: Suspect;
   piece: SuspectPiece;
@@ -43,6 +44,7 @@ export interface Player {
   failedAccusation: boolean;
   guessedHere: boolean;
   movedBySuggestion: boolean;
+  enteredRoomThisTurn: boolean;
   isRobot: boolean;
   userId?: string;    // for humans
 }

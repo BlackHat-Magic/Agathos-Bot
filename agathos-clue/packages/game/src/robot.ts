@@ -65,7 +65,8 @@ export function decideRobotIntent(
   }
 
   // 4. in a room — suggest if not already suggested this turn (clue.py:510-523)
-  if (inRoom && !player.guessedHere) {
+  if (inRoom && !player.guessedHere &&
+      (player.enteredRoomThisTurn || player.movedBySuggestion)) {
     return {
       kind: 'suggest',
       suspect: randomOf(SUSPECTS, rng),
