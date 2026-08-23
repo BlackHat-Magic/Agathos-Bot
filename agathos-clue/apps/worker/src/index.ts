@@ -1,4 +1,5 @@
 import { handleLobby } from './Lobby';
+import { handleOAuth } from './auth/oauth2';
 
 export interface Env {
   ASSETS: Fetcher;
@@ -14,6 +15,7 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === '/api/health') return new Response('ok');
+    if (url.pathname.startsWith('/auth/')) return handleOAuth(req, env);
     if (url.pathname.startsWith('/api/')) return handleLobby(req, env);
     if (url.pathname === '/ws') {
       const gameId = url.searchParams.get('gameId');
