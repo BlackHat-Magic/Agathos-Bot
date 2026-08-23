@@ -52,6 +52,13 @@ export interface PersistedGame {
   finishedAt: number | null;
 }
 
+export interface PersistedPrivateReveal {
+  fromIndex: number;
+  card?: Card;
+}
+
+export type PersistedPrivateReveals = Record<string, PersistedPrivateReveal>;
+
 /** Return the empty authoritative lobby used when a room has no stored game. */
 export function createInitialGame(): Game {
   return createGame([]);
@@ -90,6 +97,48 @@ export function serializeGame(game: Game): PersistedGame {
     winnerIndex: game.winnerIndex,
     finishedAt: game.finishedAt,
   };
+}
+
+/** Keep private reveal frames separate from the public game snapshot. */
+export function serializePrivateReveals(
+  reveals: PersistedPrivateReveals,
+): PersistedPrivateReveals {
+  return Object.fromEntries(Object.entries(reveals).map(([userId, reveal]) => [
+    userId,
+    {
+      fromIndex: reveal.fromIndex,
+      ...(reveal.card === undefined ? {} : { card: cloneCard(reveal.card) }),
+    },
+  ]));
+}
+
+export function hydratePrivateReveals(
+  value: unknown,
+  playerCount: number,
+): PersistedPrivateReveals {
+  if (value === undefined) return {};
+  const persisted = requireRecord(value, 'private reveals');
+  const reveals: PersistedPrivateReveals = {};
+  for (const [userId, revealValue] of Object.entries(persisted)) {
+    if (userId === '') throw new Error('invalid persisted private reveal user ID');
+    const reveal = requireRecord(revealValue, `private reveal for ${userId}`);
+    requireKeys(
+      reveal,
+      Object.hasOwn(reveal, 'card') ? ['fromIndex', 'card'] : ['fromIndex'],
+      `private reveal for ${userId}`,
+    );
+    if (typeof reveal.fromIndex !== 'number' || !Number.isInteger(reveal.fromIndex) ||
+        reveal.fromIndex < 0 || reveal.fromIndex >= playerCount) {
+      throw new Error(`invalid persisted private reveal source for ${userId}`);
+    }
+    reveals[userId] = {
+      fromIndex: reveal.fromIndex,
+      ...(Object.hasOwn(reveal, 'card')
+        ? { card: cloneCard(reveal.card) }
+        : {}),
+    };
+  }
+  return reveals;
 }
 
 /** Rebuild one canonical board and bind every restored piece to it. */

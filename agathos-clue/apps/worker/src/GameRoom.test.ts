@@ -29,6 +29,10 @@ type TestMessage =
       turnIndex: number;
     };
     events: unknown[];
+  }
+  | {
+    type: 'private';
+    reveal: { fromIndex: number; card?: Card };
   };
 
 class BunWebSocketFallback {
@@ -125,6 +129,7 @@ function player(
 
 interface TestStorage {
   value: unknown;
+  privateReveals: unknown;
   lobby: unknown;
   robotAlarmInfo: unknown;
   failPuts: boolean;
@@ -140,9 +145,14 @@ interface TestStorage {
   deleteAlarmCount: number;
 }
 
-function roomWithStorage(stored?: unknown, storedLobby?: unknown): { gameRoom: GameRoom; storage: TestStorage } {
+function roomWithStorage(
+  stored?: unknown,
+  storedLobby?: unknown,
+  storedPrivateReveals?: unknown,
+): { gameRoom: GameRoom; storage: TestStorage } {
   const storage: TestStorage = {
     value: stored,
+    privateReveals: storedPrivateReveals,
     lobby: storedLobby,
     robotAlarmInfo: undefined,
     failPuts: false,
@@ -162,7 +172,9 @@ function roomWithStorage(stored?: unknown, storedLobby?: unknown): { gameRoom: G
       get: async <T>(key: string) =>
         (key === 'lobby'
           ? storage.lobby
-          : key === 'robot-alarm-info' ? storage.robotAlarmInfo : storage.value) as T | undefined,
+          : key === 'robot-alarm-info'
+            ? storage.robotAlarmInfo
+            : key === 'lastShownCard' ? storage.privateReveals : storage.value) as T | undefined,
       put: async (key: string, value: unknown) => {
         storage.putCount += 1;
         if (storage.failPuts ||
@@ -176,6 +188,7 @@ function roomWithStorage(stored?: unknown, storedLobby?: unknown): { gameRoom: G
         }
         if (key === 'lobby') storage.lobby = value;
         else if (key === 'robot-alarm-info') storage.robotAlarmInfo = value;
+        else if (key === 'lastShownCard') storage.privateReveals = value;
         else storage.value = value;
       },
       getAlarm: async () => {
@@ -205,6 +218,7 @@ function roomWithStorage(stored?: unknown, storedLobby?: unknown): { gameRoom: G
         if (storage.failTransactions) throw new Error('storage unavailable');
         for (const [key, value] of pending) {
           if (key === 'lobby') storage.lobby = value;
+          else if (key === 'lastShownCard') storage.privateReveals = value;
           else storage.value = value;
         }
         return result;
@@ -304,6 +318,20 @@ function robotTurnGame(): ReturnType<typeof serializeGame> {
   stored.players[0]!.failedAccusation = true;
   delete stored.players[0]!.userId;
   return stored;
+}
+
+function pendingRevealGame(revealerIsRobot: boolean, revealerCards: Card[]): ReturnType<typeof serializeGame> {
+  const game = hydrateGame(joinedGame());
+  game.players[1]!.isRobot = revealerIsRobot;
+  game.players[1]!.cards = revealerCards;
+  game.pendingReveal = {
+    suggesterIndex: 0,
+    suspect: 'Professor Plum',
+    weapon: 'Lead Pipe',
+    room: 'Hall',
+    revealerIndex: 1,
+  };
+  return serializeGame(game);
 }
 
 describe('GameRoom protocol helpers', () => {
@@ -458,6 +486,148 @@ describe('GameRoom protocol helpers', () => {
     expect(hydrateGame(storage.value).turnIndex).toBe(1);
 
     closeConnections(gameRoom);
+  });
+
+  it('sends a human show privately after persistence without putting the card in state', async () => {
+    const { gameRoom, storage } = roomWithStorage(pendingRevealGame(false, [
+      { type: 'weapon', weapon: 'Lead Pipe' },
+    ]));
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+
+    bob.client.send(JSON.stringify({ intent: {
+      kind: 'showCard', card: { type: 'weapon', weapon: 'Lead Pipe' },
+    } }));
+
+    const aliceState = await alice.messages.next();
+    await expect(bob.messages.next()).resolves.toMatchObject({
+      type: 'state', view: { pendingReveal: null },
+    });
+    await expect(alice.messages.next()).resolves.toEqual({
+      type: 'private',
+      reveal: { fromIndex: 1, card: { type: 'weapon', weapon: 'Lead Pipe' } },
+    });
+    expect(JSON.stringify(aliceState)).not.toContain('Lead Pipe');
+    expect(storage.value).toEqual(expect.not.objectContaining({ lastShownCard: expect.anything() }));
+    expect(storage.privateReveals).toEqual({
+      alice: { fromIndex: 1, card: { type: 'weapon', weapon: 'Lead Pipe' } },
+    });
+    closeConnections(gameRoom);
+  });
+
+  it('sends a human decline privately without a card', async () => {
+    const { gameRoom, storage } = roomWithStorage(pendingRevealGame(false, []));
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+
+    bob.client.send(JSON.stringify({ intent: { kind: 'declineReveal' } }));
+
+    await expect(alice.messages.next()).resolves.toMatchObject({
+      type: 'state', view: { pendingReveal: null },
+    });
+    await expect(bob.messages.next()).resolves.toMatchObject({
+      type: 'state', view: { pendingReveal: null },
+    });
+    await expect(alice.messages.next()).resolves.toEqual({
+      type: 'private', reveal: { fromIndex: 1 },
+    });
+    expect(storage.privateReveals).toEqual({ alice: { fromIndex: 1 } });
+    closeConnections(gameRoom);
+  });
+
+  it('does not deliver a private reveal to another connected identity', async () => {
+    const { gameRoom } = roomWithStorage(pendingRevealGame(false, [
+      { type: 'weapon', weapon: 'Lead Pipe' },
+    ]));
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+    const spectator = await connectJoinedPlayer(gameRoom, 'spectator');
+
+    bob.client.send(JSON.stringify({ intent: {
+      kind: 'showCard', card: { type: 'weapon', weapon: 'Lead Pipe' },
+    } }));
+
+    await alice.messages.next();
+    await bob.messages.next();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(spectator.messages.received.some(message => message.type === 'private')).toBe(false);
+    closeConnections(gameRoom);
+  });
+
+  it('delivers robot show and decline frames to the human suggester', async () => {
+    const shown = roomWithStorage(pendingRevealGame(true, [
+      { type: 'weapon', weapon: 'Lead Pipe' },
+    ]));
+    const shownAlice = await connectJoinedPlayer(shown.gameRoom, 'alice');
+    await shown.gameRoom.maybeRunRobot();
+    await shownAlice.messages.next();
+    await expect(shownAlice.messages.next()).resolves.toEqual({
+      type: 'private',
+      reveal: { fromIndex: 1, card: { type: 'weapon', weapon: 'Lead Pipe' } },
+    });
+    closeConnections(shown.gameRoom);
+
+    const declined = roomWithStorage(pendingRevealGame(true, []));
+    const declinedAlice = await connectJoinedPlayer(declined.gameRoom, 'alice');
+    await declined.gameRoom.maybeRunRobot();
+    await declinedAlice.messages.next();
+    await expect(declinedAlice.messages.next()).resolves.toEqual({
+      type: 'private', reveal: { fromIndex: 1 },
+    });
+    closeConnections(declined.gameRoom);
+  });
+
+  it('retains an undelivered robot reveal for the correct reconnecting human', async () => {
+    const first = roomWithStorage(pendingRevealGame(true, [
+      { type: 'weapon', weapon: 'Lead Pipe' },
+    ]));
+    await first.gameRoom.maybeRunRobot();
+    expect(first.storage.privateReveals).toEqual({
+      alice: { fromIndex: 1, card: { type: 'weapon', weapon: 'Lead Pipe' } },
+    });
+
+    const reloaded = roomWithStorage(
+      first.storage.value,
+      undefined,
+      first.storage.privateReveals,
+    );
+    const alice = await connectJoinedPlayer(reloaded.gameRoom, 'alice');
+    await expect(alice.messages.next()).resolves.toEqual({
+      type: 'private',
+      reveal: { fromIndex: 1, card: { type: 'weapon', weapon: 'Lead Pipe' } },
+    });
+    closeConnections(reloaded.gameRoom);
+  });
+
+  it('does not broadcast or persist a reveal when game/private persistence fails', async () => {
+    const stored = pendingRevealGame(false, [
+      { type: 'weapon', weapon: 'Lead Pipe' },
+    ]);
+    const { gameRoom, storage } = roomWithStorage(stored);
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+    storage.failTransactions = true;
+
+    bob.client.send(JSON.stringify({ intent: {
+      kind: 'showCard', card: { type: 'weapon', weapon: 'Lead Pipe' },
+    } }));
+
+    await expect(bob.messages.next()).resolves.toEqual({
+      type: 'error', message: 'storage unavailable',
+    });
+    expect(alice.messages.received).toHaveLength(1);
+    expect(storage.value).toEqual(stored);
+    expect(storage.privateReveals).toBeUndefined();
+    closeConnections(gameRoom);
+  });
+
+  it('persists a robot reveal without requiring a connected recipient', async () => {
+    const { gameRoom, storage } = roomWithStorage(pendingRevealGame(true, []));
+
+    await gameRoom.maybeRunRobot();
+
+    expect(hydrateGame(storage.value).pendingReveal).toBeNull();
+    expect(storage.privateReveals).toEqual({ alice: { fromIndex: 1 } });
   });
 
   it('rolls back a joined mutation and reports storage failures without broadcasting', async () => {

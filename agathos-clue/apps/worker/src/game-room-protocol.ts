@@ -1,4 +1,4 @@
-import type { Game, Intent } from '@agathos/game';
+import type { Card, Game, Intent } from '@agathos/game';
 
 const LIFECYCLE_INTENTS = new Set([
   'join', 'claimSuspect', 'start', 'setOrder', 'leave',
@@ -7,6 +7,10 @@ const LIFECYCLE_INTENTS = new Set([
 export interface IntentEnvelope {
   intent: Intent;
 }
+
+export type PrivateRevealFrame =
+  | { type: 'private'; reveal: { fromIndex: number; card: Card } }
+  | { type: 'private'; reveal: { fromIndex: number } };
 
 export interface AuthenticatedDevProtocol {
   protocol: string;

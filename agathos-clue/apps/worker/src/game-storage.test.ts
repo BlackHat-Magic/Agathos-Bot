@@ -5,7 +5,12 @@ import {
   spaceAt,
 } from '@agathos/game';
 import type { Player } from '@agathos/game';
-import { hydrateGame, serializeGame } from './game-storage';
+import {
+  hydrateGame,
+  hydratePrivateReveals,
+  serializeGame,
+  serializePrivateReveals,
+} from './game-storage';
 
 function player(suspect: Player['suspect'], index: number): Player {
   const board = buildBoard();
@@ -25,6 +30,19 @@ function player(suspect: Player['suspect'], index: number): Player {
 }
 
 describe('game persistence codec', () => {
+  it('keeps private reveal cards JSON-safe and separate from the game snapshot', () => {
+    const reveals = {
+      alice: { fromIndex: 1, card: { type: 'weapon' as const, weapon: 'Rope' as const } },
+      bob: { fromIndex: 0 },
+    };
+
+    const persisted = serializePrivateReveals(reveals);
+
+    expect(() => JSON.stringify(persisted)).not.toThrow();
+    expect(hydratePrivateReveals(persisted, 2)).toEqual(reveals);
+    expect(serializeGame(createGame([player('Miss Scarlett', 0)]))).not.toHaveProperty('lastShownCard');
+  });
+
   it('serializes a game without its cyclic board graph', () => {
     const game = createGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
     game.players[0]!.piece.location = spaceAt(game.board, 10, 18);

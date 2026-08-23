@@ -6,12 +6,17 @@ import {
   toView,
 } from '@agathos/game';
 import type { Game, Intent } from '@agathos/game';
+import { assertCard } from '@agathos/game';
+import type { Card } from '@agathos/game';
 import type { Env } from './index';
 import {
   createInitialGame,
+  hydratePrivateReveals,
   hydrateGame,
+  serializePrivateReveals,
   serializeGame,
 } from './game-storage';
+import type { PersistedPrivateReveals } from './game-storage';
 import {
   LOBBY_STORAGE_KEY,
   claimLobbySuspect,
@@ -34,6 +39,8 @@ import {
   resolveViewerIndex,
 } from './game-room-protocol';
 import { hasRobotActionableState, runRobotScheduler } from './robots/scheduler';
+import type { RobotPrivateReveal } from './robots/scheduler';
+import type { PrivateRevealFrame } from './game-room-protocol';
 export {
   assertIntentAuthority,
   authenticateDevProtocol,
@@ -43,6 +50,7 @@ export {
 } from './game-room-protocol';
 
 const STORAGE_KEY = 'game';
+const PRIVATE_REVEALS_STORAGE_KEY = 'lastShownCard';
 const ROBOT_ALARM_INFO_STORAGE_KEY = 'robot-alarm-info';
 const ROBOT_RETRY_INITIAL_DELAY_MS = 1_000;
 const ROBOT_RETRY_MAX_DELAY_MS = 60_000;
@@ -60,6 +68,7 @@ interface Connection {
 
 export class GameRoom extends DurableObject<Env> {
   private game: Game | undefined;
+  private privateReveals: PersistedPrivateReveals = {};
   private lobby: LobbyState | undefined;
   private gameLoad: Promise<Game> | undefined;
   private messageQueue: Promise<void> = Promise.resolve();
@@ -97,7 +106,7 @@ export class GameRoom extends DurableObject<Env> {
       };
       const initialPayload = game.phase === 'lobby'
         ? lobbyView(this.lobby!, this.gameId)
-        : connection.viewerIndex === null
+          : connection.viewerIndex === null
           ? { type: 'ready' as const }
           : {
             type: 'state' as const,
@@ -119,6 +128,7 @@ export class GameRoom extends DurableObject<Env> {
       serverSocket.addEventListener('error', () => this.removeConnection(serverSocket));
 
       this.sendJson(connection, initialPayload);
+      if (connection.viewerIndex !== null) this.sendPrivateReveal(connection);
 
       return new Response(null, {
         status: 101,
@@ -196,10 +206,8 @@ export class GameRoom extends DurableObject<Env> {
         },
         snapshot: serializeGame,
         restore: snapshot => { this.game = hydrateGame(snapshot); },
-        persist: async game => {
-          await this.ctx.storage.put(STORAGE_KEY, serializeGame(game));
-        },
-        broadcast: events => this.broadcast(events),
+        persist: (game, privateReveal) => this.persistRobotMutation(game, privateReveal),
+        broadcast: (events, privateReveal) => this.broadcast(events, privateReveal),
       });
       await this.resetRobotRetry();
     } catch (error) {
@@ -222,6 +230,8 @@ export class GameRoom extends DurableObject<Env> {
     this.gameLoad ??= this.ctx.blockConcurrencyWhile(async () => {
       const storedGame = await this.ctx.storage.get<unknown>(STORAGE_KEY);
       this.game = storedGame === undefined ? createInitialGame() : hydrateGame(storedGame);
+      const storedPrivateReveals = await this.ctx.storage.get<unknown>(PRIVATE_REVEALS_STORAGE_KEY);
+      this.privateReveals = hydratePrivateReveals(storedPrivateReveals, this.game.players.length);
       const storedRobotAlarmInfo = await this.ctx.storage.get<unknown>(
         ROBOT_ALARM_INFO_STORAGE_KEY,
       );
@@ -278,15 +288,28 @@ export class GameRoom extends DurableObject<Env> {
     assertIntentAuthority(game, connection.viewerIndex, intent);
 
     const previous = serializeGame(game);
+    const previousPrivateReveals = serializePrivateReveals(this.privateReveals);
+    const pendingReveal = game.pendingReveal;
     const events = applyIntent(game, connection.viewerIndex!, intent);
     if (intent.kind === 'wait') return;
+    const privateReveal = privateRevealForIntent(pendingReveal, connection.viewerIndex!, intent);
+    const nextPrivateReveals = this.nextPrivateReveals(
+      connection.userId,
+      privateReveal,
+      intent.kind === 'suggest',
+    );
     try {
-      await this.ctx.storage.put(STORAGE_KEY, serializeGame(game));
+      await this.persistGameMutation(game, nextPrivateReveals, !samePrivateReveals(
+        this.privateReveals,
+        nextPrivateReveals,
+      ));
     } catch (error) {
       this.game = hydrateGame(previous);
+      this.privateReveals = previousPrivateReveals;
       throw error;
     }
-    this.broadcast(events);
+    this.privateReveals = nextPrivateReveals;
+    this.broadcast(events, privateReveal);
     await this.maybeRunRobot(true);
   }
 
@@ -410,7 +433,10 @@ export class GameRoom extends DurableObject<Env> {
     await this.ctx.storage.put(ROBOT_ALARM_INFO_STORAGE_KEY, info);
   }
 
-  private broadcast(events: ReturnType<typeof applyIntent>): void {
+  private broadcast(
+    events: ReturnType<typeof applyIntent>,
+    privateReveal?: RobotPrivateReveal,
+  ): void {
     const game = this.game;
     if (game === undefined) return;
     for (const connection of [...this.connections.values()]) {
@@ -425,6 +451,7 @@ export class GameRoom extends DurableObject<Env> {
         this.sendError(connection, error);
       }
     }
+    if (privateReveal !== undefined) this.deliverPrivateReveal(privateReveal.recipientIndex);
   }
 
   private broadcastLobby(): void {
@@ -449,6 +476,81 @@ export class GameRoom extends DurableObject<Env> {
       type: 'state',
       view: toView(this.game, connection.viewerIndex),
       events,
+    });
+  }
+
+  private sendPrivateReveal(connection: Connection): void {
+    if (connection.viewerIndex === null || this.game === undefined) return;
+    const player = this.game.players[connection.viewerIndex];
+    if (player?.userId !== connection.userId) return;
+    const reveal = this.privateReveals[connection.userId];
+    if (reveal === undefined) return;
+    this.sendJson(connection, privateRevealFrame(reveal));
+  }
+
+  private deliverPrivateReveal(recipientIndex: number): void {
+    if (this.game === undefined) return;
+    const recipient = this.game.players[recipientIndex];
+    if (recipient?.userId === undefined) return;
+    for (const connection of [...this.connections.values()]) {
+      if (connection.userId !== recipient.userId) continue;
+      connection.viewerIndex = recipientIndex;
+      this.sendPrivateReveal(connection);
+    }
+  }
+
+  private nextPrivateReveals(
+    suggesterUserId: string,
+    privateReveal: RobotPrivateReveal | undefined,
+    clearSuggester: boolean,
+  ): PersistedPrivateReveals {
+    const next = serializePrivateReveals(this.privateReveals);
+    if (clearSuggester) delete next[suggesterUserId];
+    if (privateReveal !== undefined && this.game !== undefined) {
+      const recipient = this.game.players[privateReveal.recipientIndex];
+      if (recipient?.userId !== undefined) {
+        next[recipient.userId] = {
+          fromIndex: privateReveal.fromIndex,
+          ...(privateReveal.card === undefined ? {} : {
+            card: canonicalCard(privateReveal.card),
+          }),
+        };
+      }
+    }
+    return next;
+  }
+
+  private async persistRobotMutation(
+    game: Game,
+    privateReveal?: RobotPrivateReveal,
+  ): Promise<void> {
+    const nextPrivateReveals = this.nextPrivateReveals(
+      '',
+      privateReveal,
+      false,
+    );
+    await this.persistGameMutation(game, nextPrivateReveals, !samePrivateReveals(
+      this.privateReveals,
+      nextPrivateReveals,
+    ));
+    this.privateReveals = nextPrivateReveals;
+  }
+
+  private async persistGameMutation(
+    game: Game,
+    privateReveals: PersistedPrivateReveals,
+    privateRevealsChanged: boolean,
+  ): Promise<void> {
+    const serializedGame = serializeGame(game);
+    if (!privateRevealsChanged) {
+      await this.ctx.storage.put(STORAGE_KEY, serializedGame);
+      return;
+    }
+    await this.ctx.storage.transaction(async transaction => {
+      await transaction.put({
+        [STORAGE_KEY]: serializedGame,
+        [PRIVATE_REVEALS_STORAGE_KEY]: serializePrivateReveals(privateReveals),
+      });
     });
   }
 
@@ -503,4 +605,42 @@ function readRetryCount(value: unknown): number {
   const retryCount = (value as Record<string, unknown>).retryCount;
   if (!Number.isInteger(retryCount) || (retryCount as number) < 0) return 0;
   return Math.min(retryCount as number, ROBOT_RETRY_MAX_ATTEMPT);
+}
+
+function privateRevealForIntent(
+  pendingReveal: Game['pendingReveal'],
+  fromIndex: number,
+  intent: Intent,
+): RobotPrivateReveal | undefined {
+  if (pendingReveal === null || (intent.kind !== 'showCard' && intent.kind !== 'declineReveal')) {
+    return undefined;
+  }
+  return {
+    recipientIndex: pendingReveal.suggesterIndex,
+    fromIndex,
+    ...(intent.kind === 'showCard' ? { card: canonicalCard(intent.card) } : {}),
+  };
+}
+
+function canonicalCard(value: unknown): Card {
+  assertCard(value);
+  if (value.type === 'suspect') return { type: 'suspect', suspect: value.suspect };
+  if (value.type === 'weapon') return { type: 'weapon', weapon: value.weapon };
+  return { type: 'room', room: value.room };
+}
+
+function privateRevealFrame(reveal: { fromIndex: number; card?: Card }): PrivateRevealFrame {
+  return reveal.card === undefined
+    ? { type: 'private', reveal: { fromIndex: reveal.fromIndex } }
+    : {
+      type: 'private',
+      reveal: { fromIndex: reveal.fromIndex, card: canonicalCard(reveal.card) },
+    };
+}
+
+function samePrivateReveals(
+  left: PersistedPrivateReveals,
+  right: PersistedPrivateReveals,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
