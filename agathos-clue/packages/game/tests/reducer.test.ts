@@ -417,6 +417,22 @@ describe('applyIntent', () => {
     expect(() => applyIntent(game, 0, { kind: 'useSecretPassage' })).toThrow();
   });
 
+  it('allows a suggestion after a legal room-to-room secret passage', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1),
+    ]);
+    game.players[0]!.piece.location = spaceAt(game.board, 2, 1);
+
+    applyIntent(game, 0, { kind: 'useSecretPassage' });
+
+    expect(game.players[0]!.piece.location.room).toBe('Lounge');
+    expect(game.players[0]!.enteredRoomThisTurn).toBe(true);
+    expect(() => applyIntent(game, 0, {
+      kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope',
+    })).not.toThrow();
+  });
+
   it('rejects a secret passage after the player has rolled', () => {
     const game = playingGame([player('Miss Scarlett', 0)]);
     game.players[0]!.piece.location = game.board[2]![1]!;

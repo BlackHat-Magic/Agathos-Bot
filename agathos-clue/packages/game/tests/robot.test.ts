@@ -32,6 +32,14 @@ describe('decideRobotIntent', () => {
     expect(intent.kind).toBe('suggest');
   });
 
+  it('ends the turn in a room without room-entry eligibility', () => {
+    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    g.turnIndex = 0; g.phase = 'playing';
+    g.players[0].piece.location = spaceAt(g.board, 10, 18);
+
+    expect(decideRobotIntent(g, 0, () => 0.5)).toEqual({ kind: 'endTurn' });
+  });
+
   // NOTE: spec used `() => 0.5`; the implementation uses strict `< 0.5`,
   // matching clue.py:407 `random.choice([True, False])` (a 50%/50% split).
   // With `0.5 < 0.5 === false`, the passage branch would be skipped. To
@@ -39,7 +47,7 @@ describe('decideRobotIntent', () => {
   it('takes secret passage probabilistically when in a corner room', () => {
     const g = createGame([mkRobot('Miss Scarlett', 0)]);
     g.turnIndex = 0; g.phase = 'playing';
-    g.players[0].piece.location = buildBoard()[2][1];  // Conservatory
+    g.players[0].piece.location = spaceAt(g.board, 2, 1);  // Conservatory
     const intent = decideRobotIntent(g, 0, () => 0.4);
     expect(intent.kind).toBe('useSecretPassage');
   });

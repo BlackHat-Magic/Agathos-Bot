@@ -131,7 +131,7 @@ export function applyIntent(
       if (!destinations.spaces.includes(destination)) {
         throw new Error('destination is not reachable with the current roll');
       }
-      const enteredRoom = !player.piece.location.room && destination.room != null;
+      const enteredRoom = destination.room != null;
       player.piece.location = destination;
       game.lastDieRoll = null;
       game.hasMovedThisTurn = true;
