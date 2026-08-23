@@ -70,6 +70,42 @@ export interface Game {
   finishedAt: number | null;
 }
 
+export interface GameView {
+  phase: Phase;
+  boardWidth: number;
+  boardHeight: number;
+  players: Array<{
+    name: string;
+    suspect: Suspect;
+    location: Room | CellId;
+    handCount: number;
+    failedAccusation: boolean;
+    isRobot: boolean;
+    movedBySuggestion: boolean;
+    userId?: string;
+  }>;
+  weaponLocations: Array<{
+    weapon: Weapon;
+    location: Room | CellId;
+  }>;
+  turnIndex: number;
+  pendingReveal: {
+    suggesterIndex: number;
+    suspect: Suspect;
+    weapon: Weapon;
+    room: Room;
+    revealerIndex: number;
+  } | null;
+  lastDieRoll: number | null;
+  myIndex: number;
+  myHand: Card[];
+  myRevealOpportunities?: Card[];
+  myLastShownCard?: Card;
+  lastSuggestionReveal?: Card;
+  reachableSpacesHints?: Array<Room | CellId>;
+  solution?: { suspect: Card; weapon: Card; room: Card };
+}
+
 export const STARTING_POSITIONS: Record<Suspect, [number, number]> = {
   'Miss Scarlett': [16, 24],
   'Professor Plum': [0, 19],
