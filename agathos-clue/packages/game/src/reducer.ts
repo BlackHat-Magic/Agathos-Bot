@@ -106,6 +106,8 @@ export function applyIntent(
   intent: Intent,
   rng: RNG = Math.random,
 ): Event[] {
+  if (intent.kind === 'wait') return [];
+
   const player = playerAt(game, playerIndex);
 
   if (intent.kind === 'join' || intent.kind === 'claimSuspect' || intent.kind === 'start' ||

@@ -29,13 +29,15 @@ export function decideRobotIntent(
   const pending = game.pendingReveal;
 
   if (pending) {
-    if (pending.revealerIndex !== robotIndex) return { kind: 'endTurn' };
+    if (pending.revealerIndex !== robotIndex) return { kind: 'wait' };
 
     const matches = player.cards.filter(card => matchesPendingReveal(card, pending));
     return matches.length
       ? { kind: 'showCard', card: randomOf(matches, rng) }
       : { kind: 'declineReveal' };
   }
+
+  if (game.turnIndex !== robotIndex) return { kind: 'wait' };
 
   if (player.failedAccusation) return { kind: 'endTurn' };
 

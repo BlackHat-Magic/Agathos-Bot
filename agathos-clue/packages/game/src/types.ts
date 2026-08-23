@@ -80,6 +80,8 @@ export const STARTING_POSITIONS: Record<Suspect, [number, number]> = {
 };
 
 export type Intent =
+  /** Internal server-side scheduler signal; not a public gameplay action. */
+  | { kind: 'wait' }
   | { kind: 'join'; userId: string; name: string }
   | { kind: 'claimSuspect'; suspect: Suspect }
   | { kind: 'start' }

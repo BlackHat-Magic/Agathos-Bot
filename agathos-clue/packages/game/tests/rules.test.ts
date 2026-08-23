@@ -34,6 +34,54 @@ describe('begin', () => {
     // 18 cards / 3 players = 6 each
     for (const p of players) expect(p.cards.length).toBe(6);
   });
+
+  it('resets cards and game state when beginning a reused game', () => {
+    const players = [mkPlayer('Miss Scarlett', 0), mkPlayer('Professor Plum', 1), mkPlayer('Mrs. Peacock', 2)];
+    const game = createGame(players);
+    begin(game, () => 0);
+    const firstSolution = game.solution;
+
+    for (const player of players) {
+      player.cards.push({ type: 'weapon', weapon: 'Rope' });
+      player.failedAccusation = true;
+      player.guessedHere = true;
+      player.movedBySuggestion = true;
+      player.enteredRoomThisTurn = true;
+    }
+    game.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Miss Scarlett',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+    };
+    game.lastDieRoll = 12;
+    game.hasRolledThisTurn = true;
+    game.hasMovedThisTurn = true;
+    game.winnerIndex = 1;
+    game.finishedAt = 123;
+    game.phase = 'finished';
+    game.turnIndex = 2;
+
+    begin(game, () => 0.99);
+
+    expect(game.solution).not.toEqual(firstSolution);
+    expect(players.reduce((total, player) => total + player.cards.length, 0)).toBe(18);
+    for (const player of players) {
+      expect(player.failedAccusation).toBe(false);
+      expect(player.guessedHere).toBe(false);
+      expect(player.movedBySuggestion).toBe(false);
+      expect(player.enteredRoomThisTurn).toBe(false);
+    }
+    expect(game.pendingReveal).toBeNull();
+    expect(game.lastDieRoll).toBeNull();
+    expect(game.hasRolledThisTurn).toBe(false);
+    expect(game.hasMovedThisTurn).toBe(false);
+    expect(game.winnerIndex).toBeNull();
+    expect(game.finishedAt).toBeNull();
+    expect(game.phase as string).toBe('playing');
+    expect(game.turnIndex).toBe(0);
+  });
 });
 
 describe('resolveSuggestion', () => {

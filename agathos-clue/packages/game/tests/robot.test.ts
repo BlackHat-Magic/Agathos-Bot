@@ -88,6 +88,51 @@ describe('decideRobotIntent', () => {
     expect(decideRobotIntent(g, 0, () => 0)).toEqual({ kind: 'declineReveal' });
   });
 
+  it('waits when another player is the pending revealer', () => {
+    const g = createGame([mkRobot('Miss Scarlett', 0), mkRobot('Professor Plum', 1)]);
+    g.phase = 'finished';
+    g.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Professor Plum',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+    };
+
+    const intent = decideRobotIntent(g, 0);
+    expect(intent).toEqual({ kind: 'wait' });
+    expect(applyIntent(g, 0, intent)).toEqual([]);
+  });
+
+  it('waits when it is not the robot turn', () => {
+    const g = createGame([mkRobot('Miss Scarlett', 0), mkRobot('Professor Plum', 1)]);
+    g.phase = 'lobby';
+    g.turnIndex = 1;
+
+    const intent = decideRobotIntent(g, 0);
+    expect(intent).toEqual({ kind: 'wait' });
+    expect(applyIntent(g, 0, intent)).toEqual([]);
+  });
+
+  it('resumes the robot turn after a human resolves its suggestion', () => {
+    const g = createGame([
+      mkRobot('Miss Scarlett', 0),
+      { ...mkRobot('Professor Plum', 1), isRobot: false, cards: [{ type: 'weapon', weapon: 'Revolver' }] },
+    ]);
+    g.phase = 'playing';
+    g.players[0]!.piece.location = spaceAt(g.board, 10, 18);
+    g.players[0]!.enteredRoomThisTurn = true;
+
+    const suggestion = decideRobotIntent(g, 0, () => 0.5);
+    expect(suggestion.kind).toBe('suggest');
+    expect(applyIntent(g, 0, suggestion)).toHaveLength(2);
+
+    expect(applyIntent(g, 1, { kind: 'showCard', card: { type: 'weapon', weapon: 'Revolver' } })).toEqual([
+      { type: 'revealed', revealerIndex: 1, cardHint: 'private' },
+    ]);
+    expect(decideRobotIntent(g, 0, () => 0.5)).toEqual({ kind: 'endTurn' });
+  });
+
   it('does not request a secret passage after dice movement enters a corner room', () => {
     const g = createGame([mkRobot('Miss Scarlett', 0)]);
     g.turnIndex = 0;

@@ -33,6 +33,22 @@ function putInHall(game: ReturnType<typeof createGame>, playerIndex = 0): void {
 }
 
 describe('applyIntent', () => {
+  it('treats the internal wait intent as an unconditional no-op', () => {
+    const game = playingGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
+    game.phase = 'finished';
+    game.turnIndex = 1;
+    game.pendingReveal = {
+      suggesterIndex: 1,
+      suspect: 'Miss Scarlett',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 0,
+    };
+
+    expect(applyIntent(game, 0, { kind: 'wait' })).toEqual([]);
+    expect(game.pendingReveal).not.toBeNull();
+  });
+
   it('rolls two dice, stores the positive result, and emits an event', () => {
     const game = playingGame([player('Miss Scarlett', 0)]);
     const events = applyIntent(game, 0, { kind: 'roll' }, () => 0.5);

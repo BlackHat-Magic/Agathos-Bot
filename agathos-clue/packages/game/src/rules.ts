@@ -58,6 +58,20 @@ export function createGame(players: Player[]): Game {
 
 export function begin(game: Game, rng: RNG = Math.random): void {
   game.players.forEach((player, index) => { player.index = index; });
+  for (const player of game.players) {
+    player.cards = [];
+    player.failedAccusation = false;
+    player.guessedHere = false;
+    player.movedBySuggestion = false;
+    player.enteredRoomThisTurn = false;
+  }
+  game.pendingReveal = null;
+  game.lastDieRoll = null;
+  game.hasRolledThisTurn = false;
+  game.hasMovedThisTurn = false;
+  game.winnerIndex = null;
+  game.finishedAt = null;
+
   const suspectCards: Card[] = SUSPECTS.map(suspect => ({ type: 'suspect', suspect }));
   const weaponCards: Card[] = WEAPONS.map(weapon => ({ type: 'weapon', weapon }));
   const roomCards: Card[] = ROOMS.map(room => ({ type: 'room', room }));
