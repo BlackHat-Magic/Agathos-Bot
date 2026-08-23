@@ -40,9 +40,15 @@ export function toView(game: Game, viewerIndex: number): GameView {
   }
 
   const viewer = game.players[viewerIndex]!;
-  const pendingReveal = game.pendingReveal
-    ? { ...game.pendingReveal }
-    : null;
+  const pendingReveal = game.pendingReveal === null
+    ? null
+    : {
+        suggesterIndex: game.pendingReveal.suggesterIndex,
+        suspect: game.pendingReveal.suspect,
+        weapon: game.pendingReveal.weapon,
+        room: game.pendingReveal.room,
+        revealerIndex: game.pendingReveal.revealerIndex,
+      };
 
   const view: GameView = {
     phase: game.phase,

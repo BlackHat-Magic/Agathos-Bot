@@ -168,6 +168,9 @@ export function resolveSuggestion(
   suggesterIndex: number,
   guess: { suspect: Suspect; weapon: Weapon; room: Room },
 ): SuggestionResult {
+  if (!Number.isInteger(suggesterIndex) || suggesterIndex < 0 || suggesterIndex >= game.players.length) {
+    throw new Error(`invalid suggester index: ${String(suggesterIndex)}`);
+  }
   const validGuess = requireGuess(guess, 'suggestion');
   const n = game.players.length;
   for (let off = 1; off < n; off++) {
@@ -216,7 +219,11 @@ export function requireAccusationSolution(game: Game): Solution {
   if (!isValidSolution(solution)) {
     throw new Error('invalid game solution');
   }
-  return solution;
+  return {
+    suspect: { type: 'suspect', suspect: solution.suspect.suspect },
+    weapon: { type: 'weapon', weapon: solution.weapon.weapon },
+    room: { type: 'room', room: solution.room.room },
+  };
 }
 
 export function evaluateAccusation(
@@ -229,6 +236,7 @@ export function evaluateAccusation(
   }
   if (game.phase !== 'playing') throw new Error('game is not in the playing phase');
   if (game.turnIndex !== playerIndex) throw new Error(`it is not player ${playerIndex}'s turn`);
+  if (game.pendingReveal !== null) throw new Error('a card reveal is pending');
   if (game.players[playerIndex]!.failedAccusation) {
     throw new Error('players with failed accusations may only end their turn');
   }

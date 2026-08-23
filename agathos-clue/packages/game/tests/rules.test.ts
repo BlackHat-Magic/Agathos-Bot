@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'bun:test';
-import { createGame, begin, resolveSuggestion, evaluateAccusation } from '../src/rules';
+import {
+  createGame,
+  begin,
+  evaluateAccusation,
+  requireAccusationSolution,
+  resolveSuggestion,
+} from '../src/rules';
 import { buildBoard, suspectStart } from '../src/board';
 import type { Card, Player, Solution, Suspect, Weapon, Room } from '../src/types';
 
@@ -177,9 +183,37 @@ describe('resolveSuggestion', () => {
       suspect: Suspect; weapon: Weapon; room: Room;
     })).toThrow('invalid suspect: Unknown Suspect');
   });
+
+  it('rejects invalid suggester indexes before searching hands', () => {
+    const game = createGame([mkPlayer('Colonel Mustard', 0), mkPlayer('Mrs. White', 1)]);
+    const guess = { suspect: 'Miss Scarlett' as Suspect, weapon: 'Rope' as Weapon, room: 'Hall' as Room };
+
+    expect(() => resolveSuggestion(game, -1, guess)).toThrow('invalid suggester index: -1');
+    expect(() => resolveSuggestion(game, 0.5, guess)).toThrow('invalid suggester index: 0.5');
+    expect(() => resolveSuggestion(game, 2, guess)).toThrow('invalid suggester index: 2');
+  });
 });
 
 describe('evaluateAccusation', () => {
+  it('returns a detached solution that cannot mutate game state', () => {
+    const game = createGame([mkPlayer('Miss Scarlett', 0)]);
+    game.solution = {
+      suspect: { type: 'suspect', suspect: 'Miss Scarlett' },
+      weapon: { type: 'weapon', weapon: 'Rope' },
+      room: { type: 'room', room: 'Library' },
+    };
+
+    const solution = requireAccusationSolution(game);
+    solution.suspect.suspect = 'Colonel Mustard';
+    solution.weapon.weapon = 'Dagger';
+
+    expect(game.solution).toEqual({
+      suspect: { type: 'suspect', suspect: 'Miss Scarlett' },
+      weapon: { type: 'weapon', weapon: 'Rope' },
+      room: { type: 'room', room: 'Library' },
+    });
+  });
+
   it('wins when matches solution', () => {
     const players = [mkPlayer('Miss Scarlett', 0), mkPlayer('Professor Plum', 1)];
     const g = createGame(players);
@@ -191,6 +225,33 @@ describe('evaluateAccusation', () => {
     g.phase = 'playing';
     g.turnIndex = 0;
     expect(evaluateAccusation(g, 0, { suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' })).toBe(true);
+  });
+
+  it('rejects an accusation while a reveal is pending before mutating state', () => {
+    const g = createGame([mkPlayer('Miss Scarlett', 0), mkPlayer('Professor Plum', 1)]);
+    g.solution = {
+      suspect: { type: 'suspect', suspect: 'Miss Scarlett' },
+      weapon: { type: 'weapon', weapon: 'Rope' },
+      room: { type: 'room', room: 'Library' },
+    };
+    g.phase = 'playing';
+    g.turnIndex = 0;
+    g.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Miss Scarlett',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+    };
+
+    expect(() => evaluateAccusation(g, 0, {
+      suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library',
+    })).toThrow('a card reveal is pending');
+    expect(g.phase).toBe('playing');
+    expect(g.turnIndex).toBe(0);
+    expect(g.players[0]!.failedAccusation).toBe(false);
+    expect(g.winnerIndex).toBeNull();
+    expect(g.finishedAt).toBeNull();
   });
 
   it('rejects an accusation when the solution is missing', () => {

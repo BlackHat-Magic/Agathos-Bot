@@ -138,6 +138,33 @@ describe('toView', () => {
     expect(game.pendingReveal!.revealerIndex).toBe(1);
   });
 
+  it('projects only the public pending reveal fields', () => {
+    const game = playingGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
+    const pendingReveal: unknown = {
+      suggesterIndex: 0,
+      suspect: 'Miss Scarlett',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+      secret: 'runtime metadata',
+    };
+    game.pendingReveal = pendingReveal as Game['pendingReveal'];
+
+    const view = toView(game, 0);
+
+    expect(view.pendingReveal).toEqual({
+      suggesterIndex: 0,
+      suspect: 'Miss Scarlett',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+    });
+    expect(Object.keys(view.pendingReveal!).sort()).toEqual([
+      'revealerIndex', 'room', 'suggesterIndex', 'suspect', 'weapon',
+    ]);
+    expect(JSON.stringify(view)).not.toContain('runtime metadata');
+  });
+
   it('detaches the viewer hand and does not expose other card data', () => {
     const ownCard: Card = { type: 'room', room: 'Library' };
     const otherCard: Card = { type: 'weapon', weapon: 'Lead Pipe' };
