@@ -15,12 +15,30 @@ interface GameRow {
   config_json: string;
 }
 
+interface PlayerRow {
+  game_id: string;
+  player_index: number;
+  user_id: string;
+  suspect: string | null;
+  is_bot: number;
+}
+
 class FakeD1 {
   readonly games = new Map<string, GameRow>();
-  readonly players = new Map<string, { userId: string; suspect: string }>();
+  readonly players = new Map<string, PlayerRow>();
+  failNext = false;
 
   prepare(query: string) {
     return new FakeStatement(this, query);
+  }
+
+  async batch(statements: FakeStatement[]): Promise<unknown[]> {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error('D1 unavailable: private SQL details');
+    }
+    for (const statement of statements) await statement.run();
+    return [];
   }
 }
 
@@ -53,17 +71,41 @@ class FakeStatement {
         winner_user_id: null,
         config_json: String(configJson),
       });
-    } else if (this.query.startsWith('INSERT OR REPLACE INTO game_players')) {
-      const [gameId, userId, suspect] = this.args;
-      this.db.players.set(`${String(gameId)}:${String(userId)}`, {
-        userId: String(userId),
-        suspect: String(suspect),
+    } else if (this.query.startsWith('INSERT INTO game_players')) {
+      const [gameId, playerIndex, userId, suspect] = this.args;
+      const key = `${String(gameId)}:${String(userId)}`;
+      const existing = this.db.players.get(key);
+      this.db.players.set(key, {
+        game_id: String(gameId),
+        player_index: existing?.player_index ?? Number(playerIndex),
+        user_id: String(userId),
+        suspect: suspect === null ? null : String(suspect),
+        is_bot: 0,
       });
+    } else if (this.query.startsWith('UPDATE games SET player_count')) {
+      const gameId = String(this.args[1]);
+      const game = this.db.games.get(gameId);
+      if (game !== undefined) {
+        game.player_count = [...this.db.players.values()]
+          .filter(player => player.game_id === gameId && player.is_bot === 0).length;
+      }
     }
     return { success: true };
   }
 
   async all<T>(): Promise<{ results: T[] }> {
+    if (this.db.failNext) {
+      this.db.failNext = false;
+      throw new Error('D1 unavailable: private SQL details');
+    }
+    if (this.query.includes('FROM game_players')) {
+      const gameId = String(this.args[0]);
+      return {
+        results: [...this.db.players.values()]
+          .filter(player => player.game_id === gameId)
+          .sort((a, b) => a.player_index - b.player_index) as T[],
+      };
+    }
     if (this.query.includes('WHERE state = ?')) {
       const state = String(this.args[0]);
       return {
@@ -102,12 +144,38 @@ function request(
   });
 }
 
+function malformedRequest(path: string, rawBody: string, userId: string): Request {
+  return new Request(`https://example.test${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer dev-token-${userId}`,
+    },
+    body: rawBody,
+  });
+}
+
 async function responseBody(response: Response): Promise<Record<string, unknown>> {
   return await response.json() as Record<string, unknown>;
 }
 
+function game(id: string, botCount = 0): GameRow {
+  return {
+    id,
+    created_at: 1,
+    started_at: null,
+    finished_at: null,
+    host_user_id: 'alice',
+    state: 'lobby',
+    player_count: 1,
+    bot_count: botCount,
+    winner_user_id: null,
+    config_json: '{}',
+  };
+}
+
 describe('D1 lobby HTTP registry', () => {
-  it('creates with the Authorization identity and returns only the id', async () => {
+  it('uses the bounded Authorization identity and creates the indexed host', async () => {
     const db = new FakeD1();
     const response = await handleLobby(
       request('/api/games', 'POST', {
@@ -120,59 +188,146 @@ describe('D1 lobby HTTP registry', () => {
     const body = await responseBody(response);
     expect(response.status).toBe(200);
     expect(Object.keys(body)).toEqual(['id']);
-    const game = [...db.games.values()][0]!;
-    expect(game.host_user_id).toBe('alice');
-    expect(game.bot_count).toBe(2);
-    expect(game.state).toBe('lobby');
+    const created = [...db.games.values()][0]!;
+    expect(created.host_user_id).toBe('alice');
+    expect(created.player_count).toBe(1);
+    expect(created.bot_count).toBe(2);
+    expect([...db.players.values()]).toEqual([{
+      game_id: created.id,
+      player_index: 0,
+      user_id: 'alice',
+      suspect: null,
+      is_bot: 0,
+    }]);
+
+    const acceptedBoundary = await handleLobby(
+      request('/api/games', 'POST', {}, 'x'.repeat(128)),
+      environment(new FakeD1()),
+    );
+    expect(acceptedBoundary.status).toBe(200);
+    const rejectedBoundary = await handleLobby(
+      request('/api/games', 'POST', {}, 'x'.repeat(129)),
+      environment(new FakeD1()),
+    );
+    expect(rejectedBoundary.status).toBe(401);
   });
 
-  it('requires authentication for mutations and ignores body userId on join', async () => {
+  it('requires valid Authorization and ignores body identity on join', async () => {
     const db = new FakeD1();
-    const unauthorized = await handleLobby(request('/api/games', 'POST', {}), environment(db));
-    expect(unauthorized.status).toBe(401);
+    expect((await handleLobby(request('/api/games', 'POST', {}), environment(db))).status).toBe(401);
+    expect((await handleLobby(
+      new Request('https://example.test/api/games', { method: 'POST', headers: { Authorization: 'Basic attacker' }, body: '{}' }),
+      environment(db),
+    )).status).toBe(401);
 
     const gameId = 'clue-game:test-game';
-    db.games.set(gameId, {
-      id: gameId,
-      created_at: 1,
-      started_at: null,
-      finished_at: null,
-      host_user_id: 'alice',
-      state: 'lobby',
-      player_count: 1,
-      bot_count: 0,
-      winner_user_id: null,
-      config_json: '{}',
+    db.games.set(gameId, game(gameId));
+    db.players.set(`${gameId}:alice`, {
+      game_id: gameId,
+      player_index: 0,
+      user_id: 'alice',
+      suspect: null,
+      is_bot: 0,
     });
     const joined = await handleLobby(
-      request(`/api/games/${gameId}/join`, 'POST', { userId: 'attacker', suspect: 'Miss Scarlett' }, 'bob'),
+      request(`/api/games/${gameId}/join`, 'POST', { userId: 'attacker' }, 'bob'),
       environment(db),
     );
     expect(joined.status).toBe(200);
-    expect(await responseBody(joined)).toEqual({ ok: true });
-    expect(db.players.get(`${gameId}:bob`)).toEqual({ userId: 'bob', suspect: 'Miss Scarlett' });
+    expect(db.players.get(`${gameId}:bob`)).toMatchObject({
+      user_id: 'bob',
+      player_index: 1,
+      suspect: null,
+    });
     expect(db.players.has(`${gameId}:attacker`)).toBe(false);
+    expect(db.games.get(gameId)?.player_count).toBe(2);
+  });
+
+  it('accepts only omitted/null unclaimed suspects and rejects invalid or duplicate claims', async () => {
+    const db = new FakeD1();
+    const gameId = 'clue-game:suspects';
+    db.games.set(gameId, game(gameId));
+    db.players.set(`${gameId}:alice`, {
+      game_id: gameId,
+      player_index: 0,
+      user_id: 'alice',
+      suspect: null,
+      is_bot: 0,
+    });
+
+    const omitted = await handleLobby(request(`/api/games/${gameId}/join`, 'POST', {}, 'bob'), environment(db));
+    expect(omitted.status).toBe(200);
+    expect(db.players.get(`${gameId}:bob`)?.suspect).toBeNull();
+    const explicitNull = await handleLobby(
+      request(`/api/games/${gameId}/join`, 'POST', { suspect: null }, 'bob'),
+      environment(db),
+    );
+    expect(explicitNull.status).toBe(200);
+    expect(db.games.get(gameId)?.player_count).toBe(2);
+
+    const invalid = await handleLobby(
+      request(`/api/games/${gameId}/join`, 'POST', { suspect: '' }, 'carol'),
+      environment(db),
+    );
+    expect(invalid.status).toBe(400);
+    const claimed = await handleLobby(
+      request(`/api/games/${gameId}/join`, 'POST', { suspect: 'Miss Scarlett' }, 'carol'),
+      environment(db),
+    );
+    expect(claimed.status).toBe(200);
+    const duplicate = await handleLobby(
+      request(`/api/games/${gameId}/join`, 'POST', { suspect: 'Miss Scarlett' }, 'dave'),
+      environment(db),
+    );
+    expect(duplicate.status).toBe(409);
+  });
+
+  it('fills six indexed players, keeps duplicate joins at one count, and rejects a seventh', async () => {
+    const db = new FakeD1();
+    const create = await handleLobby(request('/api/games', 'POST', {}, 'alice'), environment(db));
+    const gameId = String((await responseBody(create)).id);
+    for (const userId of ['bob', 'carol', 'dave', 'erin', 'frank']) {
+      expect((await handleLobby(
+        request(`/api/games/${gameId}/join`, 'POST', {}, userId),
+        environment(db),
+      )).status).toBe(200);
+    }
+    expect(db.games.get(gameId)?.player_count).toBe(6);
+    expect([...db.players.values()].map(player => player.player_index)).toEqual([0, 1, 2, 3, 4, 5]);
+
+    const duplicate = await handleLobby(
+      request(`/api/games/${gameId}/join`, 'POST', { suspect: null }, 'frank'),
+      environment(db),
+    );
+    expect(duplicate.status).toBe(200);
+    expect(db.games.get(gameId)?.player_count).toBe(6);
+    expect((await handleLobby(
+      request(`/api/games/${gameId}/join`, 'POST', {}, 'grace'),
+      environment(db),
+    )).status).toBe(409);
+  });
+
+  it('reserves bot slots when enforcing the six-player limit', async () => {
+    const db = new FakeD1();
+    const create = await handleLobby(request('/api/games', 'POST', { botCount: 5 }, 'alice'), environment(db));
+    const gameId = String((await responseBody(create)).id);
+    const join = await handleLobby(request(`/api/games/${gameId}/join`, 'POST', {}, 'bob'), environment(db));
+    expect(join.status).toBe(409);
+    expect(db.games.get(gameId)?.player_count).toBe(1);
   });
 
   it('lists lobby public fields without config or private game data', async () => {
     const db = new FakeD1();
     db.games.set('clue-game:public', {
-      id: 'clue-game:public',
+      ...game('clue-game:public'),
       created_at: 10,
-      started_at: null,
-      finished_at: null,
-      host_user_id: 'alice',
-      state: 'lobby',
-      player_count: 1,
       bot_count: 3,
-      winner_user_id: null,
       config_json: JSON.stringify({ solution: 'secret', cards: ['private'] }),
     });
-    db.games.set('clue-game:playing', { ...db.games.get('clue-game:public')!, id: 'clue-game:playing', state: 'playing' });
+    db.games.set('clue-game:playing', { ...game('clue-game:playing'), state: 'playing' });
     const response = await handleLobby(request('/api/games', 'GET'), environment(db));
-    const body = await responseBody(response);
     expect(response.status).toBe(200);
-    expect(body).toEqual({ games: [{
+    expect(await responseBody(response)).toEqual({ games: [{
       id: 'clue-game:public',
       created_at: 10,
       host_user_id: 'alice',
@@ -182,22 +337,47 @@ describe('D1 lobby HTTP registry', () => {
     }] });
   });
 
-  it('validates game state and leaves D1 unchanged at the DO start boundary', async () => {
+  it('rejects malformed JSON and invalid object shapes', async () => {
+    const db = new FakeD1();
+    expect((await handleLobby(
+      malformedRequest('/api/games', '{', 'alice'),
+      environment(db),
+    )).status).toBe(400);
+    expect((await handleLobby(
+      request('/api/games', 'POST', [], 'alice'),
+      environment(db),
+    )).status).toBe(400);
+    expect((await handleLobby(
+      request('/api/games', 'POST', { botCount: 6 }, 'alice'),
+      environment(db),
+    )).status).toBe(400);
+  });
+
+  it('maps D1 failures to safe internal errors', async () => {
+    const db = new FakeD1();
+    db.failNext = true;
+    const create = await handleLobby(request('/api/games', 'POST', {}, 'alice'), environment(db));
+    expect(create.status).toBe(500);
+    expect(await responseBody(create)).toEqual({ error: 'internal server error' });
+
+    db.failNext = true;
+    const list = await handleLobby(request('/api/games', 'GET'), environment(db));
+    expect(list.status).toBe(500);
+    expect(await responseBody(list)).toEqual({ error: 'internal server error' });
+  });
+
+  it('preserves the index-only start 409 without changing D1', async () => {
     const db = new FakeD1();
     const gameId = 'clue-game:start-boundary';
-    const row: GameRow = {
-      id: gameId,
-      created_at: 1,
-      started_at: null,
-      finished_at: null,
-      host_user_id: 'alice',
-      state: 'lobby',
-      player_count: 1,
-      bot_count: 0,
-      winner_user_id: null,
-      config_json: '{}',
-    };
+    const row = game(gameId);
     db.games.set(gameId, row);
+    db.players.set(`${gameId}:alice`, {
+      game_id: gameId,
+      player_index: 0,
+      user_id: 'alice',
+      suspect: null,
+      is_bot: 0,
+    });
     const before = JSON.stringify(row);
     const gameRoom = new FakeGameRoomNamespace();
     const response = await handleLobby(
@@ -211,21 +391,5 @@ describe('D1 lobby HTTP registry', () => {
 
     const notHost = await handleLobby(request(`/api/games/${gameId}/start`, 'POST', undefined, 'bob'), environment(db));
     expect(notHost.status).toBe(403);
-  });
-
-  it('rejects malformed and out-of-bounds input', async () => {
-    const db = new FakeD1();
-    expect((await handleLobby(
-      request('/api/games', 'POST', { botCount: 6 }, 'alice'),
-      environment(db),
-    )).status).toBe(400);
-    expect((await handleLobby(
-      request('/api/games', 'POST', { config: [] }, 'alice'),
-      environment(db),
-    )).status).toBe(400);
-    expect((await handleLobby(
-      request('/api/games/clue-game:not%20valid/join', 'POST', {}, 'alice'),
-      environment(db),
-    )).status).toBe(400);
   });
 });

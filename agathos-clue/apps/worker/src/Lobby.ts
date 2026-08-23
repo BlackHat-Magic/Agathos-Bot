@@ -5,6 +5,8 @@ import { authenticateDevProtocol } from './game-room-protocol';
 const MAX_GAME_ID_LENGTH = 80;
 const MAX_CONFIG_BYTES = 4_096;
 const MAX_BOT_COUNT = 5;
+const MAX_PLAYERS = 6;
+const MAX_DEV_ID_LENGTH = 128;
 const GAME_ID_PATTERN = /^clue-game:[A-Za-z0-9_-]{1,64}$/;
 const LOBBY_STATE = 'lobby';
 
@@ -28,6 +30,14 @@ interface PublicGame {
   state: 'lobby';
   player_count: number;
   bot_count: number;
+}
+
+interface PlayerRow {
+  game_id: string;
+  player_index: number;
+  user_id: string;
+  suspect: string | null;
+  is_bot: number;
 }
 
 class LobbyHttpError extends Error {
@@ -72,9 +82,15 @@ async function createGame(req: Request, env: Env, hostUserId: string): Promise<R
   const id = `clue-game:${crypto.randomUUID()}`;
   const configJson = JSON.stringify(config);
 
-  await env.LOBBY_DB.prepare(
-    'INSERT INTO games (id, created_at, state, player_count, bot_count, host_user_id, config_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  ).bind(id, Date.now(), LOBBY_STATE, 1, botCount, hostUserId, configJson).run();
+  await env.LOBBY_DB.batch([
+    env.LOBBY_DB.prepare(
+      'INSERT INTO games (id, created_at, state, player_count, bot_count, host_user_id, config_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).bind(id, Date.now(), LOBBY_STATE, 1, botCount, hostUserId, configJson),
+    env.LOBBY_DB.prepare(
+      'INSERT INTO game_players (game_id, player_index, user_id, suspect, is_bot) VALUES (?, ?, ?, ?, 0)',
+    ).bind(id, 0, hostUserId, null),
+    countPlayersStatement(env, id),
+  ]);
   return json({ id });
 }
 
@@ -99,11 +115,29 @@ async function joinGame(
   const body = await readObject(req);
   requireAllowedKeys(body, ['userId', 'suspect']);
   const suspect = body.suspect === undefined || body.suspect === null
-    ? ''
+    ? null
     : parseSuspect(body.suspect);
-  await env.LOBBY_DB.prepare(
-    'INSERT OR REPLACE INTO game_players (game_id, user_id, suspect, is_bot) VALUES (?, ?, ?, 0)',
-  ).bind(gameId, userId, suspect).run();
+  const players = await findPlayers(env, gameId);
+  const existing = players.find(player => player.user_id === userId);
+  if (existing === undefined) {
+    const humanCount = players.filter(player => player.is_bot === 0).length;
+    if (humanCount + game.bot_count >= MAX_PLAYERS) {
+      throw new LobbyHttpError(409, 'game is full');
+    }
+  }
+  if (suspect !== null && players.some(player =>
+    player.user_id !== userId && player.suspect === suspect,
+  )) {
+    throw new LobbyHttpError(409, 'suspect is already claimed');
+  }
+
+  const playerIndex = existing?.player_index ?? findPlayerIndex(players, game.bot_count);
+  await env.LOBBY_DB.batch([
+    env.LOBBY_DB.prepare(
+      'INSERT INTO game_players (game_id, player_index, user_id, suspect, is_bot) VALUES (?, ?, ?, ?, 0) ON CONFLICT(game_id, user_id) DO UPDATE SET suspect = excluded.suspect',
+    ).bind(gameId, playerIndex, userId, suspect),
+    countPlayersStatement(env, gameId),
+  ]);
   return json({ ok: true });
 }
 
@@ -132,7 +166,9 @@ async function findGame(env: Env, gameId: string): Promise<GameRow | null> {
 
 function requireIdentity(req: Request): string {
   const userId = authenticateDevProtocol(req.headers.get('Authorization'));
-  if (userId === null) throw new LobbyHttpError(401, 'unauthorized');
+  if (userId === null || userId.length < 1 || userId.length > MAX_DEV_ID_LENGTH) {
+    throw new LobbyHttpError(401, 'unauthorized');
+  }
   return userId;
 }
 
@@ -188,6 +224,28 @@ function parseSuspect(value: unknown): string {
   return value;
 }
 
+function countPlayersStatement(env: Env, gameId: string): D1PreparedStatement {
+  return env.LOBBY_DB.prepare(
+    'UPDATE games SET player_count = (SELECT COUNT(*) FROM game_players WHERE game_id = ? AND is_bot = 0) WHERE id = ?',
+  ).bind(gameId, gameId);
+}
+
+function findPlayerIndex(players: PlayerRow[], botCount: number): number {
+  const occupied = new Set(players.map(player => player.player_index));
+  const humanLimit = MAX_PLAYERS - botCount;
+  for (let playerIndex = 0; playerIndex < humanLimit; playerIndex += 1) {
+    if (!occupied.has(playerIndex)) return playerIndex;
+  }
+  throw new LobbyHttpError(409, 'game is full');
+}
+
+async function findPlayers(env: Env, gameId: string): Promise<PlayerRow[]> {
+  const result = await env.LOBBY_DB.prepare(
+    'SELECT game_id, player_index, user_id, suspect, is_bot FROM game_players WHERE game_id = ? ORDER BY player_index',
+  ).bind(gameId).all<unknown>();
+  return result.results.map(value => parsePlayerRow(value));
+}
+
 function requireAllowedKeys(body: Record<string, unknown>, allowed: string[]): void {
   const allowedKeys = new Set(allowed);
   if (Object.keys(body).some(key => !allowedKeys.has(key))) {
@@ -201,11 +259,11 @@ function parseGameRow(value: unknown): GameRow {
       typeof value.created_at !== 'number' || !Number.isFinite(value.created_at) ||
       (value.started_at !== null && typeof value.started_at !== 'number') ||
       (value.finished_at !== null && typeof value.finished_at !== 'number') ||
-      typeof value.host_user_id !== 'string' || value.host_user_id.length === 0 ||
+      typeof value.host_user_id !== 'string' || !isValidDevId(value.host_user_id) ||
       typeof value.state !== 'string' ||
-      typeof value.player_count !== 'number' || !Number.isInteger(value.player_count) || value.player_count < 0 ||
+      typeof value.player_count !== 'number' || !Number.isInteger(value.player_count) || value.player_count < 0 || value.player_count > MAX_PLAYERS ||
       typeof value.bot_count !== 'number' || !Number.isInteger(value.bot_count) || value.bot_count < 0 ||
-      value.bot_count > MAX_BOT_COUNT ||
+      value.bot_count > MAX_BOT_COUNT || value.player_count + value.bot_count > MAX_PLAYERS ||
       (value.winner_user_id !== null && typeof value.winner_user_id !== 'string') ||
       typeof value.config_json !== 'string') {
     throw new Error('invalid game row');
@@ -220,11 +278,11 @@ function toPublicGame(value: unknown): PublicGame {
   if (!isPlainObject(value) ||
       typeof value.id !== 'string' || value.id.length > MAX_GAME_ID_LENGTH || !GAME_ID_PATTERN.test(value.id) ||
       typeof value.created_at !== 'number' || !Number.isFinite(value.created_at) ||
-      typeof value.host_user_id !== 'string' || value.host_user_id.length === 0 ||
+      typeof value.host_user_id !== 'string' || !isValidDevId(value.host_user_id) ||
       value.state !== LOBBY_STATE ||
-      typeof value.player_count !== 'number' || !Number.isInteger(value.player_count) || value.player_count < 0 ||
+      typeof value.player_count !== 'number' || !Number.isInteger(value.player_count) || value.player_count < 0 || value.player_count > MAX_PLAYERS ||
       typeof value.bot_count !== 'number' || !Number.isInteger(value.bot_count) ||
-      value.bot_count < 0 || value.bot_count > MAX_BOT_COUNT) {
+      value.bot_count < 0 || value.bot_count > MAX_BOT_COUNT || value.player_count + value.bot_count > MAX_PLAYERS) {
     throw new Error('invalid lobby query result');
   }
   return {
@@ -235,6 +293,23 @@ function toPublicGame(value: unknown): PublicGame {
     player_count: value.player_count,
     bot_count: value.bot_count,
   };
+}
+
+function parsePlayerRow(value: unknown): PlayerRow {
+  if (!isPlainObject(value) ||
+      typeof value.game_id !== 'string' || !GAME_ID_PATTERN.test(value.game_id) ||
+      typeof value.player_index !== 'number' || !Number.isInteger(value.player_index) ||
+      value.player_index < 0 || value.player_index >= MAX_PLAYERS ||
+      typeof value.user_id !== 'string' || !isValidDevId(value.user_id) ||
+      (value.suspect !== null && !isSuspect(value.suspect)) ||
+      (value.is_bot !== 0 && value.is_bot !== 1)) {
+    throw new Error('invalid game player row');
+  }
+  return value as unknown as PlayerRow;
+}
+
+function isValidDevId(value: string): boolean {
+  return value.length >= 1 && value.length <= MAX_DEV_ID_LENGTH && !/\s/.test(value);
 }
 
 function json(value: unknown, status = 200): Response {
