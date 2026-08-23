@@ -10,6 +10,10 @@
   } from '@agathos/game';
   import { currentView, error, events, send } from '../stores';
   import { actionsFor } from '../intent-gating';
+  import {
+    shouldCloseAfterAccusation,
+    type AccusationBaseline,
+  } from './accusation-reconciliation';
   import { createAccuseIntent } from '../../transport/intents';
   import { focusDialog, trapDialogFocus } from '../modal-focus';
   import type { Event } from '@agathos/game';
@@ -22,12 +26,20 @@
   let dialog: HTMLDivElement;
   let accusationPending = false;
   let eventsBeforeAccusation: readonly Event[] = [];
+  let accusationBaseline: AccusationBaseline | null = null;
 
   $: actions = actionsFor($currentView);
   $: if (accusationPending && $error !== null) accusationPending = false;
-  $: if (accusationPending && $currentView !== null && $events.some(event =>
-    !eventsBeforeAccusation.includes(event) &&
-    event.type === 'accused' && event.playerIndex === $currentView?.myIndex)) {
+  $: if (
+    accusationPending &&
+    $currentView !== null &&
+    (
+      (accusationBaseline !== null && shouldCloseAfterAccusation($currentView, accusationBaseline)) ||
+      $events.some(event =>
+        !eventsBeforeAccusation.includes(event) &&
+        event.type === 'accused' && event.playerIndex === $currentView?.myIndex)
+    )
+  ) {
     accusationPending = false;
     onClose();
   }
@@ -42,8 +54,14 @@
 
   function submit(): void {
     if (!actions.canAccuse || accusationPending) return;
+    const viewBeforeAccusation = $currentView;
+    const eventsBeforeSubmit = [...$events];
     if (send(createAccuseIntent(suspect, weapon, room))) {
-      eventsBeforeAccusation = [...$events];
+      eventsBeforeAccusation = eventsBeforeSubmit;
+      accusationBaseline = viewBeforeAccusation === null ? null : {
+        phase: viewBeforeAccusation.phase,
+        failedAccusation: viewBeforeAccusation.players[viewBeforeAccusation.myIndex]?.failedAccusation ?? false,
+      };
       accusationPending = true;
     }
   }
