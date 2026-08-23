@@ -7,7 +7,7 @@ function projectLocation(location: BoardSpace): Room | CellId {
   throw new Error('cannot project a board location without a room or cell position');
 }
 
-function cloneCard(card: Card): Card {
+function cloneCard<T extends Card>(card: T): T {
   return { ...card };
 }
 

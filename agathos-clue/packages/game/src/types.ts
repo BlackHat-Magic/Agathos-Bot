@@ -10,10 +10,15 @@ export const ROOMS = ['Ballroom', 'Billiard Room', 'Conservatory', 'Dining Room'
                       'Hall', 'Kitchen', 'Library', 'Lounge', 'Study'] as const;
 export type Room = typeof ROOMS[number];
 
-export type Card =
-  | { type: 'suspect'; suspect: Suspect }
-  | { type: 'weapon'; weapon: Weapon }
-  | { type: 'room'; room: Room };
+export type SuspectCard = { type: 'suspect'; suspect: Suspect };
+export type WeaponCard = { type: 'weapon'; weapon: Weapon };
+export type RoomCard = { type: 'room'; room: Room };
+export type Card = SuspectCard | WeaponCard | RoomCard;
+export interface Solution {
+  suspect: SuspectCard;
+  weapon: WeaponCard;
+  room: RoomCard;
+}
 
 export type CellId = string;           // `${col},${row}` format
 export type BoardSpaceId = CellId | Room;  // rooms are their own id
@@ -53,7 +58,7 @@ export type Phase = 'lobby' | 'playing' | 'finished';
 
 export interface Game {
   players: Player[];
-  solution: { suspect: Card; weapon: Card; room: Card } | null;
+  solution: Solution | null;
   board: BoardSpace[][];            // [24][25] like clue.py:114
   phase: Phase;
   turnIndex: number;
@@ -117,7 +122,7 @@ export interface GameView {
    * by the current toView because Game does not own this state yet.
    */
   reachableSpacesHints?: Array<Room | CellId>;
-  solution?: { suspect: Card; weapon: Card; room: Card };
+  solution?: Solution;
 }
 
 export const STARTING_POSITIONS: Record<Suspect, [number, number]> = {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { createGame, begin, resolveSuggestion, evaluateAccusation } from '../src/rules';
 import { buildBoard, suspectStart } from '../src/board';
-import type { Card, Player, Suspect } from '../src/types';
+import type { Card, Player, Solution, Suspect, Weapon, Room } from '../src/types';
 
 function mkPlayer(suspect: Suspect, idx: number, cards: Card[] = [], isRobot = true): Player {
   return {
@@ -25,6 +25,20 @@ describe('begin', () => {
     const totalDealt = game.players.reduce((n, p) => n + p.cards.length, 0);
     // 6 + 6 + 9 = 21 cards; minus 3 in solution = 18 dealt
     expect(totalDealt).toBe(18);
+  });
+
+  it('exposes category-specific solution cards to consumers', () => {
+    const game = createGame([mkPlayer('Miss Scarlett', 0)]);
+    begin(game, () => 0);
+
+    const solution: Solution = game.solution!;
+    const readSolution = (value: Solution): [Suspect, Weapon, Room] => [
+      value.suspect.suspect,
+      value.weapon.weapon,
+      value.room.room,
+    ];
+
+    expect(readSolution(solution)).toEqual(['Miss Scarlett', 'Candlestick', 'Ballroom']);
   });
 
   it('rejects beginning a game without players', () => {

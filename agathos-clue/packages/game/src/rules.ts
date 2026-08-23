@@ -1,4 +1,4 @@
-import type { Card, Game, Player, Room, Suspect, Weapon } from './types';
+import type { Card, Game, Player, Room, Suspect, SuspectCard, Weapon, WeaponCard, RoomCard } from './types';
 import { SUSPECTS, WEAPONS, ROOMS } from './types';
 import { buildBoard, spaceAt, suspectStart } from './board';
 
@@ -88,9 +88,9 @@ export function begin(game: Game, rng: RNG = Math.random): void {
   game.winnerIndex = null;
   game.finishedAt = null;
 
-  const suspectCards: Card[] = SUSPECTS.map(suspect => ({ type: 'suspect', suspect }));
-  const weaponCards: Card[] = WEAPONS.map(weapon => ({ type: 'weapon', weapon }));
-  const roomCards: Card[] = ROOMS.map(room => ({ type: 'room', room }));
+  const suspectCards: SuspectCard[] = SUSPECTS.map(suspect => ({ type: 'suspect', suspect }));
+  const weaponCards: WeaponCard[] = WEAPONS.map(weapon => ({ type: 'weapon', weapon }));
+  const roomCards: RoomCard[] = ROOMS.map(room => ({ type: 'room', room }));
 
   const s = pick(suspectCards, rng);
   const w = pick(weaponCards, rng);
@@ -161,11 +161,8 @@ export function evaluateAccusation(
 ): boolean {
   const sol = game.solution!;
   const ok =
-    sol.suspect.type === 'suspect' &&
     sol.suspect.suspect === guess.suspect &&
-    sol.weapon.type === 'weapon' &&
     sol.weapon.weapon === guess.weapon &&
-    sol.room.type === 'room' &&
     sol.room.room === guess.room;
   if (ok) {
     game.phase = 'finished';
