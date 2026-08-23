@@ -160,6 +160,43 @@ async function malformedRequest(path: string, rawBody: string, userId: string): 
   });
 }
 
+async function signedRequest(path: string, claims: Record<string, unknown>): Promise<Request> {
+  const token = await signRaw(
+    '{"alg":"HS256","typ":"JWT"}',
+    JSON.stringify(claims),
+    JWT_SECRET,
+  );
+  return new Request(`https://example.test${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: '{}',
+  });
+}
+
+async function signRaw(header: string, payload: string, secret: string): Promise<string> {
+  const encodedHeader = encode(new TextEncoder().encode(header));
+  const encodedPayload = encode(new TextEncoder().encode(payload));
+  const input = `${encodedHeader}.${encodedPayload}`;
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(input));
+  return `${input}.${encode(new Uint8Array(signature))}`;
+}
+
+function encode(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
 async function responseBody(response: Response): Promise<Record<string, unknown>> {
   return await response.json() as Record<string, unknown>;
 }
@@ -219,6 +256,31 @@ describe('D1 lobby HTTP registry', () => {
       environment(new FakeD1()),
     );
     expect(rejectedBoundary.status).toBe(401);
+  });
+
+  it('enforces shared JWT identity and lifetime boundaries over HTTP', async () => {
+    const issuedAt = Math.floor(Date.now() / 1_000) - 1;
+    const validId = 'x'.repeat(128);
+    const valid = await handleLobby(
+      await signedRequest('/api/games', { userId: validId, iat: issuedAt, exp: issuedAt + 86_400 }),
+      environment(new FakeD1()),
+    );
+    expect(valid.status).toBe(200);
+
+    const invalidClaims = [
+      { userId: validId, iat: issuedAt },
+      { userId: validId, exp: issuedAt + 60 },
+      { userId: validId, iat: issuedAt, exp: issuedAt + 86_401 },
+      { userId: 'alice smith', iat: issuedAt, exp: issuedAt + 60 },
+      { userId: 'x'.repeat(129), iat: issuedAt, exp: issuedAt + 60 },
+    ];
+    for (const claims of invalidClaims) {
+      const rejected = await handleLobby(
+        await signedRequest('/api/games', claims),
+        environment(new FakeD1()),
+      );
+      expect(rejected.status).toBe(401);
+    }
   });
 
   it('requires valid Authorization and ignores body identity on join', async () => {

@@ -1,12 +1,11 @@
 import { isSuspect } from '@agathos/game';
 import type { Env } from './index';
-import { verifyJwt } from './auth/jwt';
+import { isValidUserId, verifyJwt } from './auth/jwt';
 
 const MAX_GAME_ID_LENGTH = 80;
 const MAX_CONFIG_BYTES = 4_096;
 const MAX_BOT_COUNT = 5;
 const MAX_PLAYERS = 6;
-const MAX_DEV_ID_LENGTH = 128;
 const GAME_ID_PATTERN = /^clue-game:[A-Za-z0-9_-]{1,64}$/;
 const LOBBY_STATE = 'lobby';
 
@@ -169,7 +168,7 @@ async function requireIdentity(req: Request, env: Env): Promise<string> {
   const match = authorization === null ? null : /^Bearer ([^\s]+)$/i.exec(authorization);
   const claims = match === null ? null : await verifyJwt(match[1]!, env.JWT_SECRET);
   const userId = claims?.userId;
-  if (typeof userId !== 'string' || !isValidDevId(userId)) {
+  if (!isValidUserId(userId)) {
     throw new LobbyHttpError(401, 'unauthorized');
   }
   return userId;
@@ -262,7 +261,7 @@ function parseGameRow(value: unknown): GameRow {
       typeof value.created_at !== 'number' || !Number.isFinite(value.created_at) ||
       (value.started_at !== null && typeof value.started_at !== 'number') ||
       (value.finished_at !== null && typeof value.finished_at !== 'number') ||
-      typeof value.host_user_id !== 'string' || !isValidDevId(value.host_user_id) ||
+       typeof value.host_user_id !== 'string' || !isValidUserId(value.host_user_id) ||
       typeof value.state !== 'string' ||
       typeof value.player_count !== 'number' || !Number.isInteger(value.player_count) || value.player_count < 0 || value.player_count > MAX_PLAYERS ||
       typeof value.bot_count !== 'number' || !Number.isInteger(value.bot_count) || value.bot_count < 0 ||
@@ -281,7 +280,7 @@ function toPublicGame(value: unknown): PublicGame {
   if (!isPlainObject(value) ||
       typeof value.id !== 'string' || value.id.length > MAX_GAME_ID_LENGTH || !GAME_ID_PATTERN.test(value.id) ||
       typeof value.created_at !== 'number' || !Number.isFinite(value.created_at) ||
-      typeof value.host_user_id !== 'string' || !isValidDevId(value.host_user_id) ||
+       typeof value.host_user_id !== 'string' || !isValidUserId(value.host_user_id) ||
       value.state !== LOBBY_STATE ||
       typeof value.player_count !== 'number' || !Number.isInteger(value.player_count) || value.player_count < 0 || value.player_count > MAX_PLAYERS ||
       typeof value.bot_count !== 'number' || !Number.isInteger(value.bot_count) ||
@@ -303,16 +302,12 @@ function parsePlayerRow(value: unknown): PlayerRow {
       typeof value.game_id !== 'string' || !GAME_ID_PATTERN.test(value.game_id) ||
       typeof value.player_index !== 'number' || !Number.isInteger(value.player_index) ||
       value.player_index < 0 || value.player_index >= MAX_PLAYERS ||
-      typeof value.user_id !== 'string' || !isValidDevId(value.user_id) ||
+       typeof value.user_id !== 'string' || !isValidUserId(value.user_id) ||
       (value.suspect !== null && !isSuspect(value.suspect)) ||
       (value.is_bot !== 0 && value.is_bot !== 1)) {
     throw new Error('invalid game player row');
   }
   return value as unknown as PlayerRow;
-}
-
-function isValidDevId(value: string): boolean {
-  return value.length >= 1 && value.length <= MAX_DEV_ID_LENGTH && !/\s/.test(value);
 }
 
 function json(value: unknown, status = 200): Response {

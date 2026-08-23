@@ -349,6 +349,26 @@ describe('GameRoom protocol helpers', () => {
     await expect(authenticateJwtProtocol('bearer.dev-token-alice', JWT_SECRET)).resolves.toBeNull();
     await expect(authenticateJwtProtocol(`Bearer.${token}`, JWT_SECRET)).resolves.toBeNull();
     await expect(authenticateJwtProtocol('bearer.', JWT_SECRET)).resolves.toBeNull();
+
+    const issuedAt = Math.floor(Date.now() / 1_000) - 1;
+    const boundaryId = 'x'.repeat(128);
+    await expect(authenticateJwtProtocol(
+      `bearer.${await signRawClaims({ userId: boundaryId, iat: issuedAt, exp: issuedAt + 86_400 })}`,
+      JWT_SECRET,
+    )).resolves.toMatchObject({ userId: boundaryId });
+    const invalidClaims = [
+      { userId: boundaryId, iat: issuedAt },
+      { userId: boundaryId, exp: issuedAt + 60 },
+      { userId: boundaryId, iat: issuedAt, exp: issuedAt + 86_401 },
+      { userId: 'alice smith', iat: issuedAt, exp: issuedAt + 60 },
+      { userId: 'x'.repeat(129), iat: issuedAt, exp: issuedAt + 60 },
+    ];
+    for (const claims of invalidClaims) {
+      await expect(authenticateJwtProtocol(
+        `bearer.${await signRawClaims(claims)}`,
+        JWT_SECRET,
+      )).resolves.toBeNull();
+    }
   });
 
   it('selects and preserves the offered authenticated protocol', () => {
@@ -1219,3 +1239,22 @@ describe('GameRoom protocol helpers', () => {
     closeConnections(reloaded.gameRoom);
   });
 });
+
+async function signRawClaims(claims: Record<string, unknown>): Promise<string> {
+  const encoder = new TextEncoder();
+  const encode = (bytes: Uint8Array): string => {
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  };
+  const input = `${encode(encoder.encode('{"alg":"HS256","typ":"JWT"}'))}.${encode(encoder.encode(JSON.stringify(claims)))}`;
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(JWT_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(input));
+  return `${input}.${encode(new Uint8Array(signature))}`;
+}

@@ -101,28 +101,21 @@ function assertPayload(payload: unknown): asserts payload is JwtClaims {
 }
 
 function assertUserId(userId: unknown): asserts userId is string {
-  if (typeof userId !== 'string' || userId.length === 0 || userId.length > MAX_USER_ID_LENGTH) {
+  if (!isValidUserId(userId)) {
     throw new Error('JWT userId is invalid');
   }
 }
 
 function isValidClaims(payload: Record<string, unknown>): boolean {
   if (!Object.hasOwn(payload, 'userId')) return false;
-  try {
-    assertUserId(payload.userId);
-  } catch {
-    return false;
-  }
+  if (!isValidUserId(payload.userId)) return false;
 
-  const hasIat = Object.hasOwn(payload, 'iat');
-  const hasExp = Object.hasOwn(payload, 'exp');
-  if (hasIat && !isNumericDate(payload.iat)) return false;
-  if (hasExp && !isNumericDate(payload.exp)) return false;
+  if (!Object.hasOwn(payload, 'iat') || !Object.hasOwn(payload, 'exp') ||
+      !isNumericDate(payload.iat) || !isNumericDate(payload.exp)) return false;
 
   const now = Math.floor(Date.now() / 1_000);
-  if (hasIat && (payload.iat as number) > now) return false;
-  if (hasExp && (payload.exp as number) <= now) return false;
-  if (hasIat && hasExp && (payload.exp as number) <= (payload.iat as number)) return false;
+  if (payload.iat > now || payload.exp <= now || payload.exp <= payload.iat ||
+      payload.exp - payload.iat > MAX_TTL_SECONDS) return false;
 
   try {
     cloneJsonValue(payload, new WeakSet<object>());
@@ -134,6 +127,11 @@ function isValidClaims(payload: Record<string, unknown>): boolean {
 
 function isNumericDate(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+export function isValidUserId(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= 1 &&
+    value.length <= MAX_USER_ID_LENGTH && !/\s/.test(value);
 }
 
 function parseJsonObject(bytes: Uint8Array): Record<string, unknown> | null {

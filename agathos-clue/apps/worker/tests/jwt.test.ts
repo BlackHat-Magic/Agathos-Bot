@@ -65,23 +65,34 @@ describe('JWT HS256 authentication', () => {
   it('requires a non-empty bounded string userId', async () => {
     expect(await verifyClaims({ exp: future(), iat: past() })).toBeNull();
     expect(await verifyClaims({ userId: '' })).toBeNull();
+    expect(await verifyClaims({ userId: 'alice smith', exp: future(), iat: past() })).toBeNull();
+    expect(await verifyClaims({ userId: ' alice', exp: future(), iat: past() })).toBeNull();
     expect(await verifyClaims({ userId: 42 })).toBeNull();
     expect(await verifyClaims({ userId: 'x'.repeat(129) })).toBeNull();
-    expect((await verifyClaims({ userId: 'x'.repeat(128), exp: future() }))?.userId)
+    expect((await verifyClaims({ userId: '用户', exp: future(), iat: past() }))?.userId)
+      .toBe('用户');
+    expect((await verifyClaims({ userId: 'x'.repeat(128), exp: future(), iat: past() }))?.userId)
       .toBe('x'.repeat(128));
   });
 
   it('enforces expiry, iat/exp relationships, and numeric claims', async () => {
+    const issuedAt = now() - 1;
+    expect(await verifyClaims({ userId: 'alice', iat: past() })).toBeNull();
+    expect(await verifyClaims({ userId: 'alice', exp: future() })).toBeNull();
     expect(await verifyClaims({ userId: 'alice', exp: now() })).toBeNull();
     expect(await verifyClaims({ userId: 'alice', exp: past() })).toBeNull();
     expect(await verifyClaims({ userId: 'alice', exp: future(), iat: future() })).toBeNull();
     expect(await verifyClaims({ userId: 'alice', exp: 20, iat: 20 })).toBeNull();
+    expect(await verifyClaims({ userId: 'alice', exp: issuedAt + 86_401, iat: issuedAt })).toBeNull();
     expect(await verifyClaims({ userId: 'alice', exp: future(), iat: future() - 1 })).toBeNull();
     expect(await verifyClaims({ userId: 'alice', exp: 'tomorrow' })).toBeNull();
     expect(await verifyClaims({ userId: 'alice', exp: null })).toBeNull();
     expect(await verifyClaims({ userId: 'alice', iat: 1.5 })).toBeNull();
     expect(await verifyClaims({ userId: 'alice', iat: -1 })).toBeNull();
     expect((await verifyClaims({ userId: 'alice', exp: future(), iat: past() }))?.userId)
+      .toBe('alice');
+    const boundary = now() - 1;
+    expect((await verifyClaims({ userId: 'alice', iat: boundary, exp: boundary + 86_400 }))?.userId)
       .toBe('alice');
   });
 

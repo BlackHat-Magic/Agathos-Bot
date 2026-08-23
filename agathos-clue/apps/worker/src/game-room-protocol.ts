@@ -1,5 +1,5 @@
 import type { Card, Game, Intent } from '@agathos/game';
-import { verifyJwt } from './auth/jwt';
+import { isValidUserId, verifyJwt } from './auth/jwt';
 
 const LIFECYCLE_INTENTS = new Set([
   'join', 'claimSuspect', 'start', 'setOrder', 'leave',
@@ -46,7 +46,7 @@ export async function authenticateJwtProtocol(
   const token = protocol.slice('bearer.'.length);
   if (token.length === 0) return null;
   const claims = await verifyJwt(token, secret);
-  if (claims === null || typeof claims.userId !== 'string') return null;
+  if (claims === null || !isValidUserId(claims.userId)) return null;
   return { protocol, userId: claims.userId, claims };
 }
 
