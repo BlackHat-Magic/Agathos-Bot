@@ -101,7 +101,7 @@ export interface GameView {
   myHand: Card[];
   myRevealOpportunities?: Card[];
   myLastShownCard?: Card;
-  lastSuggestionReveal?: Card;
+  lastSuggestionReveal?: { fromIndex: number; card: Card };
   reachableSpacesHints?: Array<Room | CellId>;
   solution?: { suspect: Card; weapon: Card; room: Card };
 }
