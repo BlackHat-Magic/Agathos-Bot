@@ -154,6 +154,51 @@ describe('toView', () => {
     expect(JSON.stringify(view)).not.toContain('cards');
   });
 
+  it('canonicalizes runtime card metadata in hands, reveal opportunities, and solutions', () => {
+    const taintedHand: unknown = {
+      type: 'room', room: 'Library', secret: 'hand-only metadata',
+    };
+    const taintedReveal: unknown = {
+      type: 'weapon', weapon: 'Rope', secret: 'reveal-only metadata',
+    };
+    const taintedSolution: unknown = {
+      suspect: { type: 'suspect', suspect: 'Mrs. Peacock', secret: 'solution metadata' },
+      weapon: { type: 'weapon', weapon: 'Dagger' },
+      room: { type: 'room', room: 'Library' },
+    };
+    const game = playingGame([
+      player('Miss Scarlett', 0, [taintedHand as Card]),
+      player('Professor Plum', 1, [taintedReveal as Card]),
+    ]);
+    game.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Miss Scarlett',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+    };
+    game.solution = taintedSolution as Game['solution'];
+    game.phase = 'finished';
+
+    const view = toView(game, 0);
+
+    expect(view.myHand).toEqual([{ type: 'room', room: 'Library' }]);
+    expect(toView(game, 1).myRevealOpportunities).toEqual([
+      { type: 'weapon', weapon: 'Rope' },
+    ]);
+    expect(view.solution).toEqual(solution);
+    expect(JSON.stringify(view)).not.toContain('metadata');
+  });
+
+  it('rejects corrupt projected card values clearly', () => {
+    const malformed: unknown = { type: 'room', room: 'Unknown Room' };
+    const game = playingGame([
+      player('Miss Scarlett', 0, [malformed as Card]),
+    ]);
+
+    expect(() => toView(game, 0)).toThrow('invalid card room: Unknown Room');
+  });
+
   it('reveals the finished solution only in the finished phase', () => {
     const game = playingGame([player('Miss Scarlett', 0)]);
     game.solution = solution;

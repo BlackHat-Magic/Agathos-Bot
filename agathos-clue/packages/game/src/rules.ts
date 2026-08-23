@@ -1,5 +1,5 @@
 import type { Card, Game, Player, Room, Solution, Suspect, SuspectCard, Weapon, WeaponCard, RoomCard } from './types';
-import { SUSPECTS, WEAPONS, ROOMS } from './types';
+import { isCard, isRoom, isSuspect, isWeapon, SUSPECTS, WEAPONS, ROOMS } from './types';
 import { buildBoard, spaceAt, suspectStart } from './board';
 
 type RNG = () => number;
@@ -135,20 +135,44 @@ export interface SuggestionResult {
   card: Card | null;
 }
 
+export type SuggestionGuess = { suspect: Suspect; weapon: Weapon; room: Room };
+
+function requireGuess(value: unknown, label: 'suggestion' | 'accusation'): SuggestionGuess {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error(`invalid ${label}: expected an object`);
+  }
+  const guess = value as Record<string, unknown>;
+  if (!isSuspect(guess.suspect)) throw new Error(`invalid suspect: ${String(guess.suspect)}`);
+  if (!isWeapon(guess.weapon)) throw new Error(`invalid weapon: ${String(guess.weapon)}`);
+  if (!isRoom(guess.room)) throw new Error(`invalid room: ${String(guess.room)}`);
+  return { suspect: guess.suspect, weapon: guess.weapon, room: guess.room };
+}
+
+/** Value-based card matching shared by advisory queries and sequential reveals. */
+export function cardMatchesSuggestion(card: unknown, guess: SuggestionGuess): card is Card {
+  if (!isCard(card)) return false;
+  return (
+    (card.type === 'suspect' && card.suspect === guess.suspect) ||
+    (card.type === 'weapon' && card.weapon === guess.weapon) ||
+    (card.type === 'room' && card.room === guess.room)
+  );
+}
+
+/**
+ * Advisory query: skips players without a matching card to identify the first
+ * possible revealer. The reducer instead advances sequentially through every
+ * reveal opportunity, including players who must decline.
+ */
 export function resolveSuggestion(
   game: Game,
   suggesterIndex: number,
   guess: { suspect: Suspect; weapon: Weapon; room: Room },
 ): SuggestionResult {
+  const validGuess = requireGuess(guess, 'suggestion');
   const n = game.players.length;
   for (let off = 1; off < n; off++) {
     const idx = (suggesterIndex + off) % n;
-    const candidate = game.players[idx].cards.find(
-      c =>
-        (c.type === 'suspect' && c.suspect === guess.suspect) ||
-        (c.type === 'weapon' && c.weapon === guess.weapon) ||
-        (c.type === 'room' && c.room === guess.room),
-    );
+    const candidate = game.players[idx].cards.find(c => cardMatchesSuggestion(c, validGuess));
     if (candidate) return { revealerIndex: idx, card: candidate };
   }
   return { revealerIndex: null, card: null };
@@ -164,9 +188,8 @@ function isValidSolutionCard(
   field: 'suspect' | 'weapon' | 'room',
   validValues: readonly string[],
 ): boolean {
-  if (!isRecord(value) || value.type !== type) return false;
-  const cardValue = value[field];
-  return typeof cardValue === 'string' && validValues.includes(cardValue);
+  return isRecord(value) && value.type === type &&
+    typeof value[field] === 'string' && validValues.includes(value[field]);
 }
 
 function isValidSolution(value: unknown): value is Solution {
@@ -194,11 +217,12 @@ export function evaluateAccusation(
   playerIndex: number,
   guess: { suspect: Suspect; weapon: Weapon; room: Room },
 ): boolean {
+  const validGuess = requireGuess(guess, 'accusation');
   const sol = requireAccusationSolution(game);
   const ok =
-    sol.suspect.suspect === guess.suspect &&
-    sol.weapon.weapon === guess.weapon &&
-    sol.room.room === guess.room;
+    sol.suspect.suspect === validGuess.suspect &&
+    sol.weapon.weapon === validGuess.weapon &&
+    sol.room.room === validGuess.room;
   if (ok) {
     game.phase = 'finished';
     game.winnerIndex = playerIndex;

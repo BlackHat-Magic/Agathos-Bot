@@ -1,5 +1,9 @@
 import { BOARD_HEIGHT, BOARD_WIDTH } from './board';
-import type { BoardSpace, Card, CellId, Game, GameView, Room } from './types';
+import { cardMatchesSuggestion } from './rules';
+import { assertCard } from './types';
+import type {
+  BoardSpace, Card, CellId, Game, GameView, Room, RoomCard, SuspectCard, WeaponCard,
+} from './types';
 
 function projectLocation(location: BoardSpace): Room | CellId {
   if (location.room) return location.room;
@@ -7,16 +11,21 @@ function projectLocation(location: BoardSpace): Room | CellId {
   throw new Error('cannot project a board location without a room or cell position');
 }
 
-function cloneCard<T extends Card>(card: T): T {
-  return { ...card };
+function cloneCard(card: SuspectCard): SuspectCard;
+function cloneCard(card: WeaponCard): WeaponCard;
+function cloneCard(card: RoomCard): RoomCard;
+function cloneCard(card: Card): Card;
+function cloneCard(card: unknown): Card {
+  assertCard(card);
+  switch (card.type) {
+    case 'suspect': return { type: 'suspect', suspect: card.suspect };
+    case 'weapon': return { type: 'weapon', weapon: card.weapon };
+    case 'room': return { type: 'room', room: card.room };
+  }
 }
 
 function matchesPendingReveal(card: Card, pending: NonNullable<Game['pendingReveal']>): boolean {
-  return (
-    (card.type === 'suspect' && card.suspect === pending.suspect) ||
-    (card.type === 'weapon' && card.weapon === pending.weapon) ||
-    (card.type === 'room' && card.room === pending.room)
-  );
+  return cardMatchesSuggestion(card, pending);
 }
 
 /**

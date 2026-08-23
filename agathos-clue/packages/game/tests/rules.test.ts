@@ -150,6 +150,17 @@ describe('resolveSuggestion', () => {
     expect(result.revealerIndex).toBeNull();
     expect(result.card).toBeNull();
   });
+
+  it('rejects malformed runtime suggestion values by field', () => {
+    const game = createGame([mkPlayer('Colonel Mustard', 0), mkPlayer('Mrs. White', 1)]);
+    const malformed: unknown = {
+      suspect: 'Unknown Suspect', weapon: 'Candlestick', room: 'Hall',
+    };
+
+    expect(() => resolveSuggestion(game, 0, malformed as {
+      suspect: Suspect; weapon: Weapon; room: Room;
+    })).toThrow('invalid suspect: Unknown Suspect');
+  });
 });
 
 describe('evaluateAccusation', () => {
@@ -205,6 +216,23 @@ describe('evaluateAccusation', () => {
     };
     expect(evaluateAccusation(g, 0, { suspect: 'Professor Plum', weapon: 'Rope', room: 'Library' })).toBe(false);
     expect(players[0].failedAccusation).toBe(true);
+  });
+
+  it('rejects malformed runtime accusation values before evaluating them', () => {
+    const g = createGame([mkPlayer('Miss Scarlett', 0)]);
+    g.solution = {
+      suspect: { type: 'suspect', suspect: 'Miss Scarlett' },
+      weapon: { type: 'weapon', weapon: 'Rope' },
+      room: { type: 'room', room: 'Library' },
+    };
+    const malformed: unknown = {
+      suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Unknown Room',
+    };
+
+    expect(() => evaluateAccusation(g, 0, malformed as {
+      suspect: Suspect; weapon: Weapon; room: Room;
+    })).toThrow('invalid room: Unknown Room');
+    expect(g.players[0]!.failedAccusation).toBe(false);
   });
 
   it('ends game when all humans have failed (regardless of robots)', () => {

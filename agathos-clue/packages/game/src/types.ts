@@ -10,10 +10,50 @@ export const ROOMS = ['Ballroom', 'Billiard Room', 'Conservatory', 'Dining Room'
                       'Hall', 'Kitchen', 'Library', 'Lounge', 'Study'] as const;
 export type Room = typeof ROOMS[number];
 
+export function isSuspect(value: unknown): value is Suspect {
+  return typeof value === 'string' && (SUSPECTS as readonly string[]).includes(value);
+}
+
+export function isWeapon(value: unknown): value is Weapon {
+  return typeof value === 'string' && (WEAPONS as readonly string[]).includes(value);
+}
+
+export function isRoom(value: unknown): value is Room {
+  return typeof value === 'string' && (ROOMS as readonly string[]).includes(value);
+}
+
 export type SuspectCard = { type: 'suspect'; suspect: Suspect };
 export type WeaponCard = { type: 'weapon'; weapon: Weapon };
 export type RoomCard = { type: 'room'; room: Room };
 export type Card = SuspectCard | WeaponCard | RoomCard;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+export function isCard(value: unknown): value is Card {
+  if (!isRecord(value)) return false;
+  if (value.type === 'suspect') return isSuspect(value.suspect);
+  if (value.type === 'weapon') return isWeapon(value.weapon);
+  if (value.type === 'room') return isRoom(value.room);
+  return false;
+}
+
+export function assertCard(value: unknown, label = 'card'): asserts value is Card {
+  if (!isRecord(value)) throw new Error(`invalid ${label}: expected an object`);
+  if (value.type !== 'suspect' && value.type !== 'weapon' && value.type !== 'room') {
+    throw new Error(`invalid ${label} type: ${String(value.type)}`);
+  }
+  const valid = value.type === 'suspect'
+    ? isSuspect(value.suspect)
+    : value.type === 'weapon'
+      ? isWeapon(value.weapon)
+      : isRoom(value.room);
+  if (!valid) {
+    const field = value.type;
+    throw new Error(`invalid ${label} ${field}: ${String(value[field])}`);
+  }
+}
 export interface Solution {
   suspect: SuspectCard;
   weapon: WeaponCard;

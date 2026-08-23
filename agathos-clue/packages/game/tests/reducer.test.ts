@@ -3,7 +3,7 @@ import { buildBoard, spaceAt, suspectStart } from '../src/board';
 import { applyIntent } from '../src/reducer';
 import { decideRobotIntent } from '../src/robot';
 import { begin, createGame } from '../src/rules';
-import type { Card, Player, Suspect } from '../src/types';
+import type { Card, Intent, Player, Suspect } from '../src/types';
 
 function player(suspect: Suspect, index: number, cards: Card[] = [], isRobot = false): Player {
   const board = buildBoard();
@@ -260,6 +260,23 @@ describe('applyIntent', () => {
     expect(game.pendingReveal).toBeNull();
   });
 
+  it('rejects malformed runtime suggestion values before mutating the turn state', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1),
+    ]);
+    putInHall(game);
+    const malformed: unknown = {
+      kind: 'suggest', suspect: 'Unknown Suspect', weapon: 'Rope',
+    };
+
+    expect(() => applyIntent(game, 0, malformed as Intent)).toThrow(
+      'invalid suspect: Unknown Suspect',
+    );
+    expect(game.players[0]!.guessedHere).toBe(false);
+    expect(game.pendingReveal).toBeNull();
+  });
+
   it('does not allow a player who ended in a room to suggest next turn without re-entering', () => {
     const game = playingGame([
       player('Miss Scarlett', 0),
@@ -426,6 +443,48 @@ describe('applyIntent', () => {
     expect(game.pendingReveal).toBeNull();
   });
 
+  it('rejects malformed runtime reveal cards with field-specific errors', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1),
+    ]);
+    game.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Professor Plum',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+    };
+    const malformed: unknown = {
+      kind: 'showCard',
+      card: { type: 'weapon', weapon: 'Unknown Weapon' },
+    };
+
+    expect(() => applyIntent(game, 1, malformed as Intent)).toThrow(
+      'invalid reveal card weapon: Unknown Weapon',
+    );
+    expect(game.pendingReveal!.revealerIndex).toBe(1);
+  });
+
+  it('keeps sequential reveal opportunities for players without matching cards', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1),
+      player('Mrs. Peacock', 2, [{ type: 'room', room: 'Hall' }]),
+    ]);
+    putInHall(game);
+    applyIntent(game, 0, { kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope' });
+
+    expect(applyIntent(game, 1, { kind: 'declineReveal' })).toEqual([
+      { type: 'declinedReveal', revealerIndex: 1 },
+      { type: 'revealRequested', revealerIndex: 2 },
+    ]);
+    expect(applyIntent(game, 2, {
+      kind: 'showCard', card: { type: 'room', room: 'Hall' },
+    })).toEqual([{ type: 'revealed', revealerIndex: 2, cardHint: 'private' }]);
+    expect(game.pendingReveal).toBeNull();
+  });
+
   it('declines around the table and clears after cycling to the suggester', () => {
     const game = playingGame([
       player('Miss Scarlett', 0),
@@ -569,6 +628,23 @@ describe('applyIntent', () => {
       { type: 'gameWon', playerIndex: 0 },
     ]);
     expect(winner.winnerIndex).toBe(0);
+  });
+
+  it('rejects malformed runtime accusation values before marking a failed accusation', () => {
+    const game = playingGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
+    game.solution = {
+      suspect: { type: 'suspect', suspect: 'Mrs. Peacock' },
+      weapon: { type: 'weapon', weapon: 'Rope' },
+      room: { type: 'room', room: 'Library' },
+    };
+    const malformed: unknown = {
+      kind: 'accuse', suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Unknown Room',
+    };
+
+    expect(() => applyIntent(game, 0, malformed as Intent)).toThrow(
+      'invalid room: Unknown Room',
+    );
+    expect(game.players[0]!.failedAccusation).toBe(false);
   });
 
   it('rejects accusations with missing or malformed solutions', () => {

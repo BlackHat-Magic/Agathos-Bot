@@ -1,8 +1,8 @@
 import { spaceAt } from './board';
 import { reachable } from './pathfind';
-import { evaluateAccusation, requireAccusationSolution } from './rules';
+import { cardMatchesSuggestion, evaluateAccusation, requireAccusationSolution } from './rules';
 import type { Card, Game, Intent, Player, Room, Suspect, Weapon } from './types';
-import { ROOMS } from './types';
+import { assertCard, isRoom, isSuspect, isWeapon } from './types';
 
 export type Event =
   | { type: 'rolled'; playerIndex: number; result: number }
@@ -51,10 +51,6 @@ function requireRevealTurn(game: Game, playerIndex: number): void {
   }
 }
 
-function isRoom(value: string): value is Room {
-  return (ROOMS as readonly string[]).includes(value);
-}
-
 function roomSpace(game: Game, room: Room) {
   for (const column of game.board) {
     for (const space of column) {
@@ -79,15 +75,6 @@ function destinationSpace(game: Game, destination: Room | string) {
   return roomSpace(game, destination);
 }
 
-function matchesSuggestion(card: Card, pending: Game['pendingReveal']): boolean {
-  if (!pending) return false;
-  return (
-    (card.type === 'suspect' && card.suspect === pending.suspect) ||
-    (card.type === 'weapon' && card.weapon === pending.weapon) ||
-    (card.type === 'room' && card.room === pending.room)
-  );
-}
-
 function sameCard(a: Card, b: Card): boolean {
   if (a.type !== b.type) return false;
   if (a.type === 'suspect' && b.type === 'suspect') return a.suspect === b.suspect;
@@ -107,6 +94,27 @@ export function applyIntent(
   rng: RNG = Math.random,
 ): Event[] {
   if (intent.kind === 'wait') return [];
+
+  if (intent.kind === 'suggest') {
+    if (!isSuspect(intent.suspect)) {
+      throw new Error(`invalid suspect: ${String(intent.suspect)}`);
+    }
+    if (!isWeapon(intent.weapon)) {
+      throw new Error(`invalid weapon: ${String(intent.weapon)}`);
+    }
+  }
+  if (intent.kind === 'accuse') {
+    if (!isSuspect(intent.suspect)) {
+      throw new Error(`invalid suspect: ${String(intent.suspect)}`);
+    }
+    if (!isWeapon(intent.weapon)) {
+      throw new Error(`invalid weapon: ${String(intent.weapon)}`);
+    }
+    if (!isRoom(intent.room)) {
+      throw new Error(`invalid room: ${String(intent.room)}`);
+    }
+  }
+  if (intent.kind === 'showCard') assertCard(intent.card, 'reveal card');
 
   const player = playerAt(game, playerIndex);
 
@@ -209,10 +217,13 @@ export function applyIntent(
     case 'showCard': {
       const pending = game.pendingReveal;
       if (!pending) throw new Error('there is no pending reveal');
-      if (!player.cards.some(card => sameCard(card, intent.card))) {
+      if (!player.cards.some(card => {
+        assertCard(card, 'owned card');
+        return sameCard(card, intent.card);
+      })) {
         throw new Error('revealer does not own that card');
       }
-      if (!matchesSuggestion(intent.card, pending)) {
+      if (!cardMatchesSuggestion(intent.card, pending)) {
         throw new Error('card does not match the pending suggestion');
       }
 
@@ -223,7 +234,10 @@ export function applyIntent(
     case 'declineReveal': {
       const pending = game.pendingReveal;
       if (!pending) throw new Error('there is no pending reveal');
-      if (player.cards.some(card => matchesSuggestion(card, pending))) {
+      if (player.cards.some(card => {
+        assertCard(card, 'owned card');
+        return cardMatchesSuggestion(card, pending);
+      })) {
         throw new Error('revealer must show a matching card instead of declining');
       }
 
