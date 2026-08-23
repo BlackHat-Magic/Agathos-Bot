@@ -176,6 +176,68 @@ export function cardMatchesSuggestion(card: unknown, guess: unknown): card is Ca
   return cardMatchesValidatedSuggestion(card, requireGuess(guess, 'suggestion'));
 }
 
+export function clonePendingReveal(
+  value: unknown,
+  playerCount: number,
+): NonNullable<Game['pendingReveal']> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('invalid pending reveal metadata: expected an object');
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error('invalid pending reveal metadata: expected a plain object');
+  }
+  const pending = value as Record<string, unknown>;
+  const expectedKeys = ['revealerIndex', 'room', 'suggesterIndex', 'suspect', 'weapon'];
+  const ownKeys = Object.keys(pending);
+  if (ownKeys.length !== expectedKeys.length ||
+      ownKeys.some(key => !expectedKeys.includes(key))) {
+    const unexpectedKey = Reflect.ownKeys(pending).find(
+      key => typeof key !== 'string' || !expectedKeys.includes(key),
+    );
+    if (unexpectedKey !== undefined) {
+      throw new Error(`invalid pending reveal metadata key: ${String(unexpectedKey)}`);
+    }
+    throw new Error('invalid pending reveal metadata: expected exactly five fields');
+  }
+  for (const key of Reflect.ownKeys(pending)) {
+    if (typeof key !== 'string' || !expectedKeys.includes(key)) {
+      throw new Error(`invalid pending reveal metadata key: ${String(key)}`);
+    }
+  }
+
+  const suggesterIndex = pending.suggesterIndex;
+  if (typeof suggesterIndex !== 'number' || !Number.isInteger(suggesterIndex) ||
+      suggesterIndex < 0 || suggesterIndex >= playerCount) {
+    throw new Error(`invalid pending reveal suggester index: ${String(suggesterIndex)}`);
+  }
+  const revealerIndex = pending.revealerIndex;
+  if (typeof revealerIndex !== 'number' || !Number.isInteger(revealerIndex) ||
+      revealerIndex < 0 || revealerIndex >= playerCount) {
+    throw new Error(`invalid pending reveal revealer index: ${String(revealerIndex)}`);
+  }
+  if (suggesterIndex === revealerIndex) {
+    throw new Error('invalid pending reveal: suggester and revealer must be distinct');
+  }
+  if (!isSuspect(pending.suspect)) {
+    throw new Error(`invalid pending reveal suspect: ${String(pending.suspect)}`);
+  }
+  if (!isWeapon(pending.weapon)) {
+    throw new Error(`invalid pending reveal weapon: ${String(pending.weapon)}`);
+  }
+  if (!isRoom(pending.room)) {
+    throw new Error(`invalid pending reveal room: ${String(pending.room)}`);
+  }
+
+  return {
+    suggesterIndex,
+    suspect: pending.suspect,
+    weapon: pending.weapon,
+    room: pending.room,
+    revealerIndex,
+  };
+}
+
 /**
  * Advisory query: skips players without a matching card to identify the first
  * possible revealer. The reducer instead advances sequentially through every
@@ -221,7 +283,10 @@ export function evaluateAccusation(
   }
   if (game.phase !== 'playing') throw new Error('game is not in the playing phase');
   if (game.turnIndex !== playerIndex) throw new Error(`it is not player ${playerIndex}'s turn`);
-  if (game.pendingReveal !== null) throw new Error('a card reveal is pending');
+  if (game.pendingReveal !== null) {
+    clonePendingReveal(game.pendingReveal, game.players.length);
+    throw new Error('a card reveal is pending');
+  }
   if (game.players[playerIndex]!.failedAccusation) {
     throw new Error('players with failed accusations may only end their turn');
   }

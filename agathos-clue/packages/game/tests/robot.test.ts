@@ -124,12 +124,12 @@ describe('decideRobotIntent', () => {
   });
 
   it('shows a matching card even after a failed accusation', () => {
-    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    const g = createGame([mkRobot('Miss Scarlett', 0), mkRobot('Professor Plum', 1)]);
     g.phase = 'playing';
     g.players[0]!.cards = [{ type: 'weapon', weapon: 'Rope' }];
     g.players[0]!.failedAccusation = true;
     g.pendingReveal = {
-      suggesterIndex: 0,
+      suggesterIndex: 1,
       suspect: 'Professor Plum',
       weapon: 'Rope',
       room: 'Hall',
@@ -144,14 +144,14 @@ describe('decideRobotIntent', () => {
   });
 
   it('rejects malformed cards later in a robot hand while checking a reveal', () => {
-    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    const g = createGame([mkRobot('Miss Scarlett', 0), mkRobot('Professor Plum', 1)]);
     g.phase = 'playing';
     g.players[0]!.cards = [
       { type: 'weapon', weapon: 'Rope' },
       { type: 'room', room: 'Unknown Room' } as never,
     ];
     g.pendingReveal = {
-      suggesterIndex: 0,
+      suggesterIndex: 1,
       suspect: 'Professor Plum',
       weapon: 'Rope',
       room: 'Hall',
@@ -162,11 +162,11 @@ describe('decideRobotIntent', () => {
   });
 
   it('declines a pending reveal when it has no matching card', () => {
-    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    const g = createGame([mkRobot('Miss Scarlett', 0), mkRobot('Professor Plum', 1)]);
     g.phase = 'playing';
     g.players[0]!.cards = [{ type: 'weapon', weapon: 'Dagger' }];
     g.pendingReveal = {
-      suggesterIndex: 0,
+      suggesterIndex: 1,
       suspect: 'Professor Plum',
       weapon: 'Rope',
       room: 'Hall',

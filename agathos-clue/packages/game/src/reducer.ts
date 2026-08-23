@@ -1,6 +1,8 @@
 import { spaceAt } from './board';
 import { reachable } from './pathfind';
-import { cardMatchesSuggestion, evaluateAccusation, requireAccusationSolution } from './rules';
+import {
+  cardMatchesSuggestion, clonePendingReveal, evaluateAccusation, requireAccusationSolution,
+} from './rules';
 import type { Card, Game, Intent, Player, Room, Suspect, Weapon } from './types';
 import { assertCard, isRoom, isSuspect, isWeapon } from './types';
 
@@ -50,7 +52,10 @@ function playerAt(game: Game, playerIndex: number): Player {
 function requireGameplayTurn(game: Game, playerIndex: number): void {
   if (game.phase !== 'playing') throw new Error('game is not in the playing phase');
   if (game.turnIndex !== playerIndex) throw new Error(`it is not player ${playerIndex}'s turn`);
-  if (game.pendingReveal) throw new Error('a card reveal is pending');
+  if (game.pendingReveal !== null) {
+    clonePendingReveal(game.pendingReveal, game.players.length);
+    throw new Error('a card reveal is pending');
+  }
 }
 
 function requireMovementAvailable(player: Player, intent: Intent): void {
@@ -64,12 +69,16 @@ function requireMovementAvailable(player: Player, intent: Intent): void {
   }
 }
 
-function requireRevealTurn(game: Game, playerIndex: number): void {
+function requireRevealTurn(game: Game, playerIndex: number): NonNullable<Game['pendingReveal']> {
   if (game.phase !== 'playing') throw new Error('game is not in the playing phase');
-  if (!game.pendingReveal) throw new Error('there is no pending reveal');
-  if (game.pendingReveal.revealerIndex !== playerIndex) {
+  const pending = game.pendingReveal === null
+    ? null
+    : clonePendingReveal(game.pendingReveal, game.players.length);
+  if (pending === null) throw new Error('there is no pending reveal');
+  if (pending.revealerIndex !== playerIndex) {
     throw new Error('player is not the current revealer');
   }
+  return pending;
 }
 
 function roomSpace(game: Game, room: Room) {
@@ -158,8 +167,9 @@ export function applyIntent(
 
   const player = playerAt(game, playerIndex);
 
+  let pendingReveal: NonNullable<Game['pendingReveal']> | null = null;
   if (intent.kind === 'showCard' || intent.kind === 'declineReveal') {
-    requireRevealTurn(game, playerIndex);
+    pendingReveal = requireRevealTurn(game, playerIndex);
   } else {
     requireGameplayTurn(game, playerIndex);
     requireMovementAvailable(player, intent);
@@ -250,8 +260,8 @@ export function applyIntent(
     }
 
     case 'showCard': {
-      const pending = game.pendingReveal;
-      if (!pending) throw new Error('there is no pending reveal');
+      const pending = pendingReveal;
+      if (pending === null) throw new Error('there is no pending reveal');
       const hand = player.cards.map(card => canonicalCard(card, 'owned card'));
       if (!hand.some(card => sameCard(card, intent.card))) {
         throw new Error('revealer does not own that card');
@@ -265,12 +275,10 @@ export function applyIntent(
     }
 
     case 'declineReveal': {
-      const pending = game.pendingReveal;
-      if (!pending) throw new Error('there is no pending reveal');
-      if (player.cards.some(card => {
-        assertCard(card, 'owned card');
-        return cardMatchesSuggestion(card, pending);
-      })) {
+      const pending = pendingReveal;
+      if (pending === null) throw new Error('there is no pending reveal');
+      const hand = player.cards.map(card => canonicalCard(card, 'owned card'));
+      if (hand.some(card => cardMatchesSuggestion(card, pending))) {
         throw new Error('revealer must show a matching card instead of declining');
       }
 
@@ -279,7 +287,7 @@ export function applyIntent(
       if (next === pending.suggesterIndex) {
         game.pendingReveal = null;
       } else {
-        pending.revealerIndex = next;
+        game.pendingReveal = { ...pending, revealerIndex: next };
         events.push({ type: 'revealRequested', revealerIndex: next });
       }
       return events;

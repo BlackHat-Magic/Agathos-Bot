@@ -1,7 +1,7 @@
 import type { Game, Intent, Suspect, Weapon } from './types';
 import { SUSPECTS, WEAPONS } from './types';
 import { reachable } from './pathfind';
-import { cardMatchesSuggestion } from './rules';
+import { cardMatchesSuggestion, clonePendingReveal } from './rules';
 
 type RNG = () => number;
 
@@ -27,11 +27,13 @@ export function decideRobotIntent(
   rng: RNG = Math.random,
 ): Intent {
   const player = game.players[robotIndex];
-  const pending = game.pendingReveal;
 
   if (game.phase !== 'playing') return { kind: 'wait' };
 
-  if (pending) {
+  const pending = game.pendingReveal === null
+    ? null
+    : clonePendingReveal(game.pendingReveal, game.players.length);
+  if (pending !== null) {
     if (pending.revealerIndex !== robotIndex) return { kind: 'wait' };
 
     const matches = player.cards.filter(card => cardMatchesSuggestion(card, pending));

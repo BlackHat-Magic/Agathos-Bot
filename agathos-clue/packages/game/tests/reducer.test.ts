@@ -3,7 +3,7 @@ import { buildBoard, spaceAt, suspectStart } from '../src/board';
 import { applyIntent } from '../src/reducer';
 import { decideRobotIntent } from '../src/robot';
 import { begin, createGame } from '../src/rules';
-import type { Card, Intent, Player, Suspect } from '../src/types';
+import type { Card, Game, Intent, Player, Suspect } from '../src/types';
 
 function player(suspect: Suspect, index: number, cards: Card[] = [], isRobot = false): Player {
   const board = buildBoard();
@@ -496,6 +496,62 @@ describe('applyIntent', () => {
     })).toThrow('invalid owned card weapon: Unknown Weapon');
     expect(game.pendingReveal).toBe(pendingReveal);
     expect(game.players[1]!.cards).toBe(cards);
+  });
+
+  it('validates the entire revealer hand before allowing a decline', () => {
+    const malformedCard: unknown = { type: 'weapon', weapon: 'Unknown Weapon' };
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1, [
+        { type: 'suspect', suspect: 'Professor Plum' },
+        malformedCard as Card,
+      ]),
+    ]);
+    game.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Professor Plum',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+    };
+    const pendingReveal = game.pendingReveal;
+
+    expect(() => applyIntent(game, 1, { kind: 'declineReveal' })).toThrow(
+      'invalid owned card weapon: Unknown Weapon',
+    );
+    expect(game.pendingReveal).toBe(pendingReveal);
+  });
+
+  it('rejects corrupt pending reveal metadata before gameplay or reveal actions', () => {
+    const base = {
+      suggesterIndex: 0,
+      suspect: 'Professor Plum' as const,
+      weapon: 'Rope' as const,
+      room: 'Hall' as const,
+      revealerIndex: 1,
+    };
+    const cases: Array<[unknown, string]> = [
+      [undefined, 'invalid pending reveal metadata: expected an object'],
+      [false, 'invalid pending reveal metadata: expected an object'],
+      [0, 'invalid pending reveal metadata: expected an object'],
+      ['', 'invalid pending reveal metadata: expected an object'],
+      [{ ...base, secret: 'runtime metadata' }, 'invalid pending reveal metadata key: secret'],
+      [{ ...base, revealerIndex: 0 }, 'invalid pending reveal: suggester and revealer must be distinct'],
+    ];
+
+    for (const [pendingReveal, message] of cases) {
+      for (const intent of [{ kind: 'roll' as const }, { kind: 'declineReveal' as const }]) {
+        const game = playingGame([
+          player('Miss Scarlett', 0),
+          player('Professor Plum', 1),
+        ]);
+        game.pendingReveal = pendingReveal as Game['pendingReveal'];
+
+        expect(() => applyIntent(game, 0, intent)).toThrow(message);
+        expect(game.hasRolledThisTurn).toBe(false);
+        expect(game.pendingReveal).toBe(pendingReveal as Game['pendingReveal']);
+      }
+    }
   });
 
   it('rejects malformed runtime reveal cards with field-specific errors', () => {
