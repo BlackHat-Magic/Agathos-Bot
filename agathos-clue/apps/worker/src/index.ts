@@ -12,6 +12,14 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === '/api/health') return new Response('ok');
+    if (url.pathname === '/ws') {
+      const gameId = url.searchParams.get('gameId');
+      if (gameId === null || gameId === '') {
+        return new Response('gameId is required', { status: 400 });
+      }
+      const id = env.GAME_ROOM.idFromName(gameId);
+      return env.GAME_ROOM.get(id).fetch(req);
+    }
     // Fall back to static assets for everything else
     return env.ASSETS.fetch(req);
   },
