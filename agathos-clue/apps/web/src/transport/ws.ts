@@ -294,7 +294,7 @@ export function connect(gameId: string, token: string, options: TransportOptions
         errorStore.set(null);
         return;
       case 'error':
-        clearRememberedJoin();
+        if (frame.intentKind === 'join') clearRememberedJoin();
         setTransportError(frame.message);
         return;
     }

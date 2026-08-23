@@ -8,6 +8,8 @@ import {
   isWeapon,
 } from '@agathos/game';
 import type { Card, CellId, Event, GameView, Room, Suspect, Weapon } from '@agathos/game';
+import { isClientIntentKind } from './intents';
+import type { ClientIntentKind } from './intents';
 
 const MAX_PLAYERS = 6;
 const MAX_CARDS = 18;
@@ -49,6 +51,7 @@ export interface ReadyFrame {
 export interface ErrorFrame {
   type: 'error';
   message: string;
+  intentKind?: ClientIntentKind;
 }
 
 export type ServerFrame = StateFrame | PrivateRevealFrame | LobbySnapshot | ReadyFrame | ErrorFrame;
@@ -112,12 +115,17 @@ export function validateServerFrame(value: unknown): ServerFrame {
       requireKeys(record, ['type'], 'ready frame');
       return { type: 'ready' };
     case 'error':
-      requireKeys(record, ['type', 'message'], 'error frame');
+      requireKeys(record, ['type', 'message'], 'error frame', ['intentKind']);
       if (typeof record.message !== 'string' || record.message.length === 0 ||
           record.message.length > 1_024) {
         throw new Error('invalid error message');
       }
-      return { type: 'error', message: record.message };
+      if (record.intentKind !== undefined && !isClientIntentKind(record.intentKind)) {
+        throw new Error('invalid error intent kind');
+      }
+      return record.intentKind === undefined
+        ? { type: 'error', message: record.message }
+        : { type: 'error', message: record.message, intentKind: record.intentKind };
     default:
       throw new Error(`unknown server frame type: ${String(record.type)}`);
   }

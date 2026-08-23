@@ -4,6 +4,12 @@ import { isValidUserId, verifyJwt } from './auth/jwt';
 const LIFECYCLE_INTENTS = new Set([
   'join', 'claimSuspect', 'start', 'setOrder', 'leave',
 ]);
+const CLIENT_INTENT_KINDS = new Set([
+  'join', 'claimSuspect', 'start', 'setOrder', 'useSecretPassage', 'roll', 'moveTo',
+  'suggest', 'showCard', 'declineReveal', 'accuse', 'endTurn', 'leave',
+]);
+
+export type ClientIntentKind = Exclude<Intent['kind'], 'wait'>;
 
 export interface IntentEnvelope {
   intent: Intent;
@@ -12,6 +18,12 @@ export interface IntentEnvelope {
 export type PrivateRevealFrame =
   | { type: 'private'; reveal: { fromIndex: number; card: Card } }
   | { type: 'private'; reveal: { fromIndex: number } };
+
+export interface ErrorFrame {
+  type: 'error';
+  message: string;
+  intentKind?: ClientIntentKind;
+}
 
 export interface AuthenticatedJwtProtocol {
   protocol: string;
@@ -35,6 +47,10 @@ export function parseIntentEnvelope(data: string | ArrayBuffer): IntentEnvelope 
     throw new Error('invalid intent envelope');
   }
   return { intent: decoded.intent as Intent };
+}
+
+export function isClientIntentKind(value: unknown): value is ClientIntentKind {
+  return typeof value === 'string' && CLIENT_INTENT_KINDS.has(value);
 }
 
 /** Verify one offered bearer subprotocol without accepting legacy dev tokens. */

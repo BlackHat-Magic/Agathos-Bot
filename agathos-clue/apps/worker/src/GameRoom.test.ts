@@ -23,7 +23,7 @@ type TestMessage =
     isHost: boolean;
     players: Array<{ name: string; suspect: Player['suspect'] | null; isHost: boolean }>;
   }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; intentKind?: string }
   | {
     type: 'state';
     view: {
@@ -701,7 +701,7 @@ describe('GameRoom protocol helpers', () => {
     } }));
 
     await expect(bob.messages.next()).resolves.toEqual({
-      type: 'error', message: 'storage unavailable',
+      type: 'error', message: 'storage unavailable', intentKind: 'showCard',
     });
     expect(alice.messages.received).toHaveLength(1);
     expect(storage.value).toEqual(stored);
@@ -730,6 +730,7 @@ describe('GameRoom protocol helpers', () => {
     await expect(alice.messages.next()).resolves.toEqual({
       type: 'error',
       message: 'storage unavailable',
+      intentKind: 'endTurn',
     });
     expect(bob.messages.received).toHaveLength(1);
     expect(storage.putCount).toBe(1);
@@ -805,7 +806,7 @@ describe('GameRoom protocol helpers', () => {
     });
     alice.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'Miss Scarlett' } }));
     await expect(alice.messages.next()).resolves.toEqual({
-      type: 'error', message: 'suspect is already claimed: Miss Scarlett',
+      type: 'error', message: 'suspect is already claimed: Miss Scarlett', intentKind: 'claimSuspect',
     });
     expect(storage.putCount).toBe(4);
     expect(JSON.stringify(alice.messages.received)).not.toContain('solution');
@@ -918,13 +919,13 @@ describe('GameRoom protocol helpers', () => {
 
     bobReloaded.client.send(JSON.stringify({ intent: { kind: 'start' } }));
     await expect(bobReloaded.messages.next()).resolves.toEqual({
-      type: 'error', message: 'only the host can perform this lobby action',
+      type: 'error', message: 'only the host can perform this lobby action', intentKind: 'start',
     });
     bobReloaded.client.send(JSON.stringify({
       intent: { kind: 'setOrder', order: ['Professor Plum', 'Miss Scarlett'] },
     }));
     await expect(bobReloaded.messages.next()).resolves.toEqual({
-      type: 'error', message: 'only the host can perform this lobby action',
+      type: 'error', message: 'only the host can perform this lobby action', intentKind: 'setOrder',
     });
 
     aliceReloaded.client.send(JSON.stringify({ intent: { kind: 'start' } }));
@@ -947,21 +948,21 @@ describe('GameRoom protocol helpers', () => {
     const beforeStart = JSON.stringify(storage.lobby);
     alice.client.send(JSON.stringify({ intent: { kind: 'start' } }));
     await expect(alice.messages.next()).resolves.toEqual({
-      type: 'error', message: 'every lobby player must claim a suspect before starting',
+      type: 'error', message: 'every lobby player must claim a suspect before starting', intentKind: 'start',
     });
     expect(JSON.stringify(storage.lobby)).toBe(beforeStart);
     bob.client.send(JSON.stringify({ intent: { kind: 'start' } }));
     await expect(bob.messages.next()).resolves.toEqual({
-      type: 'error', message: 'only the host can perform this lobby action',
+      type: 'error', message: 'only the host can perform this lobby action', intentKind: 'start',
     });
     bob.client.send(JSON.stringify({ intent: { kind: 'setOrder', order: ['Miss Scarlett'] } }));
     await expect(bob.messages.next()).resolves.toEqual({
-      type: 'error', message: 'only the host can perform this lobby action',
+      type: 'error', message: 'only the host can perform this lobby action', intentKind: 'setOrder',
     });
     const beforeInvalid = JSON.stringify(storage.lobby);
     alice.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'invalid' } }));
     await expect(alice.messages.next()).resolves.toEqual({
-      type: 'error', message: 'invalid suspect: invalid',
+      type: 'error', message: 'invalid suspect: invalid', intentKind: 'claimSuspect',
     });
     expect(JSON.stringify(storage.lobby)).toBe(beforeInvalid);
     closeConnections(gameRoom);
@@ -1029,7 +1030,7 @@ describe('GameRoom protocol helpers', () => {
     alice.client.send(JSON.stringify({ intent: { kind: 'start' } }));
 
     await expect(alice.messages.next()).resolves.toEqual({
-      type: 'error', message: 'storage unavailable',
+      type: 'error', message: 'storage unavailable', intentKind: 'start',
     });
     expect(bob.messages.received).toHaveLength(5);
     expect(storage.value).toBeUndefined();

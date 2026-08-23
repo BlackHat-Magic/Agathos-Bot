@@ -27,6 +27,16 @@ export type ClientIntent =
   | { kind: 'leave' };
 
 export type Intent = ClientIntent;
+export type ClientIntentKind = ClientIntent['kind'];
+
+const CLIENT_INTENT_KINDS = new Set<ClientIntentKind>([
+  'join', 'claimSuspect', 'start', 'setOrder', 'useSecretPassage', 'roll', 'moveTo',
+  'suggest', 'showCard', 'declineReveal', 'accuse', 'endTurn', 'leave',
+]);
+
+export function isClientIntentKind(value: unknown): value is ClientIntentKind {
+  return typeof value === 'string' && CLIENT_INTENT_KINDS.has(value as ClientIntentKind);
+}
 
 export function createJoinIntent(name: string): Extract<ClientIntent, { kind: 'join' }> {
   const trimmedName = typeof name === 'string' ? name.trim() : '';

@@ -54,8 +54,8 @@ describe('server snapshot validation', () => {
       },
     });
     expect(parseServerMessage('{"type":"ready"}')).toEqual({ ok: true, frame: { type: 'ready' } });
-    expect(parseServerMessage('{"type":"error","message":"not your turn"}')).toEqual({
-      ok: true, frame: { type: 'error', message: 'not your turn' },
+    expect(parseServerMessage('{"type":"error","message":"not your turn","intentKind":"claimSuspect"}')).toEqual({
+      ok: true, frame: { type: 'error', message: 'not your turn', intentKind: 'claimSuspect' },
     });
     expect(parseServerMessage(JSON.stringify({
       type: 'private', reveal: { fromIndex: 1, card: { type: 'weapon', weapon: 'Rope' } },
@@ -115,6 +115,8 @@ describe('server snapshot validation', () => {
     expect(parseServerMessage({ type: 'state' })).toEqual({
       ok: false, error: 'unsupported WebSocket message',
     });
+    expect(parseServerMessage('{"type":"error","message":"bad","intentKind":"wait"}'))
+      .toMatchObject({ ok: false });
   });
 
   it('returns detached validated snapshots', () => {

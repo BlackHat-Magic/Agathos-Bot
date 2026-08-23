@@ -321,11 +321,73 @@ describe('typed WebSocket transport', () => {
     vi.advanceTimersByTime(1_000);
     sockets[1]!.open();
     expect(sockets[1]!.sent).toEqual(['{"intent":{"kind":"join","name":"Alice"}}']);
-    sockets[1]!.message(JSON.stringify({ type: 'error', message: 'join rejected' }));
+    sockets[1]!.message(JSON.stringify({ type: 'error', message: 'join rejected', intentKind: 'join' }));
     sockets[1]!.close();
     vi.advanceTimersByTime(1_000);
     sockets[2]!.open();
     expect(sockets[2]!.sent).toEqual([]);
+    transport.close();
+  });
+
+  it('preserves replay after claim and start errors', () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const transport = connect('game', 'jwt', {
+      origin: 'https://example.test',
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    sockets[0]!.open();
+    transport.send(createJoinIntent('Alice'));
+    sockets[0]!.close();
+    vi.advanceTimersByTime(1_000);
+    sockets[1]!.open();
+    expect(sockets[1]!.sent).toEqual(['{"intent":{"kind":"join","name":"Alice"}}']);
+
+    expect(transport.send({ kind: 'claimSuspect', suspect: 'Miss Scarlett' })).toBe(true);
+    sockets[1]!.message(JSON.stringify({
+      type: 'error', message: 'claim rejected', intentKind: 'claimSuspect',
+    }));
+    expect(transport.send({ kind: 'start' })).toBe(true);
+    sockets[1]!.message(JSON.stringify({
+      type: 'error', message: 'start rejected', intentKind: 'start',
+    }));
+    sockets[1]!.close();
+    vi.advanceTimersByTime(1_000);
+    sockets[2]!.open();
+
+    expect(sockets[2]!.sent).toEqual(['{"intent":{"kind":"join","name":"Alice"}}']);
+    transport.close();
+  });
+
+  it('preserves replay after malformed and uncorrelated errors', () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const transport = connect('game', 'jwt', {
+      origin: 'https://example.test',
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    sockets[0]!.open();
+    transport.send(createJoinIntent('Alice'));
+    sockets[0]!.close();
+    vi.advanceTimersByTime(1_000);
+    sockets[1]!.open();
+    sockets[1]!.message('not json');
+    sockets[1]!.message(JSON.stringify({ type: 'error', message: 'internal failure' }));
+    sockets[1]!.close();
+    vi.advanceTimersByTime(1_000);
+    sockets[2]!.open();
+
+    expect(sockets[2]!.sent).toEqual(['{"intent":{"kind":"join","name":"Alice"}}']);
     transport.close();
   });
 

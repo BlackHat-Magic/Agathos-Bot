@@ -34,16 +34,18 @@ import type { LobbyState } from './lobbies';
 import {
   assertIntentAuthority,
   authenticateJwtProtocol,
+  isClientIntentKind,
   negotiateJwtProtocol,
   parseIntentEnvelope,
   resolveViewerIndex,
 } from './game-room-protocol';
 import { hasRobotActionableState, runRobotScheduler } from './robots/scheduler';
 import type { RobotPrivateReveal } from './robots/scheduler';
-import type { PrivateRevealFrame } from './game-room-protocol';
+import type { ClientIntentKind, PrivateRevealFrame } from './game-room-protocol';
 export {
   assertIntentAuthority,
   authenticateJwtProtocol,
+  isClientIntentKind,
   negotiateJwtProtocol,
   parseIntentEnvelope,
   resolveViewerIndex,
@@ -263,11 +265,14 @@ export class GameRoom extends DurableObject<Env> {
 
   private enqueueMessage(connection: Connection, data: string | ArrayBuffer | null): void {
     void this.enqueueRoomTask(async () => {
+      let intentKind: ClientIntentKind | undefined;
       try {
         if (data === null) throw new Error('unsupported WebSocket message');
-        await this.handleMessage(connection, data);
+        const { intent } = parseIntentEnvelope(data);
+        intentKind = isClientIntentKind(intent.kind) ? intent.kind : undefined;
+        await this.handleMessage(connection, intent);
       } catch (error) {
-        this.sendError(connection, error);
+        this.sendError(connection, error, intentKind);
       }
     });
   }
@@ -280,8 +285,7 @@ export class GameRoom extends DurableObject<Env> {
     return queued;
   }
 
-  private async handleMessage(connection: Connection, data: string | ArrayBuffer): Promise<void> {
-    const { intent } = parseIntentEnvelope(data);
+  private async handleMessage(connection: Connection, intent: Intent): Promise<void> {
     const game = await this.loadGame();
     if (game.phase === 'lobby' && isLobbyIntent(intent)) {
       await this.handleLobbyIntent(connection, intent);
@@ -559,8 +563,16 @@ export class GameRoom extends DurableObject<Env> {
     });
   }
 
-  private sendError(connection: Connection, error: unknown): void {
-    this.sendJson(connection, { type: 'error', message: errorMessage(error) });
+  private sendError(
+    connection: Connection,
+    error: unknown,
+    intentKind?: ClientIntentKind,
+  ): void {
+    this.sendJson(connection, {
+      type: 'error',
+      message: errorMessage(error),
+      ...(intentKind === undefined ? {} : { intentKind }),
+    });
   }
 
   private sendJson(connection: Connection, payload: unknown): void {
