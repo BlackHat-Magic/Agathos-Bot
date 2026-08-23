@@ -35,12 +35,18 @@ describe('lobby helpers', () => {
     expect(() => claimLobbySuspect(lobby, 'nobody', 'not a suspect')).toThrow('invalid suspect');
   });
 
-  it('rejects duplicate users and a seventh participant', () => {
+  it('replays a duplicate join as a detached no-op and rejects a seventh participant', () => {
+    const original = lobbyWithPlayers();
+    const replayed = joinLobby(original, 'alice', '   ');
+    expect(replayed).toEqual(original);
+    expect(replayed).not.toBe(original);
+    expect(replayed.players).not.toBe(original.players);
+    expect(replayed.players[0]).not.toBe(original.players[0]);
     let lobby = createLobby();
     for (let index = 0; index < 6; index += 1) {
       lobby = joinLobby(lobby, `user-${index}`, `User ${index}`);
     }
-    expect(() => joinLobby(lobby, 'user-0', 'Another name')).toThrow('already');
+    expect(joinLobby(lobby, 'user-0', 'Another name')).toEqual(lobby);
     expect(() => joinLobby(lobby, 'user-6', 'User 6')).toThrow('full');
     expect(lobby.players).toHaveLength(6);
   });
@@ -62,7 +68,8 @@ describe('lobby helpers', () => {
     const ordered = setLobbyOrder(lobby, 'alice', ['Professor Plum', 'Miss Scarlett']);
     expect(ordered.players.map(player => player.userId)).toEqual(['bob', 'alice', 'carol']);
     expect(ordered.hostUserId).toBe('alice');
-    expect(lobbyView(ordered, 'game-1').players.map(player => player.isHost)).toEqual([false, true, false]);
+    expect(lobbyView(ordered, 'game-1', 'alice')).toMatchObject({ isHost: true });
+    expect(lobbyView(ordered, 'game-1', 'bob').players.map(player => player.isHost)).toEqual([false, true, false]);
     expect(lobby.players.map(player => player.userId)).toEqual(['alice', 'bob', 'carol']);
   });
 
@@ -83,10 +90,10 @@ describe('lobby helpers', () => {
     const remaining = leaveLobby(lobby, 'alice');
     expect(remaining.players.map(player => player.userId)).toEqual(['bob']);
     expect(remaining.hostUserId).toBe('bob');
-    expect(lobbyView(remaining, 'game-1')).toEqual({
+    expect(lobbyView(remaining, 'game-1', 'bob')).toEqual({
       type: 'lobby',
       gameId: 'game-1',
-      hostUserId: 'bob',
+      isHost: true,
       players: [{ name: 'Bob', suspect: 'Professor Plum', isHost: true }],
     });
     expect(leaveLobby(remaining, 'bob')).toEqual({ hostUserId: null, players: [] });

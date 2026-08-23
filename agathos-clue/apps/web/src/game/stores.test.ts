@@ -71,7 +71,7 @@ describe('global game stores', () => {
     socket.message(JSON.stringify({ type: 'error', message: 'game is full' }));
     expect(get(error)).toBe('game is full');
     socket.message(JSON.stringify({
-      type: 'lobby', gameId: 'game', hostUserId: null, players: [],
+      type: 'lobby', gameId: 'game', isHost: false, players: [],
     }));
     expect(get(error)).toBeNull();
   });

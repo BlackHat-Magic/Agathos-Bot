@@ -30,7 +30,7 @@ export interface LobbyViewPlayer {
 export interface LobbyView {
   type: 'lobby';
   gameId: string;
-  hostUserId: string | null;
+  isHost: boolean;
   players: LobbyViewPlayer[];
 }
 
@@ -78,9 +78,7 @@ export function hydrateLobby(value: unknown): LobbyState {
 
 export function joinLobby(lobby: LobbyState, userId: string, rawName: unknown): LobbyState {
   validateLobby(lobby);
-  if (lobby.players.some(player => player.userId === userId)) {
-    throw new Error('user is already in the lobby');
-  }
+  if (lobby.players.some(player => player.userId === userId)) return serializeLobby(lobby);
   if (lobby.players.length >= MAX_LOBBY_PLAYERS) {
     throw new Error('lobby is full');
   }
@@ -176,12 +174,12 @@ export function createStartPlayers(lobby: LobbyState): Player[] {
   return [...humans, ...robots];
 }
 
-export function lobbyView(lobby: LobbyState, gameId: string): LobbyView {
+export function lobbyView(lobby: LobbyState, gameId: string, viewerUserId: string): LobbyView {
   validateLobby(lobby);
   return {
     type: 'lobby',
     gameId,
-    hostUserId: lobby.hostUserId,
+    isHost: lobby.hostUserId === viewerUserId,
     players: lobby.players.map(player => ({
       name: player.name,
       suspect: player.suspect,

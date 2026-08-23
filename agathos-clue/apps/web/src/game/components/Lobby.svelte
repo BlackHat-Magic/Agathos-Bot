@@ -24,7 +24,7 @@
 
   $: availableSuspects = SUSPECTS.filter(suspect =>
     !($lobby?.players.some(player => player.suspect === suspect) ?? false));
-  $: isHost = $lobby?.hostUserId !== null && $lobby?.hostUserId === $session?.userId;
+  $: isHost = $lobby?.isHost ?? false;
   $: canManageLobby = canManageLobbyState(hasJoined);
   $: canStartLobby = canStartLobbyState(hasJoined, isHost);
   $: allPlayersClaimed = ($lobby?.players.length ?? 0) > 0 &&

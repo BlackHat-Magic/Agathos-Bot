@@ -108,7 +108,7 @@ export class GameRoom extends DurableObject<Env> {
         viewerIndex: game.phase === 'lobby' ? null : resolveViewerIndex(game, negotiated.userId),
       };
       const initialPayload = game.phase === 'lobby'
-        ? lobbyView(this.lobby!, this.gameId)
+        ? lobbyView(this.lobby!, this.gameId, connection.userId)
           : connection.viewerIndex === null
           ? { type: 'ready' as const }
           : {
@@ -459,11 +459,10 @@ export class GameRoom extends DurableObject<Env> {
 
   private broadcastLobby(): void {
     if (this.lobby === undefined) return;
-    const payload = lobbyView(this.lobby, this.gameId);
     for (const connection of [...this.connections.values()]) {
       try {
         connection.viewerIndex = null;
-        this.sendJson(connection, payload);
+        this.sendJson(connection, lobbyView(this.lobby, this.gameId, connection.userId));
       } catch (error) {
         this.sendError(connection, error);
       }

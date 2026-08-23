@@ -44,12 +44,12 @@ describe('server snapshot validation', () => {
       frame: { type: 'state', view: expect.objectContaining({ myHand: [{ type: 'room', room: 'Study' }] }), events: [] },
     });
     expect(parseServerMessage(JSON.stringify({
-      type: 'lobby', gameId: 'clue-game:test', hostUserId: 'alice',
+      type: 'lobby', gameId: 'clue-game:test', isHost: true,
       players: [{ name: 'Alice', suspect: null, isHost: true }],
     }))).toEqual({
       ok: true,
       frame: {
-        type: 'lobby', gameId: 'clue-game:test', hostUserId: 'alice',
+        type: 'lobby', gameId: 'clue-game:test', isHost: true,
         players: [{ name: 'Alice', suspect: null, isHost: true }],
       },
     });
@@ -114,5 +114,12 @@ describe('server snapshot validation', () => {
     const validated = validateGameView(raw);
     (raw.myHand as Array<Record<string, unknown>>)[0]!.room = 'Kitchen';
     expect(validated.myHand[0]).toEqual({ type: 'room', room: 'Study' });
+  });
+
+  it('rejects lobby frames carrying an authenticated host identity', () => {
+    expect(parseServerMessage(JSON.stringify({
+      type: 'lobby', gameId: 'clue-game:test', hostUserId: 'alice',
+      players: [{ name: 'Alice', suspect: null, isHost: true }],
+    }))).toMatchObject({ ok: false });
   });
 });

@@ -20,7 +20,7 @@ type TestMessage =
   | {
     type: 'lobby';
     gameId: string;
-    hostUserId: string | null;
+    isHost: boolean;
     players: Array<{ name: string; suspect: Player['suspect'] | null; isHost: boolean }>;
   }
   | { type: 'error'; message: string }
@@ -460,7 +460,7 @@ describe('GameRoom protocol helpers', () => {
         {
           type: 'lobby',
           gameId: 'game-1',
-          hostUserId: null,
+          isHost: false,
           players: [],
         },
       { type: 'error', message: 'malformed JSON message' },
@@ -754,7 +754,7 @@ describe('GameRoom protocol helpers', () => {
     expect(alice.initial).toEqual({
       type: 'lobby',
       gameId: 'game-1',
-      hostUserId: null,
+      isHost: false,
       players: [],
     });
 
@@ -764,31 +764,47 @@ describe('GameRoom protocol helpers', () => {
     await expect(alice.messages.next()).resolves.toEqual({
       type: 'lobby',
       gameId: 'game-1',
-      hostUserId: 'alice',
+      isHost: true,
       players: [{ name: 'Alice', suspect: null, isHost: true }],
     });
 
     const bob = await connectJoinedPlayer(gameRoom, 'bob');
-    expect(bob.initial).toMatchObject({ type: 'lobby', hostUserId: 'alice' });
+    expect(bob.initial).toMatchObject({ type: 'lobby', isHost: false });
+    expect(JSON.stringify(bob.initial)).not.toContain('alice');
     bob.client.send(JSON.stringify({ intent: { kind: 'join', userId: 'alice', name: 'Bob' } }));
     await expect(alice.messages.next()).resolves.toMatchObject({
       type: 'lobby',
-      hostUserId: 'alice',
+      isHost: true,
       players: [
         { name: 'Alice', suspect: null, isHost: true },
         { name: 'Bob', suspect: null, isHost: false },
       ],
     });
-    await expect(bob.messages.next()).resolves.toMatchObject({ type: 'lobby', hostUserId: 'alice' });
+    await expect(bob.messages.next()).resolves.toMatchObject({ type: 'lobby', isHost: false });
 
     bob.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'Miss Scarlett' } }));
     await expect(bob.messages.next()).resolves.toMatchObject({ type: 'lobby' });
     await expect(alice.messages.next()).resolves.toMatchObject({ type: 'lobby' });
+    alice.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Alice replay' } }));
+    await expect(alice.messages.next()).resolves.toEqual({
+      type: 'lobby',
+      gameId: 'game-1',
+      isHost: true,
+      players: [
+        { name: 'Alice', suspect: null, isHost: true },
+        { name: 'Bob', suspect: 'Miss Scarlett', isHost: false },
+      ],
+    });
+    await expect(bob.messages.next()).resolves.toMatchObject({
+      type: 'lobby',
+      isHost: false,
+      players: [{ name: 'Alice', suspect: null }, { name: 'Bob', suspect: 'Miss Scarlett' }],
+    });
     alice.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'Miss Scarlett' } }));
     await expect(alice.messages.next()).resolves.toEqual({
       type: 'error', message: 'suspect is already claimed: Miss Scarlett',
     });
-    expect(storage.putCount).toBe(3);
+    expect(storage.putCount).toBe(4);
     expect(JSON.stringify(alice.messages.received)).not.toContain('solution');
     expect(JSON.stringify(alice.messages.received)).not.toContain('cards');
 
@@ -810,24 +826,33 @@ describe('GameRoom protocol helpers', () => {
     const bobReloaded = await connectJoinedPlayer(reloaded.gameRoom, 'bob');
     expect(bobReloaded.initial).toMatchObject({
       type: 'lobby',
-      hostUserId: 'alice',
+      isHost: false,
       players: [
         { name: 'Alice', suspect: null, isHost: true },
         { name: 'Bob', suspect: null, isHost: false },
       ],
     });
     const aliceReloaded = await connectJoinedPlayer(reloaded.gameRoom, 'alice');
+    expect(aliceReloaded.initial).toEqual({
+      type: 'lobby',
+      gameId: 'game-1',
+      isHost: true,
+      players: [
+        { name: 'Alice', suspect: null, isHost: true },
+        { name: 'Bob', suspect: null, isHost: false },
+      ],
+    });
     aliceReloaded.client.send(JSON.stringify({ intent: { kind: 'leave' } }));
     await expect(aliceReloaded.messages.next()).resolves.toEqual({
       type: 'lobby',
       gameId: 'game-1',
-      hostUserId: 'bob',
+      isHost: false,
       players: [{ name: 'Bob', suspect: null, isHost: true }],
     });
     await expect(bobReloaded.messages.next()).resolves.toEqual({
       type: 'lobby',
       gameId: 'game-1',
-      hostUserId: 'bob',
+      isHost: true,
       players: [{ name: 'Bob', suspect: null, isHost: true }],
     });
     closeConnections(reloaded.gameRoom);
@@ -857,7 +882,7 @@ describe('GameRoom protocol helpers', () => {
     await expect(alice.messages.next()).resolves.toEqual({
       type: 'lobby',
       gameId: 'game-1',
-      hostUserId: 'alice',
+      isHost: true,
       players: [
         { name: 'Bob', suspect: 'Miss Scarlett', isHost: false },
         { name: 'Alice', suspect: 'Professor Plum', isHost: true },
@@ -866,7 +891,7 @@ describe('GameRoom protocol helpers', () => {
     await expect(bob.messages.next()).resolves.toEqual({
       type: 'lobby',
       gameId: 'game-1',
-      hostUserId: 'alice',
+      isHost: false,
       players: [
         { name: 'Bob', suspect: 'Miss Scarlett', isHost: false },
         { name: 'Alice', suspect: 'Professor Plum', isHost: true },
@@ -881,7 +906,7 @@ describe('GameRoom protocol helpers', () => {
     expect(bobReloaded.initial).toEqual({
       type: 'lobby',
       gameId: 'game-1',
-      hostUserId: 'alice',
+      isHost: false,
       players: [
         { name: 'Bob', suspect: 'Miss Scarlett', isHost: false },
         { name: 'Alice', suspect: 'Professor Plum', isHost: true },
@@ -1040,7 +1065,7 @@ describe('GameRoom protocol helpers', () => {
     expect(connection.initial).toEqual({
       type: 'lobby',
       gameId: 'game-1',
-      hostUserId: null,
+      isHost: false,
       players: [],
     });
     expect(storage.lobby).toEqual({ hostUserId: null, players: [] });

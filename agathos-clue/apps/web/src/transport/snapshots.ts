@@ -34,7 +34,7 @@ export interface PrivateRevealFrame {
 export interface LobbySnapshot {
   type: 'lobby';
   gameId: string;
-  hostUserId: string | null;
+  isHost: boolean;
   players: Array<{
     name: string;
     suspect: Suspect | null;
@@ -225,12 +225,12 @@ function validatePrivateReveal(value: unknown): PrivateReveal {
 }
 
 function validateLobbySnapshot(record: Record<string, unknown>): LobbySnapshot {
-  requireKeys(record, ['type', 'gameId', 'hostUserId', 'players']);
+  requireKeys(record, ['type', 'gameId', 'isHost', 'players']);
   if (typeof record.gameId !== 'string' || record.gameId.length === 0 || record.gameId.length > 80) {
     throw new Error('invalid lobby game id');
   }
-  if (record.hostUserId !== null && !isSafeUserId(record.hostUserId)) {
-    throw new Error('invalid lobby host user id');
+  if (typeof record.isHost !== 'boolean') {
+    throw new Error('invalid lobby host flag');
   }
   if (!Array.isArray(record.players) || record.players.length > MAX_PLAYERS) {
     throw new Error('invalid lobby players');
@@ -238,7 +238,7 @@ function validateLobbySnapshot(record: Record<string, unknown>): LobbySnapshot {
   return {
     type: 'lobby',
     gameId: record.gameId,
-    hostUserId: record.hostUserId,
+    isHost: record.isHost,
     players: record.players.map((value, index) => {
       const player = requireObject(value, `lobby player at index ${index}`);
       requireKeys(player, ['name', 'suspect', 'isHost']);
