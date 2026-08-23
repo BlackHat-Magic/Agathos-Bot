@@ -264,7 +264,7 @@ function isSafeAccessToken(value: string): boolean {
 }
 
 function isBearerTokenType(value: unknown): value is string {
-  return typeof value === 'string' && value.toLowerCase() === 'bearer';
+  return value === 'Bearer';
 }
 
 function isBoundedString(value: unknown, maxLength: number): value is string {

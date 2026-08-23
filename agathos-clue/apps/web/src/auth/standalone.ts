@@ -11,13 +11,17 @@ export interface StandaloneSession {
 
 export async function loadStandaloneSession(
   fetcher: typeof fetch = fetch,
+  redirect: (path: string) => void = path => window.location.assign(path),
 ): Promise<StandaloneSession | null> {
   const response = await fetcher('/auth/session', {
     method: 'GET',
     credentials: 'same-origin',
     headers: { Accept: 'application/json' },
   });
-  if (response.status === 401) return null;
+  if (response.status === 401) {
+    beginStandaloneAuth(redirect);
+    return null;
+  }
   if (!response.ok) throw new Error('session request failed');
 
   let value: unknown;

@@ -116,9 +116,9 @@ describe('standalone Discord OAuth', () => {
     expect(await malformedUser.text()).toBe('authentication failed');
   });
 
-  it('rejects token responses without a Bearer token type', async () => {
+  it.each(['bearer', 'BEARER', 'bEaReR', 'Basic'])('rejects token responses with token type %s', async tokenType => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      jsonResponse({ access_token: ACCESS_TOKEN, token_type: 'Basic', expires_in: 604_800 }),
+      jsonResponse({ access_token: ACCESS_TOKEN, token_type: tokenType, expires_in: 604_800 }),
     );
 
     const response = await handleOAuth(callbackRequest('state'), env());
@@ -130,7 +130,7 @@ describe('standalone Discord OAuth', () => {
 
   it('rejects unsafe access tokens before calling Discord userinfo', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      jsonResponse({ access_token: `${ACCESS_TOKEN}\r\nInjected: value`, token_type: 'bearer', expires_in: 604_800 }),
+      jsonResponse({ access_token: `${ACCESS_TOKEN}\r\nInjected: value`, token_type: 'Bearer', expires_in: 604_800 }),
     );
 
     const response = await handleOAuth(callbackRequest('state'), env());

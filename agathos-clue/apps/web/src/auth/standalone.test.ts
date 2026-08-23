@@ -3,21 +3,25 @@ import { beginStandaloneAuth, loadStandaloneSession } from './standalone';
 
 describe('standalone auth helper', () => {
   it('loads a same-origin session with credentials', async () => {
+    const redirect = vi.fn();
     const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       expect(init).toMatchObject({ method: 'GET', credentials: 'same-origin' });
       expect(init?.headers).toEqual({ Accept: 'application/json' });
       return Response.json({ authenticated: true, userId: '123', token: 'jwt' });
     });
 
-    await expect(loadStandaloneSession(fetcher)).resolves.toEqual({
+    await expect(loadStandaloneSession(fetcher, redirect)).resolves.toEqual({
       authenticated: true,
       userId: '123',
       token: 'jwt',
     });
+    expect(redirect).not.toHaveBeenCalled();
   });
 
-  it('returns null when the worker reports no session', async () => {
-    await expect(loadStandaloneSession(async () => new Response(null, { status: 401 }))).resolves.toBeNull();
+  it('redirects to standalone auth when the worker reports no session', async () => {
+    const redirect = vi.fn();
+    await expect(loadStandaloneSession(async () => new Response(null, { status: 401 }), redirect)).resolves.toBeNull();
+    expect(redirect).toHaveBeenCalledWith('/auth/begin');
   });
 
   it('rejects malformed session payloads and starts login without storing a token', async () => {
