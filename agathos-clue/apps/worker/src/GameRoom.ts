@@ -135,12 +135,27 @@ export class GameRoom extends DurableObject<Env> {
     if (this.game !== undefined && this.lobby !== undefined) return this.game;
     this.gameLoad ??= this.ctx.blockConcurrencyWhile(async () => {
       const storedGame = await this.ctx.storage.get<unknown>(STORAGE_KEY);
-      const storedLobby = await this.ctx.storage.get<unknown>(LOBBY_STORAGE_KEY);
       this.game = storedGame === undefined ? createInitialGame() : hydrateGame(storedGame);
-      this.lobby = storedLobby === undefined ? createLobby() : hydrateLobby(storedLobby);
+      const storedLobby = await this.ctx.storage.get<unknown>(LOBBY_STORAGE_KEY);
+      this.lobby = storedLobby === undefined ? createLobby() : await this.loadLobby(storedLobby);
       return this.game;
     });
     return this.gameLoad;
+  }
+
+  private async loadLobby(storedLobby: unknown): Promise<LobbyState> {
+    try {
+      return hydrateLobby(storedLobby);
+    } catch (error) {
+      const lobby = createLobby();
+      console.warn(`invalid persisted lobby; resetting to empty lobby: ${errorMessage(error)}`);
+      try {
+        await this.ctx.storage.put(LOBBY_STORAGE_KEY, serializeLobby(lobby));
+      } catch (repairError) {
+        console.error(`failed to repair persisted lobby: ${errorMessage(repairError)}`);
+      }
+      return lobby;
+    }
   }
 
   private enqueueMessage(connection: Connection, data: string | ArrayBuffer | null): void {
@@ -239,15 +254,15 @@ export class GameRoom extends DurableObject<Env> {
     const previousPersistedGame = serializeGame(previousGame);
     const previousPersistedLobby = serializeLobby(previousLobby);
     try {
-      await this.ctx.storage.put(STORAGE_KEY, serializeGame(nextGame));
-      await this.ctx.storage.put(LOBBY_STORAGE_KEY, serializeLobby(nextLobby));
+      await this.ctx.storage.transaction(async transaction => {
+        await transaction.put({
+          [STORAGE_KEY]: serializeGame(nextGame),
+          [LOBBY_STORAGE_KEY]: serializeLobby(nextLobby),
+        });
+      });
     } catch (error) {
-      try {
-        await this.ctx.storage.put(STORAGE_KEY, previousPersistedGame);
-        await this.ctx.storage.put(LOBBY_STORAGE_KEY, previousPersistedLobby);
-      } catch {
-        // Keep the in-memory state unchanged; the next DO invocation will fail closed if needed.
-      }
+      this.game = hydrateGame(previousPersistedGame);
+      this.lobby = hydrateLobby(previousPersistedLobby);
       throw error;
     }
   }

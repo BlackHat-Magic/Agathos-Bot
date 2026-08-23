@@ -127,11 +127,20 @@ interface TestStorage {
   value: unknown;
   lobby: unknown;
   failPuts: boolean;
+  failTransactions: boolean;
   putCount: number;
+  transactionCount: number;
 }
 
 function roomWithStorage(stored?: unknown, storedLobby?: unknown): { gameRoom: GameRoom; storage: TestStorage } {
-  const storage: TestStorage = { value: stored, lobby: storedLobby, failPuts: false, putCount: 0 };
+  const storage: TestStorage = {
+    value: stored,
+    lobby: storedLobby,
+    failPuts: false,
+    failTransactions: false,
+    putCount: 0,
+    transactionCount: 0,
+  };
   const ctx = {
     storage: {
       get: async <T>(key: string) =>
@@ -141,6 +150,23 @@ function roomWithStorage(stored?: unknown, storedLobby?: unknown): { gameRoom: G
         if (storage.failPuts) throw new Error('storage unavailable');
         if (key === 'lobby') storage.lobby = value;
         else storage.value = value;
+      },
+      transaction: async <T>(callback: (transaction: {
+        put: (entries: Record<string, unknown>) => Promise<void>;
+      }) => Promise<T>) => {
+        storage.transactionCount += 1;
+        const pending = new Map<string, unknown>();
+        const result = await callback({
+          put: async entries => {
+            for (const [key, value] of Object.entries(entries)) pending.set(key, value);
+          },
+        });
+        if (storage.failTransactions) throw new Error('storage unavailable');
+        for (const [key, value] of pending) {
+          if (key === 'lobby') storage.lobby = value;
+          else storage.value = value;
+        }
+        return result;
       },
     },
     blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
@@ -647,10 +673,73 @@ describe('GameRoom protocol helpers', () => {
     closeConnections(gameRoom);
   });
 
-  it('fails closed on corrupt lobby persistence', async () => {
-    const { gameRoom } = roomWithStorage(undefined, { players: [{ bad: true }] });
-    const response = await gameRoom.fetch(upgradeRequest('bearer.dev-token-user'));
-    expect(response.status).toBe(500);
-    expect(await response.text()).toContain('invalid persisted lobby');
+  it('atomically rejects a failed start without partial persistence or a success broadcast', async () => {
+    const { gameRoom, storage } = roomWithStorage();
+    const hook = vi.spyOn(GameRoomClass.prototype, 'maybeRunRobot');
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+
+    alice.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Alice' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    bob.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Bob' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    alice.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'Miss Scarlett' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    bob.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'Professor Plum' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+
+    const previousLobby = structuredClone(storage.lobby);
+    storage.failTransactions = true;
+    alice.client.send(JSON.stringify({ intent: { kind: 'start' } }));
+
+    await expect(alice.messages.next()).resolves.toEqual({
+      type: 'error', message: 'storage unavailable',
+    });
+    expect(bob.messages.received).toHaveLength(5);
+    expect(storage.value).toBeUndefined();
+    expect(storage.lobby).toEqual(previousLobby);
+    expect(storage.transactionCount).toBe(1);
+    expect(hook).not.toHaveBeenCalled();
+
+    storage.failTransactions = false;
+    alice.client.send(JSON.stringify({ intent: { kind: 'start' } }));
+    await expect(alice.messages.next()).resolves.toMatchObject({ type: 'state' });
+    await expect(bob.messages.next()).resolves.toMatchObject({ type: 'state' });
+    expect(hook).toHaveBeenCalledTimes(1);
+    closeConnections(gameRoom);
+    hook.mockRestore();
+  });
+
+  it('serves a valid active game and repairs corrupt lobby persistence', async () => {
+    const storedGame = joinedGame();
+    const { gameRoom, storage } = roomWithStorage(storedGame, { players: [{ bad: true }] });
+
+    const connection = await connectJoinedPlayer(gameRoom, 'alice');
+
+    expect(connection.initial).toMatchObject({
+      type: 'state',
+      view: { myIndex: 0, turnIndex: 0 },
+    });
+    expect(storage.value).toEqual(storedGame);
+    expect(storage.lobby).toEqual({ hostUserId: null, players: [] });
+    connection.client.close();
+  });
+
+  it('resets corrupt lobby-only persistence without returning an error', async () => {
+    const { gameRoom, storage } = roomWithStorage(undefined, { players: [{ bad: true }] });
+    const connection = await connectJoinedPlayer(gameRoom, 'user');
+
+    expect(connection.initial).toEqual({
+      type: 'lobby',
+      gameId: 'game-1',
+      hostUserId: null,
+      players: [],
+    });
+    expect(storage.lobby).toEqual({ hostUserId: null, players: [] });
+    connection.client.close();
   });
 });
