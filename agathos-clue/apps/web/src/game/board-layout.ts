@@ -16,12 +16,22 @@ export interface BoardPoint {
 }
 
 export function layoutFor(canvasW: number, canvasH: number): BoardLayout {
+  if (!Number.isFinite(canvasW) || !Number.isFinite(canvasH) || canvasW <= 0 || canvasH <= 0) {
+    return emptyLayout();
+  }
   const width = Math.max(0, Math.floor(canvasW));
   const height = Math.max(0, Math.floor(canvasH));
-  const cellW = Math.floor(width / BOARD_WIDTH);
-  const cellH = Math.floor(height / BOARD_HEIGHT);
-  const cell = Math.min(cellW, cellH);
-  return { cellW: cell, cellH: cell, pxW: cell * BOARD_WIDTH, pxH: cell * BOARD_HEIGHT };
+  const cell = Math.floor(Math.min(width / BOARD_WIDTH, height / BOARD_HEIGHT));
+  const pxW = cell * BOARD_WIDTH;
+  const pxH = cell * BOARD_HEIGHT;
+  if (cell <= 0 || !Number.isFinite(cell) || !Number.isFinite(pxW) || !Number.isFinite(pxH)) {
+    return emptyLayout();
+  }
+  return { cellW: cell, cellH: cell, pxW, pxH };
+}
+
+function emptyLayout(): BoardLayout {
+  return { cellW: 0, cellH: 0, pxW: 0, pxH: 0 };
 }
 
 export function boardOrigin(canvasW: number, canvasH: number, layout: BoardLayout): [number, number] {
@@ -39,7 +49,11 @@ export function cellAtPoint(
   canvasH: number,
   layout: BoardLayout,
 ): BoardPoint | null {
-  if (layout.cellW <= 0 || layout.cellH <= 0 || !Number.isFinite(x) || !Number.isFinite(y)) {
+  if (!Number.isFinite(canvasW) || !Number.isFinite(canvasH) || canvasW <= 0 || canvasH <= 0 ||
+      !Number.isFinite(x) || !Number.isFinite(y) ||
+      !Number.isFinite(layout.cellW) || !Number.isFinite(layout.cellH) ||
+      !Number.isFinite(layout.pxW) || !Number.isFinite(layout.pxH) ||
+      layout.cellW <= 0 || layout.cellH <= 0 || layout.pxW <= 0 || layout.pxH <= 0) {
     return null;
   }
   const [originX, originY] = boardOrigin(canvasW, canvasH, layout);

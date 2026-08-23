@@ -55,6 +55,8 @@ const CORRIDOR_COLOR = '#313244';
 const VOID_COLOR = '#181825';
 const GRID_COLOR = '#585b70';
 const HIGHLIGHT_COLOR = '#89b4fa';
+const TOKEN_HALO_COLOR = '#1e1e2e';
+const CURRENT_PLAYER_COLOR = '#f9e2af';
 const ANIMATION_MS = 180;
 
 type Animation =
@@ -70,6 +72,12 @@ interface CanvasLike {
   getBoundingClientRect(): DOMRect;
 }
 
+interface ActiveAnimation {
+  lifecycle: number;
+  animation: Animation;
+  resolve: () => void;
+}
+
 export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D> {
   private canvas: CanvasLike | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
@@ -77,7 +85,7 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
   private clickCb: ((location: BoardLocation) => void) | null = null;
   private highlight = new Set<BoardLocation>();
   private currentView: GameView | null = null;
-  private animation: Animation | null = null;
+  private animation: ActiveAnimation | null = null;
   private lifecycle = 0;
 
   attach(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
@@ -95,7 +103,7 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
 
   detach(): void {
     this.lifecycle += 1;
-    this.animation = null;
+    this.cancelAnimation();
     this.canvas?.removeEventListener('click', this.onClick);
     this.canvas = null;
     this.ctx = null;
@@ -166,23 +174,35 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
   };
 
   private animate(animation: Animation): Promise<void> {
-    if (!this.canvas || !this.ctx || !this.layout) return Promise.resolve();
-    const lifecycle = this.lifecycle;
-    this.animation = animation;
-    const start = now();
+    if (!this.canvas || !this.ctx || !this.layout || !isUsableLayout(this.layout)) return Promise.resolve();
+    this.cancelAnimation();
 
     return new Promise(resolve => {
-      const tick = (timestamp: number): void => {
-        if (lifecycle !== this.lifecycle || !this.canvas || !this.ctx || !this.layout) {
+      let settled = false;
+      const active: ActiveAnimation = {
+        lifecycle: this.lifecycle,
+        animation,
+        resolve: () => {
+          if (settled) return;
+          settled = true;
           resolve();
+        },
+      };
+      this.animation = active;
+      const start = now();
+      const tick = (timestamp: number): void => {
+        if (this.animation !== active || active.lifecycle !== this.lifecycle ||
+            !this.canvas || !this.ctx || !this.layout) {
+          active.resolve();
           return;
         }
-        this.animation = { ...animation, progress: Math.min(1, (timestamp - start) / ANIMATION_MS) };
+        const progress = Math.min(1, Math.max(0, (timestamp - start) / ANIMATION_MS));
+        active.animation = { ...animation, progress };
         this.draw();
-        if (this.animation.progress >= 1) {
+        if (progress >= 1) {
           this.animation = null;
           this.draw();
-          resolve();
+          active.resolve();
           return;
         }
         requestFrame(tick);
@@ -191,12 +211,20 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     });
   }
 
+  private cancelAnimation(): void {
+    const animation = this.animation;
+    if (!animation) return;
+    this.animation = null;
+    animation.resolve();
+  }
+
   private draw(): void {
     if (!this.canvas || !this.ctx || !this.layout || !this.currentView) return;
     const { canvas, ctx, layout } = this;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = CANVAS_BACKGROUND;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (!isUsableLayout(layout)) return;
 
     const [originX, originY] = boardOrigin(canvas.width, canvas.height, layout);
     ctx.save();
@@ -258,20 +286,37 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     view: GameView,
   ): void {
     const locations = new Map<BoardLocation, number>();
-    for (const player of view.players) {
-      const [x, y] = locationCenter(player.location, layout);
+    for (const [index, player] of view.players.entries()) {
+      if (!isSuspect(player.suspect)) continue;
+      const center = locationCenter(player.location, layout);
+      if (!center) continue;
+      const [x, y] = center;
       const offset = locations.get(player.location) ?? 0;
       locations.set(player.location, offset + 1);
       const angle = offset * Math.PI / 3;
       const radius = Math.min(layout.cellW, layout.cellH) * 0.18;
+      const isCurrent = index === view.myIndex;
+      const tokenRadius = layout.cellW * (isCurrent ? 0.34 : 0.28);
       ctx.fillStyle = SUSPECT_COLORS[player.suspect];
       ctx.beginPath();
-      ctx.arc(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius, layout.cellW * 0.28, 0, Math.PI * 2);
+      ctx.arc(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius, tokenRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = TOKEN_HALO_COLOR;
+      ctx.lineWidth = Math.max(2, tokenRadius * 0.2);
+      ctx.stroke();
       ctx.fill();
+      if (isCurrent) {
+        ctx.beginPath();
+        ctx.arc(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius, tokenRadius + 2, 0, Math.PI * 2);
+        ctx.strokeStyle = CURRENT_PLAYER_COLOR;
+        ctx.lineWidth = Math.max(2, layout.cellW * 0.08);
+        ctx.stroke();
+      }
     }
 
     for (const weapon of view.weaponLocations) {
-      const [x, y] = locationCenter(weapon.location, layout);
+      const center = locationCenter(weapon.location, layout);
+      if (!center) continue;
+      const [x, y] = center;
       ctx.fillStyle = WEAPON_COLORS[weapon.weapon];
       ctx.beginPath();
       ctx.moveTo(x, y - layout.cellH * 0.22);
@@ -286,22 +331,25 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
   private drawAnimation(ctx: CanvasRenderingContext2D, layout: BoardLayout): void {
     const animation = this.animation;
     if (!animation) return;
-    if (animation.kind === 'accusation') {
-      const [x, y] = locationCenter(animation.room, layout);
-      ctx.strokeStyle = SUSPECT_COLORS[animation.suspect];
+    if (animation.animation.kind === 'accusation') {
+      const center = locationCenter(animation.animation.room, layout);
+      if (!center) return;
+      const [x, y] = center;
+      ctx.strokeStyle = SUSPECT_COLORS[animation.animation.suspect];
       ctx.lineWidth = Math.max(2, layout.cellW * 0.1);
-      const radius = layout.cellW * (0.35 + animation.progress * 0.25);
+      const radius = layout.cellW * (0.35 + animation.animation.progress * 0.25);
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.stroke();
       return;
     }
 
-    const from = locationCenter(animation.from, layout);
-    const to = locationCenter(animation.to, layout);
-    const x = from[0] + (to[0] - from[0]) * animation.progress;
-    const y = from[1] + (to[1] - from[1]) * animation.progress;
-    ctx.fillStyle = SUSPECT_COLORS[animation.suspect];
+    const from = locationCenter(animation.animation.from, layout);
+    const to = locationCenter(animation.animation.to, layout);
+    if (!from || !to) return;
+    const x = from[0] + (to[0] - from[0]) * animation.animation.progress;
+    const y = from[1] + (to[1] - from[1]) * animation.animation.progress;
+    ctx.fillStyle = SUSPECT_COLORS[animation.animation.suspect];
     ctx.beginPath();
     ctx.arc(x, y, layout.cellW * 0.3, 0, Math.PI * 2);
     ctx.fill();
@@ -309,9 +357,7 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
 }
 
 function isCanonicalLocation(location: BoardLocation): boolean {
-  if (isRoom(location)) return true;
-  const point = parseCellId(location);
-  return point !== null && canonicalSpaceAt(point[0], point[1])?.room === null;
+  return cellsForLocation(location).length > 0;
 }
 
 function parseCellId(location: string): [number, number] | null {
@@ -319,7 +365,8 @@ function parseCellId(location: string): [number, number] | null {
   if (!match) return null;
   const col = Number(match[1]);
   const row = Number(match[2]);
-  return Number.isSafeInteger(col) && Number.isSafeInteger(row) ? [col, row] : null;
+  if (!Number.isSafeInteger(col) || !Number.isSafeInteger(row) || location !== `${col},${row}`) return null;
+  return [col, row];
 }
 
 function cellsForLocation(location: BoardLocation): Array<[number, number]> {
@@ -333,7 +380,7 @@ function cellsForLocation(location: BoardLocation): Array<[number, number]> {
     return cells;
   }
   const point = parseCellId(location);
-  return point === null || !canonicalSpaceAt(point[0], point[1]) ? [] : [point];
+  return point === null || canonicalSpaceAt(point[0], point[1])?.room !== null ? [] : [point];
 }
 
 function roomCells(room: Room): Array<[number, number]> {
@@ -351,9 +398,15 @@ function averageCellCenter(cells: Array<[number, number]>, layout: BoardLayout):
   return [x / cells.length, y / cells.length];
 }
 
-function locationCenter(location: BoardLocation, layout: BoardLayout): [number, number] {
+function locationCenter(location: BoardLocation, layout: BoardLayout): [number, number] | null {
   const cells = cellsForLocation(location);
-  return cells.length > 0 ? averageCellCenter(cells, layout) : [0, 0];
+  return cells.length > 0 ? averageCellCenter(cells, layout) : null;
+}
+
+function isUsableLayout(layout: BoardLayout): boolean {
+  return Number.isFinite(layout.cellW) && Number.isFinite(layout.cellH) &&
+    Number.isFinite(layout.pxW) && Number.isFinite(layout.pxH) &&
+    layout.cellW > 0 && layout.cellH > 0 && layout.pxW > 0 && layout.pxH > 0;
 }
 
 function now(): number {
