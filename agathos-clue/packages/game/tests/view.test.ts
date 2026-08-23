@@ -186,6 +186,7 @@ describe('toView', () => {
     const cases: Array<[unknown, string]> = [
       [{ ...base, suggesterIndex: 2 }, 'invalid pending reveal suggester index: 2'],
       [{ ...base, revealerIndex: 0.5 }, 'invalid pending reveal revealer index: 0.5'],
+      [{ ...base, revealerIndex: 0 }, 'invalid pending reveal: suggester and revealer must be distinct'],
       [{ ...base, suspect: 'Unknown Suspect' }, 'invalid pending reveal suspect: Unknown Suspect'],
       [{ ...base, weapon: 'Unknown Weapon' }, 'invalid pending reveal weapon: Unknown Weapon'],
       [{ ...base, room: 'Unknown Room' }, 'invalid pending reveal room: Unknown Room'],
@@ -195,6 +196,22 @@ describe('toView', () => {
       game.pendingReveal = pendingReveal as Game['pendingReveal'];
       expect(() => toView(game, 0)).toThrow(message);
     }
+  });
+
+  it('rejects pending reveal metadata whose fields are inherited', () => {
+    const inherited: unknown = Object.create({
+      suggesterIndex: 0,
+      suspect: 'Miss Scarlett',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+    });
+    const game = playingGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
+    game.pendingReveal = inherited as Game['pendingReveal'];
+
+    expect(() => toView(game, 0)).toThrow(
+      'invalid pending reveal metadata: expected a plain object',
+    );
   });
 
   it('rejects invalid winner indexes before projection', () => {

@@ -103,6 +103,13 @@ function sameCard(a: Card, b: Card): boolean {
   return a.type === 'room' && b.type === 'room' && a.room === b.room;
 }
 
+function canonicalCard(value: unknown, label: string): Card {
+  assertCard(value, label);
+  if (value.type === 'suspect') return { type: 'suspect', suspect: value.suspect };
+  if (value.type === 'weapon') return { type: 'weapon', weapon: value.weapon };
+  return { type: 'room', room: value.room };
+}
+
 function nextPlayerIndex(game: Game, index: number): number {
   return (index + 1) % game.players.length;
 }
@@ -245,10 +252,8 @@ export function applyIntent(
     case 'showCard': {
       const pending = game.pendingReveal;
       if (!pending) throw new Error('there is no pending reveal');
-      if (!player.cards.some(card => {
-        assertCard(card, 'owned card');
-        return sameCard(card, intent.card);
-      })) {
+      const hand = player.cards.map(card => canonicalCard(card, 'owned card'));
+      if (!hand.some(card => sameCard(card, intent.card))) {
         throw new Error('revealer does not own that card');
       }
       if (!cardMatchesSuggestion(intent.card, pending)) {

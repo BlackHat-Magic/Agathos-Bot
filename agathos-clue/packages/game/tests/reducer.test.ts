@@ -472,6 +472,32 @@ describe('applyIntent', () => {
     expect(game.pendingReveal).toBeNull();
   });
 
+  it('validates the entire revealer hand before accepting a matching card', () => {
+    const malformedCard: unknown = { type: 'weapon', weapon: 'Unknown Weapon' };
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1, [
+        { type: 'suspect', suspect: 'Professor Plum' },
+        malformedCard as Card,
+      ]),
+    ]);
+    game.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Professor Plum',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+    };
+    const pendingReveal = game.pendingReveal;
+    const cards = game.players[1]!.cards;
+
+    expect(() => applyIntent(game, 1, {
+      kind: 'showCard', card: { type: 'suspect', suspect: 'Professor Plum' },
+    })).toThrow('invalid owned card weapon: Unknown Weapon');
+    expect(game.pendingReveal).toBe(pendingReveal);
+    expect(game.players[1]!.cards).toBe(cards);
+  });
+
   it('rejects malformed runtime reveal cards with field-specific errors', () => {
     const game = playingGame([
       player('Miss Scarlett', 0),

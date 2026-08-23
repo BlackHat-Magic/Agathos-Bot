@@ -37,8 +37,23 @@ function clonePendingReveal(
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('invalid pending reveal metadata: expected an object');
   }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error('invalid pending reveal metadata: expected a plain object');
+  }
   const pending = value as Record<string, unknown>;
   const expectedKeys = ['revealerIndex', 'room', 'suggesterIndex', 'suspect', 'weapon'];
+  const ownKeys = Object.keys(pending);
+  if (ownKeys.length !== expectedKeys.length ||
+      ownKeys.some(key => !expectedKeys.includes(key))) {
+    const unexpectedKey = Reflect.ownKeys(pending).find(
+      key => typeof key !== 'string' || !expectedKeys.includes(key),
+    );
+    if (unexpectedKey !== undefined) {
+      throw new Error(`invalid pending reveal metadata key: ${String(unexpectedKey)}`);
+    }
+    throw new Error('invalid pending reveal metadata: expected exactly five fields');
+  }
   for (const key of Reflect.ownKeys(pending)) {
     if (typeof key !== 'string' || !expectedKeys.includes(key)) {
       throw new Error(`invalid pending reveal metadata key: ${String(key)}`);
@@ -54,6 +69,9 @@ function clonePendingReveal(
   if (typeof revealerIndex !== 'number' || !Number.isInteger(revealerIndex) ||
       revealerIndex < 0 || revealerIndex >= playerCount) {
     throw new Error(`invalid pending reveal revealer index: ${String(revealerIndex)}`);
+  }
+  if (suggesterIndex === revealerIndex) {
+    throw new Error('invalid pending reveal: suggester and revealer must be distinct');
   }
   if (!isSuspect(pending.suspect)) {
     throw new Error(`invalid pending reveal suspect: ${String(pending.suspect)}`);
