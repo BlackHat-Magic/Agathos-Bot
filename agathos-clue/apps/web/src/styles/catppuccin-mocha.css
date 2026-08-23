@@ -1,1 +1,147 @@
-/* Catppuccin Mocha theme tokens — placeholder, populated by the theming task. */
+/* Catppuccin Mocha — dark palette.
+ *
+ * Two concerns live here:
+ *   1. A Tailwind v4 `@theme` block exposing Catppuccin named colours as
+ *      utilities (`text-mocha-text`, `bg-mocha-base`, `border-mocha-mauve` …).
+ *   2. A `[data-theme='mocha']` block that re-targets Skeleton v3's own theme
+ *      variables (`--color-primary-*`, `--color-surface-*`, typography, …)
+ *      so Skeleton components render with Mocha colours.
+ *
+ * NOTE: Skeleton v3 (`5.0.0-next.11`) uses `--color-primary-50..950`,
+ * `--color-surface-50..950` etc. (NOT the `--sk-*` names from the plan,
+ * which were v2-era). The shade values below are Catppuccin Mocha's named
+ * colours spread across Skeleton's 50–950 ramp; not every shade is a unique
+ * Catppuccin colour (the palette only ships ~26 hues) so some adjacent
+ * shades repeat. This is intentional and documented.
+ */
+
+/* --------------------------------------------------------------------------
+ * Tailwind v4 design tokens
+ * -------------------------------------------------------------------------- */
+@theme {
+	--color-mocha-base: #1e1e2e;
+	--color-mocha-mantle: #181825;
+	--color-mocha-crust: #11111b;
+	--color-mocha-text: #cdd6f4;
+	--color-mocha-subtext1: #bac2de;
+	--color-mocha-subtext0: #a6adc8;
+	--color-mocha-overlay2: #9399b2;
+	--color-mocha-overlay1: #7f849c;
+	--color-mocha-overlay0: #6c7086;
+	--color-mocha-surface2: #585b70;
+	--color-mocha-surface1: #45475a;
+	--color-mocha-surface0: #313244;
+	--color-mocha-blue: #89b4fa;
+	--color-mocha-lavender: #b4befe;
+	--color-mocha-sapphire: #74c7ec;
+	--color-mocha-sky: #89dceb;
+	--color-mocha-teal: #94e2d5;
+	--color-mocha-green: #a6e3a1;
+	--color-mocha-yellow: #f9e2af;
+	--color-mocha-peach: #fab387;
+	--color-mocha-maroon: #eba0ac;
+	--color-mocha-red: #f38ba8;
+	--color-mocha-mauve: #cba6f7;
+	--color-mocha-pink: #f5c2e7;
+	--color-mocha-flamingo: #f2cdcd;
+	--color-mocha-rosewater: #f5e0dc;
+	--font-display: 'Space Grotesk Variable', sans-serif;
+	--font-body: 'Figtree Variable', sans-serif;
+}
+
+/* --------------------------------------------------------------------------
+ * Skeleton v3 theme block
+ * -------------------------------------------------------------------------- */
+[data-theme='mocha'] {
+	--spacing: 0.25rem;
+	--text-scaling: 1.067;
+
+	/* Typography ----------------------------------------------------- */
+	--typo-base--font-family: var(--font-body);
+	--typo-base--font-size: inherit;
+	--typo-base--color-light: var(--color-surface-700);
+	--typo-base--color-dark: var(--color-surface-50);
+	--typo-base--line-height: inherit;
+	--typo-base--font-weight: normal;
+	--typo-base--font-style: normal;
+	--typo-base--letter-spacing: 0em;
+	--typo-heading--font-family: var(--font-display);
+	--typo-heading--color-light: var(--color-primary-500);
+	--typo-heading--color-dark: var(--color-primary-200);
+	--typo-heading--font-weight: bolder;
+	--typo-anchor--color-light: var(--color-primary-600);
+	--typo-anchor--color-dark: var(--color-primary-400);
+
+	/* Radius --------------------------------------------------------- */
+	--radius-base: 0.375rem;
+	--radius-container: 0.75rem;
+
+	/* Edges ---------------------------------------------------------- */
+	--default-border-width: 1px;
+	--default-outline-width: 1px;
+	--default-ring-width: 1px;
+
+	/* Root background ------------------------------------------------ */
+	--color-root-bg-light: var(--color-mocha-base);
+	--color-root-bg-dark: var(--color-mocha-crust);
+
+	/* Brand ---------------------------------------------------------- */
+	--color-brand-light: var(--color-primary-500);
+	--color-brand-contrast-light: var(--color-primary-contrast-500);
+	--color-brand-dark: var(--color-primary-500);
+	--color-brand-contrast-dark: var(--color-primary-contrast-500);
+
+	/* Primary (Mocha mauve) ----------------------------------------- */
+	--color-primary-50: oklch(93.5% 0.05 295deg);
+	--color-primary-100: oklch(89% 0.07 295deg);
+	--color-primary-200: oklch(84% 0.09 295deg);
+	--color-primary-300: oklch(80% 0.11 295deg);
+	--color-primary-400: oklch(75% 0.13 295deg);
+	--color-primary-500: #cba6f7;
+	--color-primary-600: #b19be8;
+	--color-primary-700: #8c73d4;
+	--color-primary-800: #6e57b8;
+	--color-primary-900: #4f3e9c;
+	--color-primary-950: #2e2466;
+	--color-primary-contrast-dark: var(--color-mocha-base);
+	--color-primary-contrast-light: var(--color-mocha-base);
+	--color-primary-contrast-50: var(--color-primary-contrast-dark);
+	--color-primary-contrast-100: var(--color-primary-contrast-dark);
+	--color-primary-contrast-200: var(--color-primary-contrast-dark);
+	--color-primary-contrast-300: var(--color-primary-contrast-dark);
+	--color-primary-contrast-400: var(--color-primary-contrast-dark);
+	--color-primary-contrast-500: var(--color-primary-contrast-dark);
+	--color-primary-contrast-600: var(--color-primary-contrast-light);
+	--color-primary-contrast-700: var(--color-primary-contrast-light);
+	--color-primary-contrast-800: var(--color-primary-contrast-light);
+	--color-primary-contrast-900: var(--color-primary-contrast-light);
+	--color-primary-contrast-950: var(--color-primary-contrast-light);
+
+	/* Surface (Mocha: light → dark gradient) ------------------------ */
+	--color-surface-50:  #cdd6f4; /* text */
+	--color-surface-100: #a6adc8; /* subtext0 */
+	--color-surface-200: #9399b2; /* overlay2 */
+	--color-surface-300: #7f849c; /* overlay1 */
+	--color-surface-400: #6c7086; /* overlay0 */
+	--color-surface-500: #45475a; /* surface1 */
+	--color-surface-600: #313244; /* surface0 */
+	--color-surface-700: #1e1e2e; /* base */
+	--color-surface-800: #181825; /* mantle */
+	--color-surface-900: #11111b; /* crust */
+	--color-surface-950: #11111b; /* crust */
+	--color-surface-contrast-dark: var(--color-surface-950);
+	--color-surface-contrast-light: var(--color-surface-50);
+	--color-surface-contrast-50: var(--color-surface-contrast-dark);
+	--color-surface-contrast-100: var(--color-surface-contrast-dark);
+	--color-surface-contrast-200: var(--color-surface-contrast-dark);
+	--color-surface-contrast-300: var(--color-surface-contrast-dark);
+	--color-surface-contrast-400: var(--color-surface-contrast-dark);
+	--color-surface-contrast-500: var(--color-surface-contrast-light);
+	--color-surface-contrast-600: var(--color-surface-contrast-light);
+	--color-surface-contrast-700: var(--color-surface-contrast-light);
+	--color-surface-contrast-800: var(--color-surface-contrast-light);
+	--color-surface-contrast-900: var(--color-surface-contrast-light);
+	--color-surface-contrast-950: var(--color-surface-contrast-light);
+
+	color-scheme: dark;
+}
