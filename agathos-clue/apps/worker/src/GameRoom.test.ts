@@ -257,6 +257,14 @@ function joinedGame(): ReturnType<typeof serializeGame> {
   return serializeGame(game);
 }
 
+function robotTurnGame(): ReturnType<typeof serializeGame> {
+  const stored = joinedGame();
+  stored.players[0]!.isRobot = true;
+  stored.players[0]!.failedAccusation = true;
+  delete stored.players[0]!.userId;
+  return stored;
+}
+
 describe('GameRoom protocol helpers', () => {
   it('accepts the dev protocol and legacy direct forms', () => {
     expect(authenticateDevProtocol('bearer.dev-token-alice')).toBe('alice');
@@ -741,5 +749,44 @@ describe('GameRoom protocol helpers', () => {
     });
     expect(storage.lobby).toEqual({ hostUserId: null, players: [] });
     connection.client.close();
+  });
+
+  it('deduplicates concurrent robot scheduler runs', async () => {
+    const { gameRoom, storage } = roomWithStorage(robotTurnGame());
+
+    await Promise.all([gameRoom.maybeRunRobot(), gameRoom.maybeRunRobot()]);
+
+    expect(storage.putCount).toBe(1);
+    expect(hydrateGame(storage.value).turnIndex).toBe(1);
+  });
+
+  it('logs autonomous failures without sending WebSocket errors or losing state', async () => {
+    const { gameRoom, storage } = roomWithStorage(robotTurnGame());
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+    const before = structuredClone(storage.value);
+    storage.failPuts = true;
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await gameRoom.maybeRunRobot();
+      expect(log).toHaveBeenCalledWith('robot scheduler failed: storage unavailable');
+      expect(bob.messages.received).toHaveLength(1);
+      expect(storage.value).toEqual(before);
+    } finally {
+      log.mockRestore();
+      closeConnections(gameRoom);
+    }
+  });
+
+  it('does not run robots for a finished game', async () => {
+    const stored = robotTurnGame();
+    stored.phase = 'finished';
+    stored.winnerIndex = 1;
+    stored.finishedAt = 1;
+    const { gameRoom, storage } = roomWithStorage(stored);
+
+    await gameRoom.maybeRunRobot();
+
+    expect(storage.putCount).toBe(0);
   });
 });

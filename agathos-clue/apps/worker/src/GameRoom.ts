@@ -33,6 +33,7 @@ import {
   parseIntentEnvelope,
   resolveViewerIndex,
 } from './game-room-protocol';
+import { runRobotScheduler } from './robots/scheduler';
 export {
   assertIntentAuthority,
   authenticateDevProtocol,
@@ -54,6 +55,7 @@ export class GameRoom extends DurableObject<Env> {
   private lobby: LobbyState | undefined;
   private gameLoad: Promise<Game> | undefined;
   private messageQueue: Promise<void> = Promise.resolve();
+  private robotRun: Promise<void> | undefined;
   private readonly connections = new Map<WebSocket, Connection>();
   private gameId = '';
 
@@ -126,9 +128,34 @@ export class GameRoom extends DurableObject<Env> {
     }
   }
 
-  /** Task 15 will implement the robot scheduler behind this hook. */
   async maybeRunRobot(): Promise<void> {
-    return;
+    if (this.robotRun !== undefined) return this.robotRun;
+
+    const run = this.runRobotScheduler();
+    this.robotRun = run;
+    try {
+      await run;
+    } catch (error) {
+      console.error(`robot scheduler failed: ${errorMessage(error)}`);
+    } finally {
+      if (this.robotRun === run) this.robotRun = undefined;
+    }
+  }
+
+  private async runRobotScheduler(): Promise<void> {
+    await this.loadGame();
+    await runRobotScheduler({
+      getGame: () => {
+        if (this.game === undefined) throw new Error('game state is not loaded');
+        return this.game;
+      },
+      snapshot: serializeGame,
+      restore: snapshot => { this.game = hydrateGame(snapshot); },
+      persist: async game => {
+        await this.ctx.storage.put(STORAGE_KEY, serializeGame(game));
+      },
+      broadcast: events => this.broadcast(events),
+    });
   }
 
   private async loadGame(): Promise<Game> {
@@ -189,6 +216,7 @@ export class GameRoom extends DurableObject<Env> {
       throw error;
     }
     this.broadcast(events);
+    await this.maybeRunRobot();
   }
 
   private async handleLobbyIntent(
