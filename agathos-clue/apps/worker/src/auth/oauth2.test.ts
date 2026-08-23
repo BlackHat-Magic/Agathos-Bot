@@ -116,6 +116,30 @@ describe('standalone Discord OAuth', () => {
     expect(await malformedUser.text()).toBe('authentication failed');
   });
 
+  it('rejects token responses without a Bearer token type', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({ access_token: ACCESS_TOKEN, token_type: 'Basic', expires_in: 604_800 }),
+    );
+
+    const response = await handleOAuth(callbackRequest('state'), env());
+
+    expect(response.status).toBe(502);
+    expect(await response.text()).toBe('authentication failed');
+    expect(setCookies(response)).toContainEqual(expect.stringContaining('clue-oauth-state=; Max-Age=0'));
+  });
+
+  it('rejects unsafe access tokens before calling Discord userinfo', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      jsonResponse({ access_token: `${ACCESS_TOKEN}\r\nInjected: value`, token_type: 'bearer', expires_in: 604_800 }),
+    );
+
+    const response = await handleOAuth(callbackRequest('state'), env());
+
+    expect(response.status).toBe(502);
+    expect(await response.text()).toBe('authentication failed');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('exchanges the code server-side and creates a JWT containing only the bounded user ID', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(jsonResponse({ access_token: ACCESS_TOKEN, token_type: 'Bearer', expires_in: 604_800 }))
@@ -161,13 +185,18 @@ describe('standalone Discord OAuth', () => {
     expect(response.headers.get('Set-Cookie')).toBeNull();
   });
 
-  it('rejects and clears an invalid session cookie', async () => {
+  it.each([
+    ['invalid', 'clue-session=invalid'],
+    ['empty', 'clue-session='],
+    ['oversized', `clue-session=${'x'.repeat(8_193)}`],
+  ])('rejects and clears an %s session cookie', async (_name, cookie) => {
     const response = await handleOAuth(
-      new Request('https://example.test/auth/session', { headers: { Cookie: 'clue-session=invalid' } }),
+      new Request('https://example.test/auth/session', { headers: { Cookie: cookie } }),
       env(),
     );
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ authenticated: false });
     expect(setCookies(response)).toContainEqual(expect.stringContaining('clue-session=; Max-Age=0'));
+    expect(setCookies(response)).toContainEqual(expect.stringContaining('Secure'));
   });
 });

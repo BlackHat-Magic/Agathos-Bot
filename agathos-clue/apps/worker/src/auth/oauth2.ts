@@ -15,8 +15,8 @@ const MAX_REDIRECT_URI_LENGTH = 2_048;
 const MAX_CODE_LENGTH = 4_096;
 const MAX_STATE_LENGTH = 256;
 const MAX_DISCORD_TOKEN_LENGTH = 1_024;
-const MAX_TOKEN_TYPE_LENGTH = 32;
 const MAX_DISCORD_USER_ID_LENGTH = 32;
+const MAX_SESSION_COOKIE_VALUE_BYTES = 4_096;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
@@ -66,7 +66,7 @@ async function callback(req: Request, env: Env): Promise<Response> {
   const code = boundedParam(url.searchParams.get('code'), MAX_CODE_LENGTH);
   const clearState = clearCookie(STATE_COOKIE, '/auth');
 
-  if (stateCookie === null || queryState === null || !constantTimeEqual(stateCookie, queryState)) {
+  if (stateCookie.value === null || queryState === null || !constantTimeEqual(stateCookie.value, queryState)) {
     return failure(clearState);
   }
   if (code === null) return failure(clearState);
@@ -105,14 +105,14 @@ async function callback(req: Request, env: Env): Promise<Response> {
 
 async function session(req: Request, env: Env): Promise<Response> {
   if (req.method !== 'GET') return methodNotAllowed();
-  const token = readCookie(req.headers.get('Cookie'), SESSION_COOKIE);
+  const cookie = readCookie(req.headers.get('Cookie'), SESSION_COOKIE, MAX_SESSION_COOKIE_VALUE_BYTES);
+  if (cookie.invalid) return unauthenticated(clearCookie(SESSION_COOKIE, '/'));
+  const token = cookie.value;
   if (token === null) return unauthenticated();
 
   const claims = await verifyJwt(token, env.JWT_SECRET);
   if (claims === null || !isValidUserId(claims.userId)) {
-    const response = unauthenticated();
-    response.headers.append('Set-Cookie', clearCookie(SESSION_COOKIE, '/'));
-    return response;
+    return unauthenticated(clearCookie(SESSION_COOKIE, '/'));
   }
   return json({ authenticated: true, userId: claims.userId, token });
 }
@@ -135,7 +135,8 @@ async function exchangeCode(code: string, env: Env): Promise<{ accessToken: stri
   });
   const value = await readJsonObject(response);
   if (!response.ok || !isBoundedString(value.access_token, MAX_DISCORD_TOKEN_LENGTH) ||
-      !isBoundedString(value.token_type, MAX_TOKEN_TYPE_LENGTH) ||
+      !isSafeAccessToken(value.access_token) ||
+      !isBearerTokenType(value.token_type) ||
       !isSafeExpiresIn(value.expires_in)) {
     throw new Error('invalid Discord token response');
   }
@@ -211,17 +212,27 @@ function randomState(): string {
   return encodeBase64Url(bytes);
 }
 
-function readCookie(header: string | null, name: string): string | null {
-  if (header === null || encoder.encode(header).byteLength > MAX_COOKIE_BYTES) return null;
+function readCookie(
+  header: string | null,
+  name: string,
+  maxValueBytes = MAX_STATE_LENGTH * 16,
+): { value: string | null; invalid: boolean } {
+  if (header === null) return { value: null, invalid: false };
+  if (encoder.encode(header).byteLength > MAX_COOKIE_BYTES) return { value: null, invalid: true };
   for (const part of header.split(';')) {
     const separator = part.indexOf('=');
-    if (separator < 0) continue;
+    if (separator < 0) {
+      if (part.trim() === name) return { value: null, invalid: true };
+      continue;
+    }
     const key = part.slice(0, separator).trim();
     if (key !== name) continue;
     const value = part.slice(separator + 1).trim();
-    return value.length === 0 || value.length > MAX_STATE_LENGTH * 16 ? null : value;
+    return value.length === 0 || encoder.encode(value).byteLength > maxValueBytes
+      ? { value: null, invalid: true }
+      : { value, invalid: false };
   }
-  return null;
+  return { value: null, invalid: false };
 }
 
 function boundedParam(value: string | null, maxLength: number): string | null {
@@ -248,6 +259,14 @@ function isSafeExpiresIn(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 31_536_000;
 }
 
+function isSafeAccessToken(value: string): boolean {
+  return /^[\x21-\x7e]+$/.test(value);
+}
+
+function isBearerTokenType(value: unknown): value is string {
+  return typeof value === 'string' && value.toLowerCase() === 'bearer';
+}
+
 function isBoundedString(value: unknown, maxLength: number): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= maxLength;
 }
@@ -270,8 +289,10 @@ function failure(clearState: string, status = 400): Response {
   return response;
 }
 
-function unauthenticated(): Response {
-  return json({ authenticated: false }, 401);
+function unauthenticated(clearSession?: string): Response {
+  const response = json({ authenticated: false }, 401);
+  if (clearSession !== undefined) response.headers.append('Set-Cookie', clearSession);
+  return response;
 }
 
 function json(value: unknown, status = 200): Response {
