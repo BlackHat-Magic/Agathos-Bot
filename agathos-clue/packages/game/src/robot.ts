@@ -1,7 +1,7 @@
 import type { Game, Intent, Suspect, Weapon } from './types';
 import { SUSPECTS, WEAPONS } from './types';
 import { reachable } from './pathfind';
-import { cardMatchesSuggestion, clonePendingReveal } from './rules';
+import { cardMatchesSuggestion, cloneHandCard, clonePendingReveal } from './rules';
 
 type RNG = () => number;
 
@@ -38,7 +38,7 @@ export function decideRobotIntent(
 
     const matches = player.cards.filter(card => cardMatchesSuggestion(card, pending));
     return matches.length
-      ? { kind: 'showCard', card: randomOf(matches, rng) }
+      ? { kind: 'showCard', card: cloneHandCard(randomOf(matches, rng)) }
       : { kind: 'declineReveal' };
   }
 

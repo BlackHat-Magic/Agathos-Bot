@@ -162,7 +162,7 @@ function cardMatchesValidatedSuggestion(card: unknown, guess: SuggestionGuess): 
   );
 }
 
-function cloneHandCard(value: unknown): Card {
+export function cloneHandCard(value: unknown): Card {
   assertCard(value, 'hand card');
   switch (value.type) {
     case 'suspect': return { type: 'suspect', suspect: value.suspect };

@@ -143,6 +143,27 @@ describe('decideRobotIntent', () => {
     ]);
   });
 
+  it('detaches the matching card returned in a reveal intent', () => {
+    const handCard = { type: 'weapon', weapon: 'Rope' } as const;
+    const g = createGame([mkRobot('Miss Scarlett', 0), mkRobot('Professor Plum', 1)]);
+    g.phase = 'playing';
+    g.players[0]!.cards = [handCard];
+    g.pendingReveal = {
+      suggesterIndex: 1,
+      suspect: 'Professor Plum',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 0,
+    };
+
+    const intent = decideRobotIntent(g, 0, () => 0);
+    expect(intent).toEqual({ kind: 'showCard', card: handCard });
+    if (intent.kind !== 'showCard') throw new Error('expected a show-card intent');
+    (intent.card as { weapon: 'Rope' | 'Dagger' }).weapon = 'Dagger';
+
+    expect(g.players[0]!.cards[0]).toEqual(handCard);
+  });
+
   it('rejects malformed cards later in a robot hand while checking a reveal', () => {
     const g = createGame([mkRobot('Miss Scarlett', 0), mkRobot('Professor Plum', 1)]);
     g.phase = 'playing';
