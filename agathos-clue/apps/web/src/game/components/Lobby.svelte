@@ -6,6 +6,7 @@
   import {
     canManageLobby as canManageLobbyState,
     canStartLobby as canStartLobbyState,
+    enqueueJoin,
     enqueueLeave,
     shouldResetJoinedState,
   } from '../lobby-lifecycle';
@@ -51,9 +52,7 @@
   }
 
   function joinLobby(): void {
-    const name = playerName.trim();
-    if (name.length === 0) return;
-    if (send({ kind: 'join', name })) hasJoined = true;
+    if (enqueueJoin(playerName, () => error.set(null), send)) hasJoined = true;
   }
 
   function claimSuspect(): void {
