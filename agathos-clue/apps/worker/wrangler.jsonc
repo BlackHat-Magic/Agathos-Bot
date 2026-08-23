@@ -16,7 +16,7 @@
     {
       "binding": "LOBBY_DB",
       "database_name": "agathos-clue-lobby",
-      "database_id": "local",
+      "database_id": "c6b77943-0182-4d87-906e-9098b7e45bf0",
       "migrations_dir": "migrations"
     }
   ],
@@ -24,7 +24,7 @@
     { "tag": "v1", "new_sqlite_classes": ["GameRoom"] }
   ],
   "vars": {
-    "DISCORD_CLIENT_ID": "REPLACE_ME",
-    "DISCORD_REDIRECT_URI": "http://localhost:8787/auth/callback"
+    "DISCORD_CLIENT_ID": "1152547279513845811",
+    "DISCORD_REDIRECT_URI": "https://agathos-clue.blackhatmagic.workers.dev/auth/callback"
   }
 }
