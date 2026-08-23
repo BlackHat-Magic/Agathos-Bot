@@ -465,7 +465,7 @@ describe('GameRoom protocol helpers', () => {
     closeConnections(gameRoom);
   });
 
-  it('persists and reloads the lobby snapshot, reassigning its host on leave', async () => {
+  it('persists and reloads the lobby snapshot, reassigning its host when the host leaves', async () => {
     const first = roomWithStorage();
     const alice = await connectJoinedPlayer(first.gameRoom, 'alice');
     alice.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Alice' } }));
@@ -486,13 +486,92 @@ describe('GameRoom protocol helpers', () => {
         { name: 'Bob', suspect: null, isHost: false },
       ],
     });
-    bobReloaded.client.send(JSON.stringify({ intent: { kind: 'leave' } }));
+    const aliceReloaded = await connectJoinedPlayer(reloaded.gameRoom, 'alice');
+    aliceReloaded.client.send(JSON.stringify({ intent: { kind: 'leave' } }));
+    await expect(aliceReloaded.messages.next()).resolves.toEqual({
+      type: 'lobby',
+      gameId: 'game-1',
+      hostUserId: 'bob',
+      players: [{ name: 'Bob', suspect: null, isHost: true }],
+    });
     await expect(bobReloaded.messages.next()).resolves.toEqual({
       type: 'lobby',
       gameId: 'game-1',
-      hostUserId: 'alice',
-      players: [{ name: 'Alice', suspect: null, isHost: true }],
+      hostUserId: 'bob',
+      players: [{ name: 'Bob', suspect: null, isHost: true }],
     });
+    closeConnections(reloaded.gameRoom);
+  });
+
+  it('preserves the host when order moves another player first', async () => {
+    const { gameRoom, storage } = roomWithStorage();
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+
+    alice.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Alice' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    bob.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Bob' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    alice.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'Professor Plum' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    bob.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'Miss Scarlett' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+
+    alice.client.send(JSON.stringify({
+      intent: { kind: 'setOrder', order: ['Miss Scarlett', 'Professor Plum'] },
+    }));
+    await expect(alice.messages.next()).resolves.toEqual({
+      type: 'lobby',
+      gameId: 'game-1',
+      hostUserId: 'alice',
+      players: [
+        { name: 'Bob', suspect: 'Miss Scarlett', isHost: false },
+        { name: 'Alice', suspect: 'Professor Plum', isHost: true },
+      ],
+    });
+    await expect(bob.messages.next()).resolves.toEqual({
+      type: 'lobby',
+      gameId: 'game-1',
+      hostUserId: 'alice',
+      players: [
+        { name: 'Bob', suspect: 'Miss Scarlett', isHost: false },
+        { name: 'Alice', suspect: 'Professor Plum', isHost: true },
+      ],
+    });
+    expect(storage.lobby).toMatchObject({ hostUserId: 'alice' });
+
+    closeConnections(gameRoom);
+    const reloaded = roomWithStorage(storage.value, storage.lobby);
+    const bobReloaded = await connectJoinedPlayer(reloaded.gameRoom, 'bob');
+    const aliceReloaded = await connectJoinedPlayer(reloaded.gameRoom, 'alice');
+    expect(bobReloaded.initial).toEqual({
+      type: 'lobby',
+      gameId: 'game-1',
+      hostUserId: 'alice',
+      players: [
+        { name: 'Bob', suspect: 'Miss Scarlett', isHost: false },
+        { name: 'Alice', suspect: 'Professor Plum', isHost: true },
+      ],
+    });
+
+    bobReloaded.client.send(JSON.stringify({ intent: { kind: 'start' } }));
+    await expect(bobReloaded.messages.next()).resolves.toEqual({
+      type: 'error', message: 'only the host can perform this lobby action',
+    });
+    bobReloaded.client.send(JSON.stringify({
+      intent: { kind: 'setOrder', order: ['Professor Plum', 'Miss Scarlett'] },
+    }));
+    await expect(bobReloaded.messages.next()).resolves.toEqual({
+      type: 'error', message: 'only the host can perform this lobby action',
+    });
+
+    aliceReloaded.client.send(JSON.stringify({ intent: { kind: 'start' } }));
+    await expect(aliceReloaded.messages.next()).resolves.toMatchObject({ type: 'state' });
+    await expect(bobReloaded.messages.next()).resolves.toMatchObject({ type: 'state' });
     closeConnections(reloaded.gameRoom);
   });
 
@@ -563,7 +642,7 @@ describe('GameRoom protocol helpers', () => {
     expect(hydrateGame(storage.value).phase).toBe('playing');
     expect(hydrateGame(storage.value).players.slice(0, 2).map(player => player.userId)).toEqual(['alice', 'bob']);
     expect(hydrateGame(storage.value).players.slice(2).every(player => player.isRobot)).toBe(true);
-    expect(storage.lobby).toEqual({ players: [] });
+    expect(storage.lobby).toEqual({ hostUserId: null, players: [] });
     hook.mockRestore();
     closeConnections(gameRoom);
   });

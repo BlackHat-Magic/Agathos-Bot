@@ -25,11 +25,12 @@ describe('lobby helpers', () => {
   it('normalizes names and rejects invalid lifecycle payloads without mutation', () => {
     const lobby = createLobby();
     expect(joinLobby(lobby, 'alice', ' Alice ')).toEqual({
+      hostUserId: 'alice',
       players: [{ userId: 'alice', name: 'Alice', suspect: null }],
     });
     expect(() => joinLobby(lobby, 'alice', '   ')).toThrow('1-32');
     expect(() => joinLobby(lobby, 'alice', 'x'.repeat(33))).toThrow('1-32');
-    expect(lobby).toEqual({ players: [] });
+    expect(lobby).toEqual({ hostUserId: null, players: [] });
     expect(() => claimLobbySuspect(lobby, 'nobody', 'Miss Scarlett')).toThrow('not in the lobby');
     expect(() => claimLobbySuspect(lobby, 'nobody', 'not a suspect')).toThrow('invalid suspect');
   });
@@ -60,6 +61,8 @@ describe('lobby helpers', () => {
     expect(() => setLobbyOrder(lobby, 'alice', ['Miss Scarlett', 'Mrs. White'])).toThrow('unknown');
     const ordered = setLobbyOrder(lobby, 'alice', ['Professor Plum', 'Miss Scarlett']);
     expect(ordered.players.map(player => player.userId)).toEqual(['bob', 'alice', 'carol']);
+    expect(ordered.hostUserId).toBe('alice');
+    expect(lobbyView(ordered, 'game-1').players.map(player => player.isHost)).toEqual([false, true, false]);
     expect(lobby.players.map(player => player.userId)).toEqual(['alice', 'bob', 'carol']);
   });
 
@@ -70,18 +73,23 @@ describe('lobby helpers', () => {
     expect(() => hydrateLobby({ ...persisted, players: [{ ...persisted.players[0], suspect: 'bad' }] }))
       .toThrow('invalid suspect');
     expect(() => hydrateLobby({ players: [...persisted.players, persisted.players[0]] })).toThrow('duplicate lobby user');
+    expect(hydrateLobby({ players: persisted.players })).toEqual(persisted);
+    expect(() => hydrateLobby({ players: persisted.players, extra: true })).toThrow('unexpected or missing');
+    expect(() => hydrateLobby({ ...persisted, hostUserId: 'missing' })).toThrow('not in the lobby');
   });
 
   it('reassigns the host after leave and exposes only redacted lobby data', () => {
     const lobby = lobbyWithPlayers();
     const remaining = leaveLobby(lobby, 'alice');
     expect(remaining.players.map(player => player.userId)).toEqual(['bob']);
+    expect(remaining.hostUserId).toBe('bob');
     expect(lobbyView(remaining, 'game-1')).toEqual({
       type: 'lobby',
       gameId: 'game-1',
       hostUserId: 'bob',
       players: [{ name: 'Bob', suspect: 'Professor Plum', isHost: true }],
     });
+    expect(leaveLobby(remaining, 'bob')).toEqual({ hostUserId: null, players: [] });
   });
 
   it('creates six canonical players with claimed humans followed by robots', () => {

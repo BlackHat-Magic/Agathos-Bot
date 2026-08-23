@@ -17,6 +17,7 @@ export interface LobbyPlayer {
 }
 
 export interface LobbyState {
+  hostUserId: string | null;
   players: LobbyPlayer[];
 }
 
@@ -34,19 +35,23 @@ export interface LobbyView {
 }
 
 export function createLobby(): LobbyState {
-  return { players: [] };
+  return { hostUserId: null, players: [] };
 }
 
 export function serializeLobby(lobby: LobbyState): LobbyState {
   validateLobby(lobby);
-  return { players: lobby.players.map(player => ({ ...player })) };
+  return {
+    hostUserId: lobby.hostUserId,
+    players: lobby.players.map(player => ({ ...player })),
+  };
 }
 
 export function hydrateLobby(value: unknown): LobbyState {
   if (!isRecord(value) || !isPlainObject(value)) {
     throw new Error('invalid persisted lobby: expected an object');
   }
-  requireExactKeys(value, ['players'], 'lobby');
+  const isLegacy = Object.hasOwn(value, 'players') && !Object.hasOwn(value, 'hostUserId');
+  requireExactKeys(value, isLegacy ? ['players'] : ['hostUserId', 'players'], 'lobby');
   if (!Array.isArray(value.players)) {
     throw new Error('invalid persisted lobby players: expected an array');
   }
@@ -63,7 +68,10 @@ export function hydrateLobby(value: unknown): LobbyState {
     const suspect = rawPlayer.suspect === null ? null : validateSuspect(rawPlayer.suspect);
     return { userId: rawPlayer.userId, name, suspect };
   });
-  const lobby = { players };
+  const hostUserId = isLegacy
+    ? players[0]?.userId ?? null
+    : validateHostUserId(value.hostUserId);
+  const lobby = { hostUserId, players };
   validateLobby(lobby);
   return lobby;
 }
@@ -78,6 +86,7 @@ export function joinLobby(lobby: LobbyState, userId: string, rawName: unknown): 
   }
   const name = validateName(rawName);
   return {
+    hostUserId: lobby.hostUserId ?? userId,
     players: [...lobby.players.map(player => ({ ...player })), { userId, name, suspect: null }],
   };
 }
@@ -93,6 +102,7 @@ export function claimLobbySuspect(
   const owner = lobby.players.find(player => player.suspect === suspect && player.userId !== userId);
   if (owner !== undefined) throw new Error(`suspect is already claimed: ${suspect}`);
   return {
+    hostUserId: lobby.hostUserId,
     players: lobby.players.map(player =>
       player.userId === userId ? { ...player, suspect } : { ...player }),
   };
@@ -124,18 +134,22 @@ export function setLobbyOrder(
   const unclaimed = lobby.players
     .filter(player => player.suspect === null)
     .map(player => ({ ...player }));
-  return { players: [...orderedClaimed, ...unclaimed] };
+  return { hostUserId: lobby.hostUserId, players: [...orderedClaimed, ...unclaimed] };
 }
 
 export function requireLobbyHost(lobby: LobbyState, userId: string): void {
   validateLobby(lobby);
-  if (lobby.players[0]?.userId !== userId) throw new Error('only the host can perform this lobby action');
+  if (lobby.hostUserId !== userId) throw new Error('only the host can perform this lobby action');
 }
 
 export function leaveLobby(lobby: LobbyState, userId: string): LobbyState {
   validateLobby(lobby);
   requireLobbyPlayer(lobby, userId);
-  return { players: lobby.players.filter(player => player.userId !== userId).map(player => ({ ...player })) };
+  const players = lobby.players.filter(player => player.userId !== userId).map(player => ({ ...player }));
+  return {
+    hostUserId: lobby.hostUserId === userId ? players[0]?.userId ?? null : lobby.hostUserId,
+    players,
+  };
 }
 
 /** Build valid game-package players only after the lobby is ready to start. */
@@ -164,15 +178,14 @@ export function createStartPlayers(lobby: LobbyState): Player[] {
 
 export function lobbyView(lobby: LobbyState, gameId: string): LobbyView {
   validateLobby(lobby);
-  const hostUserId = lobby.players[0]?.userId ?? null;
   return {
     type: 'lobby',
     gameId,
-    hostUserId,
-    players: lobby.players.map((player, index) => ({
+    hostUserId: lobby.hostUserId,
+    players: lobby.players.map(player => ({
       name: player.name,
       suspect: player.suspect,
-      isHost: index === 0,
+      isHost: player.userId === lobby.hostUserId,
     })),
   };
 }
@@ -201,8 +214,12 @@ function makePlayer(
 }
 
 function validateLobby(lobby: LobbyState): void {
-  if (!isRecord(lobby) || !Array.isArray(lobby.players)) {
+  if (!isRecord(lobby) || !Array.isArray(lobby.players) ||
+    (lobby.hostUserId !== null && typeof lobby.hostUserId !== 'string')) {
     throw new Error('invalid lobby state');
+  }
+  if (lobby.players.length === 0 && lobby.hostUserId !== null) {
+    throw new Error('invalid lobby host: empty lobby must not have a host');
   }
   if (lobby.players.length > MAX_LOBBY_PLAYERS) throw new Error('lobby is full');
   const seenUsers = new Set<string>();
@@ -220,6 +237,12 @@ function validateLobby(lobby: LobbyState): void {
       seenSuspects.add(suspect);
     }
   }
+  if (lobby.players.length > 0 && lobby.hostUserId === null) {
+    throw new Error('invalid lobby host: non-empty lobby must have a host');
+  }
+  if (lobby.hostUserId !== null && !seenUsers.has(lobby.hostUserId)) {
+    throw new Error(`invalid lobby host: user is not in the lobby: ${lobby.hostUserId}`);
+  }
 }
 
 function requireLobbyPlayer(lobby: LobbyState, userId: string): LobbyPlayer {
@@ -235,6 +258,14 @@ function validateName(value: unknown): string {
     throw new Error('invalid name: expected 1-32 trimmed characters');
   }
   return name;
+}
+
+function validateHostUserId(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error('invalid persisted lobby hostUserId');
+  }
+  return value;
 }
 
 function validateSuspect(value: unknown): Suspect {
