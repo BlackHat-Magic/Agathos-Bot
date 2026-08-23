@@ -152,6 +152,7 @@ export interface GameView {
     location: Room | CellId;
     handCount: number;
     failedAccusation: boolean;
+    guessedHere: boolean;
     isRobot: boolean;
     movedBySuggestion: boolean;
     userId?: string;

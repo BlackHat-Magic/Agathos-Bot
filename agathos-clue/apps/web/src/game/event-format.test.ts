@@ -4,8 +4,8 @@ import { formatEvent, relativeEventLabel } from './event-format';
 
 const view = {
   players: [
-    { name: 'Alice' },
-    { name: 'Bob' },
+    { name: 'Alice', guessedHere: false },
+    { name: 'Bob', guessedHere: false },
   ],
 } as GameView;
 

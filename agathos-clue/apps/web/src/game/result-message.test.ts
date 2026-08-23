@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
+import type { GameView } from '@agathos/game';
 import { finishedGameMessage } from './result-message';
 
-const players = [{ name: 'Alice' }, { name: 'Bob' }];
+const players: GameView['players'] = [
+  {
+    name: 'Alice', suspect: 'Miss Scarlett', location: '16,24', handCount: 0,
+    failedAccusation: false, guessedHere: false, isRobot: false, movedBySuggestion: false,
+  },
+  {
+    name: 'Bob', suspect: 'Professor Plum', location: '0,19', handCount: 0,
+    failedAccusation: false, guessedHere: false, isRobot: false, movedBySuggestion: false,
+  },
+];
 
 describe('finished game messaging', () => {
   it('identifies the viewer or another detective when there is a winner', () => {

@@ -205,6 +205,7 @@ function view(): GameView {
       location: '12,12',
       handCount: 0,
       failedAccusation: false,
+      guessedHere: false,
       isRobot: false,
       movedBySuggestion: false,
     }],

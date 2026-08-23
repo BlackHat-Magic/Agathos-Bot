@@ -182,10 +182,14 @@ export function validateGameView(value: unknown): GameView {
     myIndex,
     myHand,
   };
-  if (record.hasRolledThisTurn !== undefined) view.hasRolledThisTurn = record.hasRolledThisTurn;
-  if (record.hasMovedThisTurn !== undefined) view.hasMovedThisTurn = record.hasMovedThisTurn;
-  if (record.canSuggest !== undefined) view.canSuggest = record.canSuggest;
-  if (record.canUseSecretPassage !== undefined) view.canUseSecretPassage = record.canUseSecretPassage;
+  const hasRolledThisTurn = optionalBoolean(record.hasRolledThisTurn, 'hasRolledThisTurn');
+  const hasMovedThisTurn = optionalBoolean(record.hasMovedThisTurn, 'hasMovedThisTurn');
+  const canSuggest = optionalBoolean(record.canSuggest, 'canSuggest');
+  const canUseSecretPassage = optionalBoolean(record.canUseSecretPassage, 'canUseSecretPassage');
+  if (hasRolledThisTurn !== undefined) view.hasRolledThisTurn = hasRolledThisTurn;
+  if (hasMovedThisTurn !== undefined) view.hasMovedThisTurn = hasMovedThisTurn;
+  if (canSuggest !== undefined) view.canSuggest = canSuggest;
+  if (canUseSecretPassage !== undefined) view.canUseSecretPassage = canUseSecretPassage;
   if (record.myRevealOpportunities !== undefined) {
     view.myRevealOpportunities = validateCards(record.myRevealOpportunities, 'reveal opportunities');
   }
@@ -264,12 +268,15 @@ function validateLobbySnapshot(record: Record<string, unknown>): LobbySnapshot {
 function validateViewPlayer(value: unknown, index: number): GameView['players'][number] {
   const player = requireObject(value, `view player at index ${index}`);
   requireKeys(player, [
-    'name', 'suspect', 'location', 'handCount', 'failedAccusation', 'isRobot', 'movedBySuggestion',
+    'name', 'suspect', 'location', 'handCount', 'failedAccusation', 'guessedHere', 'isRobot',
+    'movedBySuggestion',
   ], 'view player', ['userId']);
+  const guessedHere = player.guessedHere;
   if (typeof player.name !== 'string' || player.name.length === 0 || player.name.length > 32 ||
       !isSuspect(player.suspect) || !isLocation(player.location) ||
       !isBoundedInteger(player.handCount, 0, MAX_CARDS) || typeof player.failedAccusation !== 'boolean' ||
-      typeof player.isRobot !== 'boolean' || typeof player.movedBySuggestion !== 'boolean') {
+      typeof guessedHere !== 'boolean' || typeof player.isRobot !== 'boolean' ||
+      typeof player.movedBySuggestion !== 'boolean') {
     throw new Error(`invalid view player at index ${index}`);
   }
   const result: GameView['players'][number] = {
@@ -278,6 +285,7 @@ function validateViewPlayer(value: unknown, index: number): GameView['players'][
     location: player.location,
     handCount: player.handCount,
     failedAccusation: player.failedAccusation,
+    guessedHere,
     isRobot: player.isRobot,
     movedBySuggestion: player.movedBySuggestion,
   };
@@ -416,6 +424,12 @@ function optionalIndex(value: unknown, playerCount: number, label: string): numb
 
 function isBoundedInteger(value: unknown, min: number, max: number): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
+}
+
+function optionalBoolean(value: unknown, label: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') throw new Error(`invalid ${label}`);
+  return value;
 }
 
 function isSafeUserId(value: unknown): value is string {

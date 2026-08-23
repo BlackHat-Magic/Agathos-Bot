@@ -14,9 +14,10 @@ function view(phase: 'playing' | 'finished' = 'playing'): Record<string, unknown
       name: 'Alice',
       suspect: 'Miss Scarlett',
       location: '16,24',
-      handCount: 1,
-      failedAccusation: false,
-      isRobot: false,
+       handCount: 1,
+       failedAccusation: false,
+       guessedHere: false,
+       isRobot: false,
       movedBySuggestion: false,
       userId: 'alice',
     }],
@@ -68,7 +69,8 @@ describe('server snapshot validation', () => {
   it('validates local cards but rejects arbitrary public payloads', () => {
     expect(isGameView(view())).toBe(true);
     expect(isGameView({ ...view(), myHand: [{ type: 'room', room: 'secret' }] })).toBe(false);
-    expect(isGameView({ ...view(), players: [{ ...view().players instanceof Array ? view().players[0] : {}, location: { card: 'secret' } }] })).toBe(false);
+    const player = view().players[0];
+    expect(isGameView({ ...view(), players: [{ ...(player as Record<string, unknown>), location: { card: 'secret' } }] })).toBe(false);
   });
 
   it('permits a solution only in a finished view', () => {
@@ -114,6 +116,12 @@ describe('server snapshot validation', () => {
     const validated = validateGameView(raw);
     (raw.myHand as Array<Record<string, unknown>>)[0]!.room = 'Kitchen';
     expect(validated.myHand[0]).toEqual({ type: 'room', room: 'Study' });
+  });
+
+  it('requires an authoritative guessedHere boolean for every player', () => {
+    expect(isGameView({ ...view(), players: [{ ...view().players[0]!, guessedHere: undefined }] })).toBe(false);
+    expect(isGameView({ ...view(), players: [{ ...view().players[0]!, guessedHere: 'false' }] })).toBe(false);
+    expect(validateGameView(view()).players[0]!.guessedHere).toBe(false);
   });
 
   it('rejects lobby frames carrying an authenticated host identity', () => {

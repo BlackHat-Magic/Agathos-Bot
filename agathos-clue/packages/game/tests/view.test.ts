@@ -46,11 +46,12 @@ describe('toView', () => {
       player('Miss Scarlett', 0, [{ type: 'suspect', suspect: 'Professor Plum' }], 'user-0'),
       player('Professor Plum', 1, [{ type: 'weapon', weapon: 'Lead Pipe' }], 'user-1'),
     ]);
+    game.players[0]!.guessedHere = true;
 
     const view = toView(game, 0);
 
     expect(view.myHand).toEqual([{ type: 'suspect', suspect: 'Professor Plum' }]);
-    expect(view.players[0]).toMatchObject({ handCount: 1, userId: 'user-0' });
+    expect(view.players[0]).toMatchObject({ handCount: 1, guessedHere: true, userId: 'user-0' });
     expect(view.players[1]).toMatchObject({ handCount: 1, userId: 'user-1' });
     expect('cards' in view.players[0]!).toBe(false);
     expect('cards' in view.players[1]!).toBe(false);

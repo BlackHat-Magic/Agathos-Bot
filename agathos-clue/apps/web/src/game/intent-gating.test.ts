@@ -9,10 +9,10 @@ function view(overrides: Partial<GameView> = {}): GameView {
     boardHeight: 25,
     players: [{
       name: 'Alice', suspect: 'Miss Scarlett', location: 'Kitchen', handCount: 0,
-      failedAccusation: false, isRobot: false, movedBySuggestion: false,
+      failedAccusation: false, guessedHere: false, isRobot: false, movedBySuggestion: false,
     }, {
       name: 'Bob', suspect: 'Professor Plum', location: 'Study', handCount: 0,
-      failedAccusation: false, isRobot: false, movedBySuggestion: false,
+      failedAccusation: false, guessedHere: false, isRobot: false, movedBySuggestion: false,
     }],
     weaponLocations: [],
     turnIndex: 0,

@@ -96,7 +96,7 @@ describe('global game stores', () => {
       view: {
         phase: 'playing', boardWidth: 24, boardHeight: 25,
         players: [{ name: 'Alice', suspect: 'Miss Scarlett', location: '16,24', handCount: 0,
-          failedAccusation: false, isRobot: false, movedBySuggestion: false }],
+          failedAccusation: false, guessedHere: false, isRobot: false, movedBySuggestion: false }],
         weaponLocations: [], turnIndex: 0, winnerIndex: null, pendingReveal: null,
         lastDieRoll: null, myIndex: 0, myHand: [],
       },
