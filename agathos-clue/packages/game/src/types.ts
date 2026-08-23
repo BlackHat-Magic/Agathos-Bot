@@ -55,13 +55,15 @@ export interface Game {
   board: BoardSpace[][];            // [24][25] like clue.py:114
   phase: Phase;
   turnIndex: number;
-  weapons: WeaponPiece[];          // each weapon placed in a room initially
+  weapons: WeaponPiece[];          // each weapon starts on a valid board cell
   pendingReveal: {
     suggesterIndex: number;
     suspect: Suspect; weapon: Weapon; room: Room;
     revealerIndex: number;
   } | null;
   lastDieRoll: number | null;
+  hasRolledThisTurn: boolean;
+  hasMovedThisTurn: boolean;
   winnerIndex: number | null;
   finishedAt: number | null;
 }

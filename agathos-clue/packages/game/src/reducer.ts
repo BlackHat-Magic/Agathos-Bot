@@ -113,27 +113,35 @@ export function applyIntent(
 
   switch (intent.kind) {
     case 'roll': {
-      if (game.lastDieRoll !== null) {
+      if (game.hasRolledThisTurn || game.hasMovedThisTurn) {
         throw new Error('player must move or end their turn before rolling again');
       }
       const result = Math.floor(rng() * 6) + 1 + Math.floor(rng() * 6) + 1;
       game.lastDieRoll = result;
+      game.hasRolledThisTurn = true;
       return [{ type: 'rolled', playerIndex, result }];
     }
 
     case 'moveTo': {
+      if (!game.hasRolledThisTurn || game.lastDieRoll === null) {
+        throw new Error('player must roll before moving');
+      }
       const destination = destinationSpace(game, intent.destination);
-      const destinations = reachable(player.piece.location, game.lastDieRoll ?? 0);
+      const destinations = reachable(player.piece.location, game.lastDieRoll);
       if (!destinations.spaces.includes(destination)) {
         throw new Error('destination is not reachable with the current roll');
       }
       player.piece.location = destination;
       game.lastDieRoll = null;
+      game.hasMovedThisTurn = true;
       return [{ type: 'moved', playerIndex, destination: intent.destination }];
     }
 
     case 'useSecretPassage': {
-      if (game.lastDieRoll !== null) {
+      if (game.hasMovedThisTurn) {
+        throw new Error('secret passages can only be used before moving');
+      }
+      if (game.hasRolledThisTurn) {
         throw new Error('secret passages can only be used before rolling');
       }
       const destination = player.piece.location.accesses.find(space => space.room != null);
@@ -141,6 +149,7 @@ export function applyIntent(
         throw new Error('no secret passage from the current location');
       }
       player.piece.location = destination;
+      game.hasMovedThisTurn = true;
       return [{ type: 'usedSecretPassage', playerIndex, to: destination.room }];
     }
 
@@ -217,6 +226,8 @@ export function applyIntent(
       player.guessedHere = false;
       player.movedBySuggestion = false;
       game.lastDieRoll = null;
+      game.hasRolledThisTurn = false;
+      game.hasMovedThisTurn = false;
 
       let next = nextPlayerIndex(game, playerIndex);
       while (next !== playerIndex && game.players[next]!.failedAccusation) {

@@ -32,6 +32,7 @@ describe('applyIntent', () => {
     const events = applyIntent(game, 0, { kind: 'roll' }, () => 0.5);
 
     expect(game.lastDieRoll).toBe(8);
+    expect(game.hasRolledThisTurn).toBe(true);
     expect(events).toEqual([{ type: 'rolled', playerIndex: 0, result: 8 }]);
   });
 
@@ -112,6 +113,20 @@ describe('applyIntent', () => {
     expect(game.lastDieRoll).toBe(8);
   });
 
+  it('rejects a second roll after moving', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    game.players[0]!.piece.location = spaceAt(game.board, 16, 24);
+    applyIntent(game, 0, { kind: 'roll' }, () => 0.5);
+    applyIntent(game, 0, { kind: 'moveTo', destination: '17,18' });
+
+    expect(game.lastDieRoll).toBeNull();
+    expect(game.hasRolledThisTurn).toBe(true);
+    expect(game.hasMovedThisTurn).toBe(true);
+    expect(() => applyIntent(game, 0, { kind: 'roll' }, () => 0)).toThrow(
+      'player must move or end their turn before rolling again',
+    );
+  });
+
   it('rejects gameplay intents while a reveal is pending', () => {
     const game = playingGame([
       player('Miss Scarlett', 0),
@@ -133,6 +148,7 @@ describe('applyIntent', () => {
     const start = spaceAt(game.board, 16, 24);
     game.players[0]!.piece.location = start;
     game.lastDieRoll = 7;
+    game.hasRolledThisTurn = true;
 
     const events = applyIntent(game, 0, { kind: 'moveTo', destination: '17,18' });
 
@@ -145,16 +161,19 @@ describe('applyIntent', () => {
     const game = playingGame([player('Miss Scarlett', 0)]);
     game.players[0]!.piece.location = spaceAt(game.board, 16, 24);
     game.lastDieRoll = 7;
+    game.hasRolledThisTurn = true;
 
     applyIntent(game, 0, { kind: 'moveTo', destination: 'Lounge' });
 
     expect(game.players[0]!.piece.location.room).toBe('Lounge');
+    expect(game.hasMovedThisTurn).toBe(true);
   });
 
   it('rejects malformed coordinates and illegal moves without mutating position', () => {
     const game = playingGame([player('Miss Scarlett', 0)]);
     const start = game.players[0]!.piece.location;
     game.lastDieRoll = 1;
+    game.hasRolledThisTurn = true;
 
     expect(() => applyIntent(game, 0, { kind: 'moveTo', destination: 'abc,def' })).toThrow();
     expect(() => applyIntent(game, 0, { kind: 'moveTo', destination: '7,5' })).toThrow();
@@ -260,6 +279,10 @@ describe('applyIntent', () => {
       { type: 'usedSecretPassage', playerIndex: 0, to: 'Lounge' },
     ]);
     expect(game.players[0]!.piece.location.room).toBe('Lounge');
+    expect(game.hasMovedThisTurn).toBe(true);
+    expect(() => applyIntent(game, 0, { kind: 'roll' })).toThrow(
+      'player must move or end their turn before rolling again',
+    );
 
     game.players[0]!.piece.location = spaceAt(game.board, 7, 5);
     expect(() => applyIntent(game, 0, { kind: 'useSecretPassage' })).toThrow();
@@ -269,11 +292,37 @@ describe('applyIntent', () => {
     const game = playingGame([player('Miss Scarlett', 0)]);
     game.players[0]!.piece.location = game.board[2]![1]!;
     game.lastDieRoll = 6;
+    game.hasRolledThisTurn = true;
 
     expect(() => applyIntent(game, 0, { kind: 'useSecretPassage' })).toThrow(
       'secret passages can only be used before rolling',
     );
     expect(game.lastDieRoll).toBe(6);
+  });
+
+  it('rejects a secret passage after moving', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    game.players[0]!.piece.location = spaceAt(game.board, 16, 24);
+    applyIntent(game, 0, { kind: 'roll' }, () => 0.5);
+    applyIntent(game, 0, { kind: 'moveTo', destination: 'Lounge' });
+
+    expect(() => applyIntent(game, 0, { kind: 'useSecretPassage' })).toThrow(
+      'secret passages can only be used before moving',
+    );
+  });
+
+  it('allows rolling again after ending the turn', () => {
+    const game = playingGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
+    applyIntent(game, 0, { kind: 'roll' }, () => 0.5);
+    applyIntent(game, 0, { kind: 'endTurn' });
+
+    expect(game.lastDieRoll).toBeNull();
+    expect(game.hasRolledThisTurn).toBe(false);
+    expect(game.hasMovedThisTurn).toBe(false);
+
+    applyIntent(game, 1, { kind: 'roll' }, () => 0);
+    expect(game.lastDieRoll).toBe(2);
+    expect(game.hasRolledThisTurn).toBe(true);
   });
 
   it('marks wrong accusations failed, finishes when all humans fail, and emits gameWon on success', () => {
@@ -316,12 +365,16 @@ describe('applyIntent', () => {
     game.players[0]!.guessedHere = true;
     game.players[0]!.movedBySuggestion = true;
     game.lastDieRoll = 8;
+    game.hasRolledThisTurn = true;
+    game.hasMovedThisTurn = true;
     game.players[1]!.failedAccusation = true;
 
     const events = applyIntent(game, 0, { kind: 'endTurn' });
 
     expect(events).toEqual([{ type: 'turnEnded', playerIndex: 0 }]);
     expect(game.lastDieRoll).toBeNull();
+    expect(game.hasRolledThisTurn).toBe(false);
+    expect(game.hasMovedThisTurn).toBe(false);
     expect(game.players[0]!.guessedHere).toBe(false);
     expect(game.players[0]!.movedBySuggestion).toBe(false);
     expect(game.turnIndex).toBe(2);

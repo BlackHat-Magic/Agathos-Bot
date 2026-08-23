@@ -27,6 +27,8 @@ export function createGame(players: Player[]): Game {
     weapons: [],
     pendingReveal: null,
     lastDieRoll: null,
+    hasRolledThisTurn: false,
+    hasMovedThisTurn: false,
     winnerIndex: null,
     finishedAt: null,
   };
