@@ -56,6 +56,21 @@ describe('toView', () => {
     expect(JSON.stringify(view)).not.toContain('Lead Pipe');
   });
 
+  it('gives player 1 their hand while omitting player 0 cards', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0, [{ type: 'room', room: 'Library' }], 'user-0'),
+      player('Professor Plum', 1, [{ type: 'weapon', weapon: 'Lead Pipe' }], 'user-1'),
+    ]);
+
+    const view = toView(game, 1);
+
+    expect(view.myIndex).toBe(1);
+    expect(view.myHand).toEqual([{ type: 'weapon', weapon: 'Lead Pipe' }]);
+    expect(view.players[0]).toMatchObject({ handCount: 1, userId: 'user-0' });
+    expect('cards' in view.players[0]!).toBe(false);
+    expect(JSON.stringify(view)).not.toContain('"room":"Library"');
+  });
+
   it('exposes matching reveal opportunities only to the current revealer', () => {
     const game = playingGame([
       player('Miss Scarlett', 0),
@@ -150,5 +165,16 @@ describe('toView', () => {
     expect(playingView.solution).toBeUndefined();
     expect(finishedView.solution).toEqual(solution);
     expect(finishedView.solution).not.toBe(game.solution);
+  });
+
+  it('detaches the finished solution from game state', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    game.solution = solution;
+    game.phase = 'finished';
+
+    const view = toView(game, 0);
+    view.solution!.suspect = { type: 'suspect', suspect: 'Colonel Mustard' };
+
+    expect(game.solution).toEqual(solution);
   });
 });

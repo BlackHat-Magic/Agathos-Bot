@@ -100,8 +100,22 @@ export interface GameView {
   myIndex: number;
   myHand: Card[];
   myRevealOpportunities?: Card[];
+  /**
+   * Reserved for Task 16/private server event handling. Intentionally omitted
+   * by the current toView because Game does not own this state yet; no card is
+   * fabricated or leaked.
+   */
   myLastShownCard?: Card;
+  /**
+   * Reserved for Task 16/private server event handling. Intentionally omitted
+   * by the current toView because Game does not own this state yet; no card is
+   * fabricated or leaked.
+   */
   lastSuggestionReveal?: { fromIndex: number; card: Card };
+  /**
+   * Reserved for Task 16/private server event handling. Intentionally omitted
+   * by the current toView because Game does not own this state yet.
+   */
   reachableSpacesHints?: Array<Room | CellId>;
   solution?: { suspect: Card; weapon: Card; room: Card };
 }

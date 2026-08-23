@@ -19,6 +19,12 @@ function matchesPendingReveal(card: Card, pending: NonNullable<Game['pendingReve
   );
 }
 
+/**
+ * Projects server-owned game state into the redacted view for one player.
+ *
+ * `viewerIndex` must be resolved from trusted server-side connection identity
+ * and must never be accepted directly from an untrusted client.
+ */
 export function toView(game: Game, viewerIndex: number): GameView {
   if (!Number.isInteger(viewerIndex) || viewerIndex < 0 || viewerIndex >= game.players.length) {
     throw new Error(`invalid viewer index: ${viewerIndex}`);
