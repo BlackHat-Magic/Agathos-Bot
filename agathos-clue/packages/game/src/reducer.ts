@@ -8,7 +8,7 @@ export type Event =
   | { type: 'rolled'; playerIndex: number; result: number }
   | { type: 'moved'; playerIndex: number; destination: string | Room }
   | { type: 'usedSecretPassage'; playerIndex: number; to: Room }
-  | { type: 'suggested'; playerIndex: number; suspect: Suspect; weapon: string; room: Room }
+  | { type: 'suggested'; playerIndex: number; suspect: Suspect; weapon: Weapon; room: Room }
   | { type: 'revealRequested'; revealerIndex: number }
   | { type: 'revealed'; revealerIndex: number; cardHint: 'private' }
   | { type: 'declinedReveal'; revealerIndex: number }
