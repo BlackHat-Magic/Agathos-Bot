@@ -1,0 +1,1 @@
+<h1 class="font-display text-3xl text-mocha-text">Clue</h1>
