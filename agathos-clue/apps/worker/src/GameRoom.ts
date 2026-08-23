@@ -13,12 +13,14 @@ import {
 import {
   assertIntentAuthority,
   authenticateDevProtocol,
+  negotiateDevProtocol,
   parseIntentEnvelope,
   resolveViewerIndex,
 } from './game-room-protocol';
 export {
   assertIntentAuthority,
   authenticateDevProtocol,
+  negotiateDevProtocol,
   parseIntentEnvelope,
   resolveViewerIndex,
 } from './game-room-protocol';
@@ -47,23 +49,32 @@ export class GameRoom extends DurableObject<Env> {
       return new Response('Expected WebSocket upgrade', { status: 426 });
     }
 
-    const userId = authenticateDevProtocol(req.headers.get('Sec-WebSocket-Protocol'));
-    if (userId === null) return new Response('Unauthorized', { status: 401 });
+    const negotiated = negotiateDevProtocol(req.headers.get('Sec-WebSocket-Protocol'));
+    if (negotiated === null) return new Response('Unauthorized', { status: 401 });
 
+    let server: WebSocket | undefined;
     try {
       const game = await this.loadGame();
       const pair = new WebSocketPair();
       const client = pair[0];
-      const server = pair[1];
+      const serverSocket = pair[1];
+      server = serverSocket;
       const connection: Connection = {
-        ws: server,
-        userId,
-        viewerIndex: resolveViewerIndex(game, userId),
+        ws: serverSocket,
+        userId: negotiated.userId,
+        viewerIndex: resolveViewerIndex(game, negotiated.userId),
       };
+      const initialPayload = connection.viewerIndex === null
+        ? { type: 'ready' as const }
+        : {
+          type: 'state' as const,
+          view: toView(game, connection.viewerIndex),
+          events: [],
+        };
 
-      this.connections.set(server, connection);
-      server.accept();
-      server.addEventListener('message', event => {
+      this.connections.set(serverSocket, connection);
+      serverSocket.accept();
+      serverSocket.addEventListener('message', event => {
         const data = event.data;
         if (typeof data !== 'string' && !(data instanceof ArrayBuffer)) {
           this.enqueueMessage(connection, null);
@@ -71,17 +82,25 @@ export class GameRoom extends DurableObject<Env> {
         }
         this.enqueueMessage(connection, data);
       });
-      server.addEventListener('close', () => this.removeConnection(server));
-      server.addEventListener('error', () => this.removeConnection(server));
+      serverSocket.addEventListener('close', () => this.removeConnection(serverSocket));
+      serverSocket.addEventListener('error', () => this.removeConnection(serverSocket));
 
-      if (connection.viewerIndex === null) {
-        this.sendJson(connection, { type: 'ready' });
-      } else {
-        this.sendState(connection, []);
-      }
+      this.sendJson(connection, initialPayload);
 
-      return new Response(null, { status: 101, webSocket: client });
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
+        headers: { 'Sec-WebSocket-Protocol': negotiated.protocol },
+      });
     } catch (error) {
+      if (server !== undefined) {
+        this.removeConnection(server);
+        try {
+          server.close(1011, 'connection setup failed');
+        } catch {
+          // The socket may not have been accepted; removal above is authoritative.
+        }
+      }
       return new Response(errorMessage(error), { status: 500 });
     }
   }

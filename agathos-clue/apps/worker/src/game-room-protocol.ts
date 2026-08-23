@@ -8,6 +8,11 @@ export interface IntentEnvelope {
   intent: Intent;
 }
 
+export interface AuthenticatedDevProtocol {
+  protocol: string;
+  userId: string;
+}
+
 /** Parse a client envelope without trusting any client-supplied player index. */
 export function parseIntentEnvelope(data: string | ArrayBuffer): IntentEnvelope {
   let decoded: unknown;
@@ -35,6 +40,17 @@ export function authenticateDevProtocol(protocolHeader: string | null): string |
   for (const protocol of protocolHeader.split(',').map(value => value.trim())) {
     const match = /^(?:bearer\.dev-token-|dev-token-|bearer\s+dev-token-)(\S+)$/i.exec(protocol);
     if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+/** Select the first authenticated protocol while preserving its offered value. */
+export function negotiateDevProtocol(protocolHeader: string | null): AuthenticatedDevProtocol | null {
+  if (protocolHeader === null) return null;
+  for (const value of protocolHeader.split(',')) {
+    const protocol = value.trim();
+    const userId = authenticateDevProtocol(protocol);
+    if (userId !== null) return { protocol, userId };
   }
   return null;
 }

@@ -1,12 +1,48 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildBoard, createGame, spaceAt } from '@agathos/game';
 import type { Intent, Player } from '@agathos/game';
+import { serializeGame } from './game-storage';
+import type { Env } from './index';
 import {
   assertIntentAuthority,
   authenticateDevProtocol,
+  negotiateDevProtocol,
   parseIntentEnvelope,
   resolveViewerIndex,
 } from './game-room-protocol';
+
+class TestWebSocket {
+  readyState = 1;
+
+  accept(): void {}
+  addEventListener(): void {}
+  send(): void {}
+  close(): void {
+    this.readyState = 3;
+  }
+}
+
+class TestWebSocketPair {
+  0 = new TestWebSocket();
+  1 = new TestWebSocket();
+}
+
+Object.assign(globalThis, { WebSocketPair: TestWebSocketPair });
+
+vi.mock('cloudflare:workers', () => ({
+  DurableObject: class {
+    protected ctx: DurableObjectState;
+    protected env: Env;
+
+    constructor(ctx: DurableObjectState, env: Env) {
+      this.ctx = ctx;
+      this.env = env;
+    }
+  },
+}));
+
+const { GameRoom: GameRoomClass } = await import('./GameRoom');
+type GameRoom = InstanceType<typeof GameRoomClass>;
 
 function player(suspect: Player['suspect'], index: number, userId: string): Player {
   const board = buildBoard();
@@ -25,6 +61,29 @@ function player(suspect: Player['suspect'], index: number, userId: string): Play
   };
 }
 
+function room(stored?: unknown): GameRoom {
+  const ctx = {
+    storage: {
+      get: async <T>() => stored as T | undefined,
+    },
+    blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
+  } as unknown as DurableObjectState;
+  return new GameRoomClass(ctx, {} as Env);
+}
+
+function upgradeRequest(protocol: string): Request {
+  return new Request('https://example.test/ws?gameId=game-1', {
+    headers: {
+      Upgrade: 'websocket',
+      'Sec-WebSocket-Protocol': protocol,
+    },
+  });
+}
+
+function connectionCount(gameRoom: GameRoom): number {
+  return (gameRoom as unknown as { connections: Map<WebSocket, unknown> }).connections.size;
+}
+
 describe('GameRoom protocol helpers', () => {
   it('accepts the dev protocol and legacy direct forms', () => {
     expect(authenticateDevProtocol('bearer.dev-token-alice')).toBe('alice');
@@ -32,6 +91,13 @@ describe('GameRoom protocol helpers', () => {
     expect(authenticateDevProtocol('Bearer dev-token-carol')).toBe('carol');
     expect(authenticateDevProtocol('bearer.dev-token-')).toBeNull();
     expect(authenticateDevProtocol(null)).toBeNull();
+  });
+
+  it('selects and preserves the offered authenticated protocol', () => {
+    expect(negotiateDevProtocol('other, bearer.dev-token-user')).toEqual({
+      protocol: 'bearer.dev-token-user',
+      userId: 'user',
+    });
   });
 
   it('rejects malformed JSON and envelopes', () => {
@@ -74,5 +140,28 @@ describe('GameRoom protocol helpers', () => {
     const game = createGame([player('Miss Scarlett', 0, 'alice')]);
     expect(() => assertIntentAuthority(game, 0, { kind: 'join', userId: 'alice', name: 'Alice' }))
       .toThrow('lobby intent handling is not available yet');
+  });
+
+  it('echoes the selected WebSocket protocol in the upgrade response', async () => {
+    const gameRoom = room();
+
+    const response = await gameRoom.fetch(upgradeRequest('bearer.dev-token-user'));
+
+    expect(response.status).toBe(101);
+    expect(response.headers.get('Sec-WebSocket-Protocol')).toBe('bearer.dev-token-user');
+    response.webSocket?.close();
+  });
+
+  it('does not retain a socket when the initial view cannot be serialized', async () => {
+    const game = createGame([player('Miss Scarlett', 0, 'user')]);
+    const stored = serializeGame(game);
+    stored.phase = 'finished';
+    stored.solution = null;
+    const gameRoom = room(stored);
+
+    const response = await gameRoom.fetch(upgradeRequest('bearer.dev-token-user'));
+
+    expect(response.status).toBe(500);
+    expect(connectionCount(gameRoom)).toBe(0);
   });
 });
