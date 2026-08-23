@@ -1,4 +1,4 @@
-import type { Game, Intent, Suspect, Weapon } from './types';
+import type { Card, Game, Intent, Suspect, Weapon } from './types';
 import { SUSPECTS, WEAPONS } from './types';
 import { reachable } from './pathfind';
 
@@ -26,6 +26,17 @@ export function decideRobotIntent(
   rng: RNG = Math.random,
 ): Intent {
   const player = game.players[robotIndex];
+  const pending = game.pendingReveal;
+
+  if (pending) {
+    if (pending.revealerIndex !== robotIndex) return { kind: 'endTurn' };
+
+    const matches = player.cards.filter(card => matchesPendingReveal(card, pending));
+    return matches.length
+      ? { kind: 'showCard', card: randomOf(matches, rng) }
+      : { kind: 'declineReveal' };
+  }
+
   if (player.failedAccusation) return { kind: 'endTurn' };
 
   const inRoom = player.piece.location.room != null;
@@ -33,7 +44,13 @@ export function decideRobotIntent(
     inRoom && player.piece.location.accesses.some(a => a.room != null);
 
   // 1. secret passage from corner room (50% per clue.py:407)
-  if (cornerRoomHasPassage && !player.guessedHere && rng() < 0.5) {
+  if (
+    cornerRoomHasPassage &&
+    !game.hasRolledThisTurn &&
+    !game.hasMovedThisTurn &&
+    !player.guessedHere &&
+    rng() < 0.5
+  ) {
     return { kind: 'useSecretPassage' };
   }
 
@@ -78,6 +95,14 @@ export function decideRobotIntent(
   return { kind: 'endTurn' };
 }
 
-function randomOf<T extends readonly string[]>(arr: T, rng: RNG): T[number] {
-  return arr[Math.floor(rng() * arr.length)] as T[number];
+function matchesPendingReveal(card: Card, pending: NonNullable<Game['pendingReveal']>): boolean {
+  return (
+    (card.type === 'suspect' && card.suspect === pending.suspect) ||
+    (card.type === 'weapon' && card.weapon === pending.weapon) ||
+    (card.type === 'room' && card.room === pending.room)
+  );
+}
+
+function randomOf<T>(arr: readonly T[], rng: RNG): T {
+  return arr[Math.floor(rng() * arr.length)]!;
 }

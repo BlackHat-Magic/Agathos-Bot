@@ -32,6 +32,17 @@ function requireGameplayTurn(game: Game, playerIndex: number): void {
   if (game.pendingReveal) throw new Error('a card reveal is pending');
 }
 
+function requireMovementAvailable(player: Player, intent: Intent): void {
+  const movementIntent =
+    intent.kind === 'roll' ||
+    intent.kind === 'moveTo' ||
+    intent.kind === 'useSecretPassage' ||
+    intent.kind === 'suggest';
+  if (player.guessedHere && movementIntent) {
+    throw new Error('player cannot move or suggest after making a suggestion');
+  }
+}
+
 function requireRevealTurn(game: Game, playerIndex: number): void {
   if (game.phase !== 'playing') throw new Error('game is not in the playing phase');
   if (!game.pendingReveal) throw new Error('there is no pending reveal');
@@ -106,6 +117,7 @@ export function applyIntent(
     requireRevealTurn(game, playerIndex);
   } else {
     requireGameplayTurn(game, playerIndex);
+    requireMovementAvailable(player, intent);
     if (player.failedAccusation && intent.kind !== 'endTurn') {
       throw new Error('players with failed accusations may only end their turn');
     }

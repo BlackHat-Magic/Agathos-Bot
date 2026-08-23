@@ -273,7 +273,41 @@ describe('applyIntent', () => {
 
     expect(() => applyIntent(game, 0, {
       kind: 'suggest', suspect: 'Professor Plum', weapon: 'Dagger',
-    })).toThrow('player has already suggested in this room');
+    })).toThrow('player cannot move or suggest after making a suggestion');
+  });
+
+  it('locks movement and repeat suggestions after a reveal resolves, but allows accusation and ending', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1),
+    ]);
+    putInHall(game);
+    applyIntent(game, 0, { kind: 'suggest', suspect: 'Professor Plum', weapon: 'Rope' });
+    applyIntent(game, 1, { kind: 'declineReveal' });
+
+    const forbiddenIntents = [
+      { kind: 'roll' as const },
+      { kind: 'moveTo' as const, destination: '17,18' as const },
+      { kind: 'useSecretPassage' as const },
+      { kind: 'suggest' as const, suspect: 'Professor Plum' as const, weapon: 'Dagger' as const },
+    ];
+    for (const intent of forbiddenIntents) {
+      expect(() => applyIntent(game, 0, intent)).toThrow(
+        'player cannot move or suggest after making a suggestion',
+      );
+    }
+
+    game.solution = {
+      suspect: { type: 'suspect', suspect: 'Mrs. Peacock' },
+      weapon: { type: 'weapon', weapon: 'Rope' },
+      room: { type: 'room', room: 'Library' },
+    };
+    expect(applyIntent(game, 0, {
+      kind: 'accuse', suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library',
+    })).toEqual([{ type: 'accused', playerIndex: 0, correct: false }]);
+    expect(applyIntent(game, 0, { kind: 'endTurn' })).toEqual([
+      { type: 'turnEnded', playerIndex: 0 },
+    ]);
   });
 
   it('rejects malformed coordinates and illegal moves without mutating position', () => {

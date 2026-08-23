@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'bun:test';
+import { applyIntent } from '../src/reducer';
 import { createGame } from '../src/rules';
 import { decideRobotIntent } from '../src/robot';
 import { spaceAt, buildBoard } from '../src/board';
@@ -50,5 +51,57 @@ describe('decideRobotIntent', () => {
     g.players[0].piece.location = spaceAt(g.board, 2, 1);  // Conservatory
     const intent = decideRobotIntent(g, 0, () => 0.4);
     expect(intent.kind).toBe('useSecretPassage');
+  });
+
+  it('shows a matching card even after a failed accusation', () => {
+    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    g.phase = 'playing';
+    g.players[0]!.cards = [{ type: 'weapon', weapon: 'Rope' }];
+    g.players[0]!.failedAccusation = true;
+    g.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Professor Plum',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 0,
+    };
+
+    const intent = decideRobotIntent(g, 0, () => 0);
+    expect(intent).toEqual({ kind: 'showCard', card: { type: 'weapon', weapon: 'Rope' } });
+    expect(applyIntent(g, 0, intent)).toEqual([
+      { type: 'revealed', revealerIndex: 0, cardHint: 'private' },
+    ]);
+  });
+
+  it('declines a pending reveal when it has no matching card', () => {
+    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    g.phase = 'playing';
+    g.players[0]!.cards = [{ type: 'weapon', weapon: 'Dagger' }];
+    g.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Professor Plum',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 0,
+    };
+
+    expect(decideRobotIntent(g, 0, () => 0)).toEqual({ kind: 'declineReveal' });
+  });
+
+  it('does not request a secret passage after dice movement enters a corner room', () => {
+    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    g.turnIndex = 0;
+    g.phase = 'playing';
+    g.lastDieRoll = 7;
+    g.hasRolledThisTurn = true;
+    expect(applyIntent(g, 0, { kind: 'moveTo', destination: 'Lounge' })).toEqual([
+      { type: 'moved', playerIndex: 0, destination: 'Lounge' },
+    ]);
+
+    expect(decideRobotIntent(g, 0, () => 0.4)).toEqual({
+      kind: 'suggest',
+      suspect: 'Mrs. Peacock',
+      weapon: 'Lead Pipe',
+    });
   });
 });
