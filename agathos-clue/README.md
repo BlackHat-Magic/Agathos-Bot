@@ -25,6 +25,23 @@ is `{ authenticated: true, userId, token }`. The helper does not render or
 persist that token. Task 20 can offer the returned token as the
 `bearer.<token>` WebSocket subprotocol.
 
+When the SPA runs as a Discord Activity, it detects the embedded iframe, lazily
+loads `@discord/embedded-app-sdk`, authorizes the `identify` scope, and posts the
+short-lived authorization code to `/auth/embedded`. The Worker exchanges that
+code server-side, returns the app session and a transient Discord access token,
+and the browser passes that access token directly to the SDK's `authenticate`
+command. The access token is not stored in the app session or persistent browser
+storage.
+
+The embedded build needs the public client ID exposed as a Vite variable:
+
+```sh
+VITE_DISCORD_CLIENT_ID=<Discord application client ID> bun run build
+```
+
+Keep `DISCORD_CLIENT_SECRET` and `JWT_SECRET` as Worker secrets. The client ID is
+public; the secret values must never be placed in `VITE_` variables.
+
 ### OAuth configuration
 
 The values below are placeholders only. Do not use them, or any credentials

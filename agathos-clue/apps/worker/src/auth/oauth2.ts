@@ -13,6 +13,7 @@ const MAX_UPSTREAM_BODY_BYTES = 16_384;
 const MAX_CLIENT_ID_LENGTH = 128;
 const MAX_REDIRECT_URI_LENGTH = 2_048;
 const MAX_CODE_LENGTH = 4_096;
+const MAX_REQUEST_BODY_BYTES = 16_384;
 const MAX_STATE_LENGTH = 256;
 const MAX_DISCORD_TOKEN_LENGTH = 1_024;
 const MAX_DISCORD_USER_ID_LENGTH = 32;
@@ -25,6 +26,7 @@ export async function handleOAuth(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
   if (url.pathname === '/auth/begin') return begin(req, env);
   if (url.pathname === '/auth/callback') return callback(req, env);
+  if (url.pathname === '/auth/embedded') return embedded(req, env);
   if (url.pathname === '/auth/session') return session(req, env);
   return text('not found', 404);
 }
@@ -117,14 +119,53 @@ async function session(req: Request, env: Env): Promise<Response> {
   return json({ authenticated: true, userId: claims.userId, token });
 }
 
-async function exchangeCode(code: string, env: Env): Promise<{ accessToken: string }> {
+async function embedded(req: Request, env: Env): Promise<Response> {
+  if (req.method !== 'POST') return methodNotAllowed();
+  if (!isJsonContentType(req.headers.get('Content-Type'))) return authenticationFailure(400);
+  if (!isBoundedString(env.DISCORD_CLIENT_ID, MAX_CLIENT_ID_LENGTH) ||
+      !isBoundedString(env.DISCORD_CLIENT_SECRET, MAX_DISCORD_TOKEN_LENGTH) ||
+      !isBoundedString(env.JWT_SECRET, 4_096)) {
+    return authenticationFailure(503);
+  }
+
+  let value: Record<string, unknown>;
+  try {
+    value = await readJsonRequest(req);
+  } catch {
+    return authenticationFailure(400);
+  }
+  const code = boundedParam(value.code, MAX_CODE_LENGTH);
+  if (code === null) return authenticationFailure(400);
+
+  try {
+    const token = await exchangeCode(code, env, false);
+    const discordUser = await fetchDiscordUser(token.accessToken);
+    if (!isDiscordUserId(discordUser.id)) return authenticationFailure(502);
+
+    const jwt = await mintJwt({ userId: discordUser.id }, env.JWT_SECRET, SESSION_TTL_SECONDS);
+    return json({
+      authenticated: true,
+      userId: discordUser.id,
+      token: jwt,
+      access_token: token.accessToken,
+    });
+  } catch {
+    return authenticationFailure(502);
+  }
+}
+
+async function exchangeCode(
+  code: string,
+  env: Env,
+  includeRedirectUri = true,
+): Promise<{ accessToken: string }> {
   const body = new URLSearchParams({
     client_id: env.DISCORD_CLIENT_ID,
     client_secret: env.DISCORD_CLIENT_SECRET,
     grant_type: 'authorization_code',
     code,
-    redirect_uri: env.DISCORD_REDIRECT_URI,
   });
+  if (includeRedirectUri) body.set('redirect_uri', env.DISCORD_REDIRECT_URI);
   const response = await fetch(DISCORD_TOKEN_ENDPOINT, {
     method: 'POST',
     headers: {
@@ -170,6 +211,24 @@ async function readJsonObject(response: Response): Promise<Record<string, unknow
     throw new Error('invalid upstream JSON');
   }
   if (!isPlainObject(value)) throw new Error('upstream JSON must be an object');
+  return value;
+}
+
+async function readJsonRequest(request: Request): Promise<Record<string, unknown>> {
+  const contentLength = request.headers.get('Content-Length');
+  if (contentLength !== null &&
+      (!/^\d+$/.test(contentLength) || Number(contentLength) > MAX_REQUEST_BODY_BYTES)) {
+    throw new Error('request body is too large');
+  }
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.byteLength > MAX_REQUEST_BODY_BYTES) throw new Error('request body is too large');
+  let value: unknown;
+  try {
+    value = JSON.parse(decoder.decode(bytes));
+  } catch {
+    throw new Error('request body is not valid JSON');
+  }
+  if (!isPlainObject(value)) throw new Error('request JSON must be an object');
   return value;
 }
 
@@ -235,8 +294,8 @@ function readCookie(
   return { value: null, invalid: false };
 }
 
-function boundedParam(value: string | null, maxLength: number): string | null {
-  return value !== null && value.length > 0 && value.length <= maxLength ? value : null;
+function boundedParam(value: unknown, maxLength: number): string | null {
+  return typeof value === 'string' && value.length > 0 && value.length <= maxLength ? value : null;
 }
 
 function constantTimeEqual(left: string, right: string): boolean {
@@ -287,6 +346,10 @@ function failure(clearState: string, status = 400): Response {
   const response = text('authentication failed', status);
   response.headers.append('Set-Cookie', clearState);
   return response;
+}
+
+function authenticationFailure(status: number): Response {
+  return text('authentication failed', status);
 }
 
 function unauthenticated(clearSession?: string): Response {
