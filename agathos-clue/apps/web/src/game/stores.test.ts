@@ -56,26 +56,30 @@ afterEach(() => {
 
 describe('global game stores', () => {
   it('clears a mirrored transport error after the next successful frame', () => {
-    const socket = new FakeSocket();
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
     Object.defineProperty(globalThis, 'location', {
       configurable: true,
       value: { origin: 'https://example.test' },
     });
     Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: class {
       constructor() {
+        const socket = new FakeSocket();
+        sockets.push(socket);
         return socket;
       }
     } });
 
     gameId.set('game');
     session.set({ authenticated: true, userId: 'alice', token: 'jwt' });
-    socket.fail();
+    sockets[0]!.fail();
     expect(get(error)).toBe('WebSocket connection error');
-    socket.open();
+    vi.advanceTimersByTime(1_000);
+    sockets[1]!.open();
     expect(get(error)).toBeNull();
-    socket.message(JSON.stringify({ type: 'error', message: 'game is full' }));
+    sockets[1]!.message(JSON.stringify({ type: 'error', message: 'game is full' }));
     expect(get(error)).toBe('game is full');
-    socket.message(JSON.stringify({
+    sockets[1]!.message(JSON.stringify({
       type: 'lobby', gameId: 'game', isHost: false, players: [],
     }));
     expect(get(error)).toBeNull();

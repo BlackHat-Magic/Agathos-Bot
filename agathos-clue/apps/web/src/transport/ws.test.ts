@@ -182,7 +182,7 @@ describe('typed WebSocket transport', () => {
     transport.close();
   });
 
-  it('queues actions after a socket error and preserves replay ordering', () => {
+  it('reconnects after a socket error without waiting for an external close', () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
     const transport = connect('game', 'jwt', {
@@ -196,14 +196,74 @@ describe('typed WebSocket transport', () => {
     sockets[0]!.open();
     transport.send(createJoinIntent('Alice'));
     sockets[0]!.fail();
+    expect(get(transport.status)).toBe('reconnecting');
+    expect(get(transport.error)).toBe('WebSocket connection error');
     expect(transport.send(createRollIntent())).toBe(true);
-    sockets[0]!.close();
     vi.advanceTimersByTime(1_000);
     sockets[1]!.open();
     expect(sockets[1]!.sent).toEqual([
       '{"intent":{"kind":"join","name":"Alice"}}',
       '{"intent":{"kind":"roll"}}',
     ]);
+    transport.close();
+  });
+
+  it('does not replay a lobby join after an authoritative state frame', () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const transport = connect('game', 'jwt', {
+      origin: 'https://example.test',
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    sockets[0]!.open();
+    transport.send(createJoinIntent('Alice'));
+    sockets[0]!.message(JSON.stringify({
+      type: 'lobby', gameId: 'game', isHost: false, players: [],
+    }));
+    sockets[0]!.message(JSON.stringify({
+      type: 'state',
+      view: {
+        phase: 'playing', boardWidth: 24, boardHeight: 25,
+        players: [{ name: 'Alice', suspect: 'Miss Scarlett', location: '16,24', handCount: 0,
+          failedAccusation: false, guessedHere: false, isRobot: false, movedBySuggestion: false }],
+        weaponLocations: [], turnIndex: 0, winnerIndex: null, pendingReveal: null,
+        lastDieRoll: null, myIndex: 0, myHand: [],
+      },
+      events: [],
+    }));
+    sockets[0]!.close();
+    vi.advanceTimersByTime(1_000);
+    sockets[1]!.open();
+
+    expect(sockets[1]!.sent).toEqual([]);
+    transport.close();
+  });
+
+  it('schedules only one reconnect when an error is followed by close', () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const transport = connect('game', 'jwt', {
+      origin: 'https://example.test',
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    sockets[0]!.open();
+    sockets[0]!.fail();
+    sockets[0]!.close();
+    vi.advanceTimersByTime(1_000);
+
+    expect(sockets).toHaveLength(2);
+    vi.advanceTimersByTime(60_000);
+    expect(sockets).toHaveLength(2);
     transport.close();
   });
 

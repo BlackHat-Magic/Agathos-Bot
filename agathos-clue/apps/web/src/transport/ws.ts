@@ -159,9 +159,16 @@ export function connect(gameId: string, token: string, options: TransportOptions
   function handleSocketError(errorSocket: WebSocketLike): void {
     if (isClosed || socket !== errorSocket) return;
     replayJoinOnOpen = (isOpen || replayJoinOnOpen) && lastJoinIntent !== undefined;
+    socket = undefined;
     isOpen = false;
     statusStore.set('reconnecting');
     setTransportError('WebSocket connection error');
+    scheduleReconnect();
+    try {
+      errorSocket.close(1011, 'transport error');
+    } catch {
+      // The socket is already unusable; the reconnect is already scheduled.
+    }
   }
 
   function handleUnexpectedSocketFailure(): void {
@@ -255,6 +262,7 @@ export function connect(gameId: string, token: string, options: TransportOptions
       case 'state':
         // A state frame is the public baseline. A following private frame is
         // the only authority that may add a local reveal to this baseline.
+        clearRememberedJoin();
         currentPrivateReveal = null;
         privateRevealStore.set(null);
         setView(frame.view);
@@ -278,6 +286,7 @@ export function connect(gameId: string, token: string, options: TransportOptions
         errorStore.set(null);
         return;
       case 'ready':
+        clearRememberedJoin();
         currentPrivateReveal = null;
         privateRevealStore.set(null);
         setView(null);
