@@ -199,6 +199,9 @@ export function applyIntent(
     case 'declineReveal': {
       const pending = game.pendingReveal;
       if (!pending) throw new Error('there is no pending reveal');
+      if (player.cards.some(card => matchesSuggestion(card, pending))) {
+        throw new Error('revealer must show a matching card instead of declining');
+      }
 
       const events: Event[] = [{ type: 'declinedReveal', revealerIndex: playerIndex }];
       const next = nextPlayerIndex(game, playerIndex);

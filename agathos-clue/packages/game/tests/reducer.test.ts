@@ -272,6 +272,27 @@ describe('applyIntent', () => {
     expect(game.pendingReveal).toBeNull();
   });
 
+  it('rejects declining when the revealer owns a matching card without changing the pending reveal', () => {
+    const game = playingGame([
+      player('Miss Scarlett', 0),
+      player('Professor Plum', 1, [{ type: 'weapon', weapon: 'Rope' }]),
+      player('Mrs. Peacock', 2),
+    ]);
+    game.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Professor Plum',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 1,
+    };
+    const pendingReveal = game.pendingReveal;
+
+    expect(() => applyIntent(game, 1, { kind: 'declineReveal' })).toThrow(
+      'revealer must show a matching card instead of declining',
+    );
+    expect(game.pendingReveal).toBe(pendingReveal);
+  });
+
   it('uses secret passages between opposite corner rooms only', () => {
     const game = playingGame([player('Miss Scarlett', 0)]);
     game.players[0]!.piece.location = game.board[2]![1]!;
