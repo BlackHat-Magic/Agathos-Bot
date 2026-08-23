@@ -571,6 +571,29 @@ describe('applyIntent', () => {
     expect(winner.winnerIndex).toBe(0);
   });
 
+  it('rejects accusations with missing or malformed solutions', () => {
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    const accuse = {
+      kind: 'accuse' as const,
+      suspect: 'Miss Scarlett' as const,
+      weapon: 'Rope' as const,
+      room: 'Library' as const,
+    };
+
+    expect(() => applyIntent(game, 0, accuse)).toThrow(
+      'cannot evaluate accusation without a game solution',
+    );
+
+    const malformed: unknown = {
+      suspect: { type: 'weapon', suspect: 'Miss Scarlett' },
+      weapon: { type: 'weapon', weapon: 'Rope' },
+      room: { type: 'room', room: 'Library' },
+    };
+    game.solution = malformed as typeof game.solution;
+
+    expect(() => applyIntent(game, 0, accuse)).toThrow('invalid game solution');
+  });
+
   it('ends a turn, resets per-turn flags, and advances past failed players', () => {
     const players = [player('Miss Scarlett', 0), player('Professor Plum', 1), player('Mrs. Peacock', 2)];
     const game = playingGame(players);

@@ -1,6 +1,6 @@
 import { spaceAt } from './board';
 import { reachable } from './pathfind';
-import { evaluateAccusation } from './rules';
+import { evaluateAccusation, requireAccusationSolution } from './rules';
 import type { Card, Game, Intent, Player, Room, Suspect, Weapon } from './types';
 import { ROOMS } from './types';
 
@@ -239,6 +239,7 @@ export function applyIntent(
     }
 
     case 'accuse': {
+      requireAccusationSolution(game);
       const correct = evaluateAccusation(game, playerIndex, {
         suspect: intent.suspect,
         weapon: intent.weapon,

@@ -1,4 +1,4 @@
-import type { Card, Game, Player, Room, Suspect, SuspectCard, Weapon, WeaponCard, RoomCard } from './types';
+import type { Card, Game, Player, Room, Solution, Suspect, SuspectCard, Weapon, WeaponCard, RoomCard } from './types';
 import { SUSPECTS, WEAPONS, ROOMS } from './types';
 import { buildBoard, spaceAt, suspectStart } from './board';
 
@@ -154,12 +154,47 @@ export function resolveSuggestion(
   return { revealerIndex: null, card: null };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isValidSolutionCard(
+  value: unknown,
+  type: 'suspect' | 'weapon' | 'room',
+  field: 'suspect' | 'weapon' | 'room',
+  validValues: readonly string[],
+): boolean {
+  if (!isRecord(value) || value.type !== type) return false;
+  const cardValue = value[field];
+  return typeof cardValue === 'string' && validValues.includes(cardValue);
+}
+
+function isValidSolution(value: unknown): value is Solution {
+  return (
+    isRecord(value) &&
+    isValidSolutionCard(value.suspect, 'suspect', 'suspect', SUSPECTS) &&
+    isValidSolutionCard(value.weapon, 'weapon', 'weapon', WEAPONS) &&
+    isValidSolutionCard(value.room, 'room', 'room', ROOMS)
+  );
+}
+
+export function requireAccusationSolution(game: Game): Solution {
+  const solution: unknown = game.solution;
+  if (solution === null || solution === undefined) {
+    throw new Error('cannot evaluate accusation without a game solution');
+  }
+  if (!isValidSolution(solution)) {
+    throw new Error('invalid game solution');
+  }
+  return solution;
+}
+
 export function evaluateAccusation(
   game: Game,
   playerIndex: number,
   guess: { suspect: Suspect; weapon: Weapon; room: Room },
 ): boolean {
-  const sol = game.solution!;
+  const sol = requireAccusationSolution(game);
   const ok =
     sol.suspect.suspect === guess.suspect &&
     sol.weapon.weapon === guess.weapon &&

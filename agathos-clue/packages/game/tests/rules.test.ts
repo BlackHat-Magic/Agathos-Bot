@@ -163,6 +163,38 @@ describe('evaluateAccusation', () => {
     };
     expect(evaluateAccusation(g, 0, { suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' })).toBe(true);
   });
+
+  it('rejects an accusation when the solution is missing', () => {
+    const g = createGame([mkPlayer('Miss Scarlett', 0)]);
+
+    expect(() => evaluateAccusation(g, 0, {
+      suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library',
+    })).toThrow('cannot evaluate accusation without a game solution');
+  });
+
+  it('rejects malformed runtime solution cards', () => {
+    const g = createGame([mkPlayer('Miss Scarlett', 0)]);
+    const malformedSolutions: unknown[] = [
+      {
+        suspect: { type: 'weapon', suspect: 'Miss Scarlett' },
+        weapon: { type: 'weapon', weapon: 'Rope' },
+        room: { type: 'room', room: 'Library' },
+      },
+      {
+        suspect: { type: 'suspect', suspect: 'Unknown Suspect' },
+        weapon: { type: 'weapon', weapon: 'Rope' },
+        room: { type: 'room', room: 'Library' },
+      },
+    ];
+
+    for (const malformed of malformedSolutions) {
+      g.solution = malformed as typeof g.solution;
+      expect(() => evaluateAccusation(g, 0, {
+        suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library',
+      })).toThrow('invalid game solution');
+    }
+  });
+
   it('marks the player failedAccusation on loss', () => {
     const players = [mkPlayer('Miss Scarlett', 0), mkPlayer('Professor Plum', 1)];
     const g = createGame(players);
