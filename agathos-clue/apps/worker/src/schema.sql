@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS games (
+  id TEXT PRIMARY KEY, created_at INTEGER NOT NULL,
+  started_at INTEGER, finished_at INTEGER,
+  host_user_id TEXT NOT NULL, state TEXT NOT NULL,
+  player_count INTEGER NOT NULL, bot_count INTEGER NOT NULL,
+  winner_user_id TEXT, config_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS game_players (
+  game_id TEXT NOT NULL REFERENCES games(id),
+  user_id TEXT NOT NULL, suspect TEXT NOT NULL,
+  is_bot INTEGER NOT NULL DEFAULT 0, finished_rank INTEGER,
+  PRIMARY KEY (game_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS game_events (
+  game_id TEXT NOT NULL, seq INTEGER NOT NULL,
+  ts INTEGER NOT NULL, event_json TEXT NOT NULL,
+  PRIMARY KEY (game_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS games_host ON games(host_user_id);
+CREATE INDEX IF NOT EXISTS games_state ON games(state);
