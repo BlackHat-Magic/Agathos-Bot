@@ -190,10 +190,7 @@ export interface GameView {
    * fabricated or leaked.
    */
   lastSuggestionReveal?: { fromIndex: number; card: Card };
-  /**
-   * Reserved for Task 16/private server event handling. Intentionally omitted
-   * by the current toView because Game does not own this state yet.
-   */
+  /** Optional authoritative destinations for the viewer's current dice move. */
   reachableSpacesHints?: Array<Room | CellId>;
   solution?: Solution;
 }

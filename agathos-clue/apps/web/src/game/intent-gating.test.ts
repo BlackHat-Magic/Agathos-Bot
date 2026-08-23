@@ -59,4 +59,23 @@ describe('game intent gating', () => {
       canSuggest: false, canAccuse: false, canEndTurn: true,
     });
   });
+
+  it('does not advertise movement intents after making a suggestion', () => {
+    const current = view({
+      players: [
+        { ...view().players[0]!, guessedHere: true },
+        view().players[1]!,
+      ],
+      hasRolledThisTurn: true,
+      lastDieRoll: 7,
+    });
+
+    expect(actionsFor(current)).toMatchObject({
+      canRoll: false,
+      canUseSecretPassage: false,
+      canSuggest: false,
+      canMove: false,
+      canEndTurn: true,
+    });
+  });
 });

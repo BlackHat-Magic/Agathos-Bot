@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { BoardLocation, BoardRenderer } from '../BoardRenderer';
+  import type { BoardRenderer } from '../BoardRenderer';
   import { Canvas2DRenderer } from '../canvas2d';
+  import { canClickMove } from '../movement-gating';
+  import { finishedGameMessage } from '../result-message';
   import { currentView, error, send } from '../stores';
   import { createMoveToIntent } from '../../transport/intents';
   import IntentBar from './IntentBar.svelte';
@@ -21,26 +23,12 @@
     if (width > 0 && height > 0) nextRenderer.resize(width, height);
   }
 
-  function isCurrentTurnMove(location: BoardLocation): boolean {
-    const view = $currentView;
-    const hasRolled = view === null ? false : view.hasRolledThisTurn ?? view.lastDieRoll !== null;
-    const hasMoved = view?.hasMovedThisTurn ?? false;
-    if (view === null || view.phase !== 'playing' || view.turnIndex !== view.myIndex ||
-        view.pendingReveal !== null || view.players[view.myIndex]?.failedAccusation ||
-        !hasRolled || hasMoved) return false;
-    const hints = view.reachableSpacesHints;
-    return hints === undefined || hints.includes(location);
-  }
-
   onMount(() => {
     const nextRenderer = new Canvas2DRenderer();
     renderer = nextRenderer;
     nextRenderer.attach(canvas);
     nextRenderer.onUserClickCell(location => {
-      if (isCurrentTurnMove(location)) {
-        // The renderer only reports canonical board locations; the view gates the action.
-        if (isCurrentTurnMove(location)) send(createMoveToIntent(location));
-      }
+      if (canClickMove($currentView, location)) send(createMoveToIntent(location));
     });
 
     const resize = (): void => resizeBoard(nextRenderer);
@@ -111,7 +99,7 @@
         <section class="mt-4 rounded-2xl border border-mocha-green/35 bg-mocha-green/10 p-4" aria-labelledby="result-title">
           <p class="text-xs font-semibold uppercase tracking-[0.18em] text-mocha-green">Investigation complete</p>
           <h2 id="result-title" class="mt-1 font-display text-2xl font-semibold">
-            {$currentView.winnerIndex === $currentView.myIndex ? 'You solved the case.' : `${$currentView.players[$currentView.winnerIndex ?? 0]?.name ?? 'A detective'} solved the case.`}
+            {finishedGameMessage($currentView)}
           </h2>
           {#if $currentView.solution}
             <p class="mt-2 text-sm text-mocha-subtext1">

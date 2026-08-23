@@ -384,6 +384,9 @@ describe('GameRoom protocol helpers', () => {
     expect(() => parseIntentEnvelope(JSON.stringify({ intent: null }))).toThrow(
       'invalid intent envelope',
     );
+    expect(() => parseIntentEnvelope(JSON.stringify({ intent: { kind: 7 } }))).toThrow(
+      'invalid intent envelope',
+    );
     expect(parseIntentEnvelope(JSON.stringify({ intent: { kind: 'wait' } }))).toEqual({
       intent: { kind: 'wait' },
     });

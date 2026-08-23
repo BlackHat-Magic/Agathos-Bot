@@ -24,12 +24,12 @@ export function actionsFor(view: GameView | null): TurnActions {
   return {
     myTurn,
     failedAccusation,
-    canRoll: myTurn && !failedAccusation && !hasRolled && !hasMoved,
+    canRoll: myTurn && !failedAccusation && !player?.guessedHere && !hasRolled && !hasMoved,
     canUseSecretPassage: myTurn && !failedAccusation &&
-      view?.canUseSecretPassage === true && !hasRolled && !hasMoved,
-    canSuggest: myTurn && !failedAccusation && view?.canSuggest === true,
+      !player?.guessedHere && view?.canUseSecretPassage === true && !hasRolled && !hasMoved,
+    canSuggest: myTurn && !failedAccusation && !player?.guessedHere && view?.canSuggest === true,
     canAccuse: myTurn && !failedAccusation,
     canEndTurn: myTurn,
-    canMove: movementAvailable,
+    canMove: movementAvailable && !player?.guessedHere,
   };
 }

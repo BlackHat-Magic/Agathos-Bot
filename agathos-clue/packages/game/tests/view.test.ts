@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { buildBoard, spaceAt, suspectStart } from '../src/board';
+import { reachable } from '../src/pathfind';
 import { createGame } from '../src/rules';
 import { toView } from '../src/view';
 import type { Card, Game, Player, Suspect } from '../src/types';
@@ -133,6 +134,57 @@ describe('toView', () => {
     expect(serialized).not.toContain('accesses');
     expect(serialized).not.toContain('"board":');
     expect(serialized).toContain('16,24');
+  });
+
+  it('projects canonical reachable destinations only for an eligible current player', () => {
+    const game = playingGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
+    const start = spaceAt(game.board, 16, 24);
+    game.players[0]!.piece.location = start;
+    game.lastDieRoll = 7;
+    game.hasRolledThisTurn = true;
+
+    const view = toView(game, 0);
+    expect(view.reachableSpacesHints).toEqual(
+      reachable(start, 7).spaces.map(space => space.room ?? `${space.pos![0]},${space.pos![1]}`),
+    );
+    expect(view.reachableSpacesHints).toContain('Lounge');
+    expect(toView(game, 1).reachableSpacesHints).toBeUndefined();
+  });
+
+  it('omits movement hints when reducer movement preconditions are not met', () => {
+    const game = playingGame([player('Miss Scarlett', 0), player('Professor Plum', 1)]);
+    game.players[0]!.piece.location = spaceAt(game.board, 16, 24);
+    game.lastDieRoll = 7;
+    game.hasRolledThisTurn = true;
+    game.solution = solution;
+
+    const cases: Array<Partial<Game>> = [
+      { turnIndex: 1 },
+      { phase: 'finished' },
+      { hasRolledThisTurn: false },
+      { lastDieRoll: null },
+      { hasMovedThisTurn: true },
+      { pendingReveal: {
+        suggesterIndex: 1, suspect: 'Professor Plum', weapon: 'Rope', room: 'Hall', revealerIndex: 0,
+      } },
+    ];
+    for (const state of cases) {
+      const original = {
+        phase: game.phase,
+        turnIndex: game.turnIndex,
+        hasMovedThisTurn: game.hasMovedThisTurn,
+        pendingReveal: game.pendingReveal,
+      };
+      Object.assign(game, state);
+      expect(toView(game, 0).reachableSpacesHints).toBeUndefined();
+      Object.assign(game, original);
+    }
+
+    game.players[0]!.failedAccusation = true;
+    expect(toView(game, 0).reachableSpacesHints).toBeUndefined();
+    game.players[0]!.failedAccusation = false;
+    game.players[0]!.guessedHere = true;
+    expect(toView(game, 0).reachableSpacesHints).toBeUndefined();
   });
 
   it('rejects an invalid viewer index', () => {

@@ -1,4 +1,5 @@
 import { BOARD_HEIGHT, BOARD_WIDTH } from './board';
+import { reachable } from './pathfind';
 import { cardMatchesSuggestion, clonePendingReveal } from './rules';
 import {
   assertCard, cloneSolution,
@@ -100,6 +101,13 @@ export function toView(game: Game, viewerIndex: number): GameView {
     view.myRevealOpportunities = viewer.cards
       .filter(card => matchesPendingReveal(card, pendingReveal))
       .map(cloneCard);
+  }
+
+  if (game.phase === 'playing' && game.turnIndex === viewerIndex &&
+      pendingReveal === null && !viewer.failedAccusation && !viewer.guessedHere &&
+      game.hasRolledThisTurn && game.lastDieRoll !== null && !game.hasMovedThisTurn) {
+    view.reachableSpacesHints = reachable(viewer.piece.location, game.lastDieRoll).spaces
+      .map(projectLocation);
   }
 
   if (finishedSolution !== undefined) view.solution = finishedSolution;
