@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildBoard, createGame, spaceAt } from '@agathos/game';
-import type { Intent, Player } from '@agathos/game';
-import { serializeGame } from './game-storage';
+import type { Card, Intent, Player } from '@agathos/game';
+import { hydrateGame, serializeGame } from './game-storage';
 import type { Env } from './index';
 import {
   assertIntentAuthority,
@@ -12,11 +12,24 @@ import {
 } from './game-room-protocol';
 
 type TestWebSocketListener = (event: { data?: unknown }) => void;
+type TestMessage =
+  | { type: 'ready' }
+  | { type: 'error'; message: string }
+  | {
+    type: 'state';
+    view: {
+      myIndex: number;
+      myHand: Card[];
+      turnIndex: number;
+    };
+    events: unknown[];
+  };
 
 class BunWebSocketFallback {
   readyState = 1;
   peer: BunWebSocketFallback | undefined;
   private readonly listeners = new Map<string, TestWebSocketListener[]>();
+  private readonly pendingMessages: Array<{ data?: unknown }> = [];
 
   accept(): void {}
 
@@ -24,6 +37,9 @@ class BunWebSocketFallback {
     const listeners = this.listeners.get(type) ?? [];
     listeners.push(listener);
     this.listeners.set(type, listeners);
+    if (type === 'message' && this.pendingMessages.length > 0) {
+      for (const event of this.pendingMessages.splice(0)) listener(event);
+    }
   }
 
   send(data: string | ArrayBuffer): void {
@@ -41,7 +57,12 @@ class BunWebSocketFallback {
   }
 
   private dispatch(type: string, event: { data?: unknown }): void {
-    for (const listener of this.listeners.get(type) ?? []) listener(event);
+    const listeners = this.listeners.get(type) ?? [];
+    if (type === 'message' && listeners.length === 0) {
+      this.pendingMessages.push(event);
+      return;
+    }
+    for (const listener of listeners) listener(event);
   }
 }
 
@@ -55,7 +76,7 @@ class BunWebSocketPairFallback {
   }
 }
 
-if (typeof WebSocketPair === 'undefined') {
+if (typeof WebSocketPair === 'undefined' || Object.hasOwn(globalThis, 'Bun')) {
   Object.assign(globalThis, { WebSocketPair: BunWebSocketPairFallback });
 }
 
@@ -74,14 +95,19 @@ vi.mock('cloudflare:workers', () => ({
 const { GameRoom: GameRoomClass } = await import('./GameRoom');
 type GameRoom = InstanceType<typeof GameRoomClass>;
 
-function player(suspect: Player['suspect'], index: number, userId: string): Player {
+function player(
+  suspect: Player['suspect'],
+  index: number,
+  userId: string,
+  cards: Card[] = [],
+): Player {
   const board = buildBoard();
   return {
     name: suspect,
     index,
     suspect,
     piece: { suspect, location: spaceAt(board, 16, 24) },
-    cards: [],
+    cards,
     failedAccusation: false,
     guessedHere: false,
     movedBySuggestion: false,
@@ -91,14 +117,30 @@ function player(suspect: Player['suspect'], index: number, userId: string): Play
   };
 }
 
-function room(stored?: unknown): GameRoom {
+interface TestStorage {
+  value: unknown;
+  failPuts: boolean;
+  putCount: number;
+}
+
+function roomWithStorage(stored?: unknown): { gameRoom: GameRoom; storage: TestStorage } {
+  const storage: TestStorage = { value: stored, failPuts: false, putCount: 0 };
   const ctx = {
     storage: {
-      get: async <T>() => stored as T | undefined,
+      get: async <T>() => storage.value as T | undefined,
+      put: async (_key: string, value: unknown) => {
+        storage.putCount += 1;
+        if (storage.failPuts) throw new Error('storage unavailable');
+        storage.value = value;
+      },
     },
     blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
   } as unknown as DurableObjectState;
-  return new GameRoomClass(ctx, {} as Env);
+  return { gameRoom: new GameRoomClass(ctx, {} as Env), storage };
+}
+
+function room(stored?: unknown): GameRoom {
+  return roomWithStorage(stored).gameRoom;
 }
 
 function upgradeRequest(protocol: string): Request {
@@ -118,6 +160,66 @@ function closeConnections(gameRoom: GameRoom): void {
   for (const ws of (gameRoom as unknown as { connections: Map<WebSocket, unknown> }).connections.keys()) {
     ws.close();
   }
+}
+
+function messageQueue(ws: WebSocket): {
+  received: TestMessage[];
+  next: () => Promise<TestMessage>;
+} {
+  const received: TestMessage[] = [];
+  const waiters: Array<(message: TestMessage) => void> = [];
+  let consumed = 0;
+  ws.addEventListener('message', event => {
+    const message = JSON.parse(String(event.data)) as TestMessage;
+    received.push(message);
+    waiters.shift()?.(message);
+  });
+  return {
+    received,
+    next: () => {
+      if (consumed < received.length) return Promise.resolve(received[consumed++]!);
+      return new Promise(resolve => waiters.push(message => {
+        consumed += 1;
+        resolve(message);
+      }));
+    },
+  };
+}
+
+async function connectJoinedPlayer(
+  gameRoom: GameRoom,
+  userId: string,
+): Promise<{ client: WebSocket; messages: ReturnType<typeof messageQueue>; initial: TestMessage }> {
+  const response = await gameRoom.fetch(upgradeRequest(`bearer.dev-token-${userId}`));
+  expect(response.status).toBe(101);
+  let client = response.webSocket;
+  if (client === null || client === undefined) {
+    const connections = (gameRoom as unknown as {
+      connections: Map<WebSocket, { ws: WebSocket; userId: string }>;
+    }).connections;
+    const server = [...connections.values()].find(connection => connection.userId === userId)?.ws;
+    const peer = (server as unknown as { peer?: WebSocket } | undefined)?.peer;
+    if (peer === undefined) throw new Error('test WebSocket was not returned');
+    client = peer;
+  }
+  client.accept();
+  const messages = messageQueue(client);
+  const initial = await messages.next();
+  return { client, messages, initial };
+}
+
+function joinedGame(): ReturnType<typeof serializeGame> {
+  const game = createGame([
+    player('Miss Scarlett', 0, 'alice', [{ type: 'room', room: 'Library' }]),
+    player('Professor Plum', 1, 'bob', [{ type: 'weapon', weapon: 'Lead Pipe' }]),
+  ]);
+  game.phase = 'playing';
+  game.solution = {
+    suspect: { type: 'suspect', suspect: 'Mrs. Peacock' },
+    weapon: { type: 'weapon', weapon: 'Dagger' },
+    room: { type: 'room', room: 'Study' },
+  };
+  return serializeGame(game);
 }
 
 describe('GameRoom protocol helpers', () => {
@@ -231,5 +333,74 @@ describe('GameRoom protocol helpers', () => {
 
     expect(response.status).toBe(500);
     expect(connectionCount(gameRoom)).toBe(0);
+  });
+
+  it('persists a joined mutation and broadcasts redacted views to each viewer', async () => {
+    const stored = joinedGame();
+    const { gameRoom, storage } = roomWithStorage(stored);
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+
+    expect(alice.initial).toMatchObject({
+      type: 'state',
+      view: { myIndex: 0, myHand: [{ type: 'room', room: 'Library' }], turnIndex: 0 },
+    });
+    expect(bob.initial).toMatchObject({
+      type: 'state',
+      view: { myIndex: 1, myHand: [{ type: 'weapon', weapon: 'Lead Pipe' }], turnIndex: 0 },
+    });
+
+    alice.client.send(JSON.stringify({ intent: { kind: 'endTurn' } }));
+
+    const aliceUpdate = await alice.messages.next();
+    const bobUpdate = await bob.messages.next();
+    expect(aliceUpdate).toMatchObject({
+      type: 'state',
+      view: { myIndex: 0, myHand: [{ type: 'room', room: 'Library' }], turnIndex: 1 },
+      events: [{ type: 'turnEnded', playerIndex: 0 }],
+    });
+    expect(bobUpdate).toMatchObject({
+      type: 'state',
+      view: { myIndex: 1, myHand: [{ type: 'weapon', weapon: 'Lead Pipe' }], turnIndex: 1 },
+      events: [{ type: 'turnEnded', playerIndex: 0 }],
+    });
+    expect(JSON.stringify(bobUpdate)).not.toContain('Library');
+    expect(storage.putCount).toBe(1);
+    expect(hydrateGame(storage.value).turnIndex).toBe(1);
+
+    closeConnections(gameRoom);
+  });
+
+  it('rolls back a joined mutation and reports storage failures without broadcasting', async () => {
+    const stored = joinedGame();
+    const { gameRoom, storage } = roomWithStorage(stored);
+    storage.failPuts = true;
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+
+    alice.client.send(JSON.stringify({ intent: { kind: 'endTurn' } }));
+
+    await expect(alice.messages.next()).resolves.toEqual({
+      type: 'error',
+      message: 'storage unavailable',
+    });
+    expect(bob.messages.received).toHaveLength(1);
+    expect(storage.putCount).toBe(1);
+    expect(storage.value).toEqual(stored);
+
+    storage.failPuts = false;
+    alice.client.send(JSON.stringify({ intent: { kind: 'endTurn' } }));
+    await expect(alice.messages.next()).resolves.toMatchObject({
+      type: 'state',
+      view: { myIndex: 0, turnIndex: 1 },
+    });
+    await expect(bob.messages.next()).resolves.toMatchObject({
+      type: 'state',
+      view: { myIndex: 1, turnIndex: 1 },
+    });
+    expect(storage.putCount).toBe(2);
+    expect(hydrateGame(storage.value).turnIndex).toBe(1);
+
+    closeConnections(gameRoom);
   });
 });
