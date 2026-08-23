@@ -43,9 +43,14 @@ export {
 } from './game-room-protocol';
 
 const STORAGE_KEY = 'game';
+const ROBOT_ALARM_INFO_STORAGE_KEY = 'robot-alarm-info';
 const ROBOT_RETRY_INITIAL_DELAY_MS = 1_000;
 const ROBOT_RETRY_MAX_DELAY_MS = 60_000;
 const ROBOT_RETRY_MAX_ATTEMPT = 6;
+
+interface RobotAlarmInfo {
+  retryCount: number;
+}
 
 interface Connection {
   ws: WebSocket;
@@ -141,14 +146,16 @@ export class GameRoom extends DurableObject<Env> {
     try {
       await this.enqueueRoomTask(async () => {
         await this.loadGame();
+        await this.applyAlarmRetryCount(alarmInfo);
         if (this.game === undefined || !hasRobotActionableState(this.game)) {
-          this.resetRobotRetry();
+          await this.resetRobotRetry();
           return;
         }
-        await this.maybeRunRobot(true);
+        await this.runRobotIfNeededWithFailurePolicy(true);
       });
     } catch (error) {
       console.error(`robot alarm failed: ${errorMessage(error)}`);
+      throw error;
     }
   }
 
@@ -161,6 +168,10 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   private async runRobotIfNeeded(): Promise<void> {
+    return this.runRobotIfNeededWithFailurePolicy(false);
+  }
+
+  private async runRobotIfNeededWithFailurePolicy(propagateFailure: boolean): Promise<void> {
     if (this.robotRun !== undefined) return this.robotRun;
 
     const run = this.runRobotScheduler();
@@ -169,6 +180,7 @@ export class GameRoom extends DurableObject<Env> {
       await run;
     } catch (error) {
       console.error(`robot scheduler failed: ${errorMessage(error)}`);
+      if (propagateFailure) throw error;
     } finally {
       if (this.robotRun === run) this.robotRun = undefined;
     }
@@ -188,18 +200,18 @@ export class GameRoom extends DurableObject<Env> {
           await this.ctx.storage.put(STORAGE_KEY, serializeGame(game));
         },
         broadcast: events => this.broadcast(events),
-        onActionPersisted: () => { this.robotRetryAttempt = 0; },
       });
-      this.resetRobotRetry();
+      await this.resetRobotRetry();
     } catch (error) {
       if (this.game !== undefined && hasRobotActionableState(this.game)) {
         try {
           await this.scheduleRobotRetry();
         } catch (scheduleError) {
           console.error(`robot retry scheduling failed: ${errorMessage(scheduleError)}`);
+          throw scheduleError;
         }
       } else {
-        this.resetRobotRetry();
+        await this.resetRobotRetry();
       }
       throw error;
     }
@@ -210,6 +222,10 @@ export class GameRoom extends DurableObject<Env> {
     this.gameLoad ??= this.ctx.blockConcurrencyWhile(async () => {
       const storedGame = await this.ctx.storage.get<unknown>(STORAGE_KEY);
       this.game = storedGame === undefined ? createInitialGame() : hydrateGame(storedGame);
+      const storedRobotAlarmInfo = await this.ctx.storage.get<unknown>(
+        ROBOT_ALARM_INFO_STORAGE_KEY,
+      );
+      this.robotRetryAttempt = readRetryCount(storedRobotAlarmInfo);
       const storedLobby = await this.ctx.storage.get<unknown>(LOBBY_STORAGE_KEY);
       this.lobby = storedLobby === undefined ? createLobby() : await this.loadLobby(storedLobby);
       return this.game;
@@ -352,10 +368,14 @@ export class GameRoom extends DurableObject<Env> {
 
   private async scheduleRobotRetry(): Promise<void> {
     if (this.game === undefined || !hasRobotActionableState(this.game)) {
-      this.resetRobotRetry();
+      await this.resetRobotRetry();
       return;
     }
     if (this.robotAlarmScheduled) return;
+
+    const nextRetryAttempt = Math.min(this.robotRetryAttempt + 1, ROBOT_RETRY_MAX_ATTEMPT);
+    await this.persistRetryCount(nextRetryAttempt);
+    this.robotRetryAttempt = nextRetryAttempt;
 
     const existingAlarm = await this.ctx.storage.getAlarm();
     if (existingAlarm !== null) {
@@ -364,16 +384,30 @@ export class GameRoom extends DurableObject<Env> {
     }
 
     const delay = Math.min(
-      ROBOT_RETRY_INITIAL_DELAY_MS * 2 ** this.robotRetryAttempt,
+      ROBOT_RETRY_INITIAL_DELAY_MS * 2 ** (nextRetryAttempt - 1),
       ROBOT_RETRY_MAX_DELAY_MS,
     );
     await this.ctx.storage.setAlarm(Date.now() + delay);
     this.robotAlarmScheduled = true;
-    this.robotRetryAttempt = Math.min(this.robotRetryAttempt + 1, ROBOT_RETRY_MAX_ATTEMPT);
   }
 
-  private resetRobotRetry(): void {
+  private async resetRobotRetry(): Promise<void> {
+    if (this.robotRetryAttempt === 0) return;
+    await this.persistRetryCount(0);
     this.robotRetryAttempt = 0;
+  }
+
+  private async applyAlarmRetryCount(alarmInfo?: AlarmInvocationInfo): Promise<void> {
+    if (!isAlarmInvocationInfo(alarmInfo)) return;
+    const retryCount = Math.min(alarmInfo.retryCount, ROBOT_RETRY_MAX_ATTEMPT);
+    if (retryCount <= this.robotRetryAttempt) return;
+    await this.persistRetryCount(retryCount);
+    this.robotRetryAttempt = retryCount;
+  }
+
+  private async persistRetryCount(retryCount: number): Promise<void> {
+    const info: RobotAlarmInfo = { retryCount };
+    await this.ctx.storage.put(ROBOT_ALARM_INFO_STORAGE_KEY, info);
   }
 
   private broadcast(events: ReturnType<typeof applyIntent>): void {
@@ -459,6 +493,14 @@ function errorMessage(error: unknown): string {
 function isAlarmInvocationInfo(value: unknown): value is AlarmInvocationInfo {
   if (typeof value !== 'object' || value === null) return false;
   const info = value as Record<string, unknown>;
-  return typeof info.isRetry === 'boolean' && typeof info.retryCount === 'number' &&
-    typeof info.scheduledTime === 'number';
+  return typeof info.isRetry === 'boolean' && Number.isInteger(info.retryCount) &&
+    (info.retryCount as number) >= 0 && typeof info.scheduledTime === 'number' &&
+    Number.isFinite(info.scheduledTime);
+}
+
+function readRetryCount(value: unknown): number {
+  if (typeof value !== 'object' || value === null) return 0;
+  const retryCount = (value as Record<string, unknown>).retryCount;
+  if (!Number.isInteger(retryCount) || (retryCount as number) < 0) return 0;
+  return Math.min(retryCount as number, ROBOT_RETRY_MAX_ATTEMPT);
 }

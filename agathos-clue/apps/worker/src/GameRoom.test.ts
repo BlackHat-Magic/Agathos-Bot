@@ -126,9 +126,13 @@ function player(
 interface TestStorage {
   value: unknown;
   lobby: unknown;
+  robotAlarmInfo: unknown;
   failPuts: boolean;
   remainingPutFailures: number;
+  remainingGamePutFailures: number;
   failTransactions: boolean;
+  failGetAlarm: boolean;
+  failSetAlarm: boolean;
   putCount: number;
   transactionCount: number;
   alarm: number | null;
@@ -140,9 +144,13 @@ function roomWithStorage(stored?: unknown, storedLobby?: unknown): { gameRoom: G
   const storage: TestStorage = {
     value: stored,
     lobby: storedLobby,
+    robotAlarmInfo: undefined,
     failPuts: false,
     remainingPutFailures: 0,
+    remainingGamePutFailures: 0,
     failTransactions: false,
+    failGetAlarm: false,
+    failSetAlarm: false,
     putCount: 0,
     transactionCount: 0,
     alarm: null,
@@ -152,20 +160,32 @@ function roomWithStorage(stored?: unknown, storedLobby?: unknown): { gameRoom: G
   const ctx = {
     storage: {
       get: async <T>(key: string) =>
-        (key === 'lobby' ? storage.lobby : storage.value) as T | undefined,
+        (key === 'lobby'
+          ? storage.lobby
+          : key === 'robot-alarm-info' ? storage.robotAlarmInfo : storage.value) as T | undefined,
       put: async (key: string, value: unknown) => {
         storage.putCount += 1;
-        if (storage.failPuts || storage.remainingPutFailures > 0) {
+        if (storage.failPuts ||
+          (key === 'game' && storage.remainingGamePutFailures > 0) ||
+          storage.remainingPutFailures > 0) {
+          if (key === 'game' && storage.remainingGamePutFailures > 0) {
+            storage.remainingGamePutFailures -= 1;
+          }
           if (storage.remainingPutFailures > 0) storage.remainingPutFailures -= 1;
           throw new Error('storage unavailable');
         }
         if (key === 'lobby') storage.lobby = value;
+        else if (key === 'robot-alarm-info') storage.robotAlarmInfo = value;
         else storage.value = value;
       },
-      getAlarm: async () => storage.alarm,
+      getAlarm: async () => {
+        if (storage.failGetAlarm) throw new Error('getAlarm unavailable');
+        return storage.alarm;
+      },
       setAlarm: async (scheduledTime: number | Date) => {
-        storage.alarm = scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime;
         storage.setAlarmCount += 1;
+        if (storage.failSetAlarm) throw new Error('setAlarm unavailable');
+        storage.alarm = scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime;
       },
       deleteAlarm: async () => {
         storage.alarm = null;
@@ -443,7 +463,7 @@ describe('GameRoom protocol helpers', () => {
   it('rolls back a joined mutation and reports storage failures without broadcasting', async () => {
     const stored = joinedGame();
     const { gameRoom, storage } = roomWithStorage(stored);
-    storage.failPuts = true;
+    storage.remainingGamePutFailures = 1;
     const alice = await connectJoinedPlayer(gameRoom, 'alice');
     const bob = await connectJoinedPlayer(gameRoom, 'bob');
 
@@ -785,7 +805,7 @@ describe('GameRoom protocol helpers', () => {
     const { gameRoom, storage } = roomWithStorage(robotTurnGame());
     const bob = await connectJoinedPlayer(gameRoom, 'bob');
     const before = structuredClone(storage.value);
-    storage.failPuts = true;
+    storage.remainingGamePutFailures = 1;
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
@@ -817,7 +837,7 @@ describe('GameRoom protocol helpers', () => {
     const { gameRoom, storage } = roomWithStorage(robotTurnGame());
     const bob = await connectJoinedPlayer(gameRoom, 'bob');
     const before = structuredClone(storage.value);
-    storage.remainingPutFailures = 2;
+    storage.remainingGamePutFailures = 2;
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
@@ -830,7 +850,8 @@ describe('GameRoom protocol helpers', () => {
       expect(firstAlarm).not.toBeNull();
 
       storage.alarm = null;
-      await gameRoom.alarm({ isRetry: false, retryCount: 0, scheduledTime: firstAlarm! });
+      await expect(gameRoom.alarm({ isRetry: false, retryCount: 0, scheduledTime: firstAlarm! }))
+        .rejects.toThrow('storage unavailable');
 
       expect(storage.value).toEqual(before);
       expect(bob.messages.received).toHaveLength(1);
@@ -855,16 +876,15 @@ describe('GameRoom protocol helpers', () => {
   it('logs malformed alarms and remains recoverable through a later alarm', async () => {
     const { gameRoom, storage } = roomWithStorage(robotTurnGame());
     const bob = await connectJoinedPlayer(gameRoom, 'bob');
-    storage.failPuts = true;
+    storage.remainingGamePutFailures = 1;
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
-      await gameRoom.alarm({} as AlarmInvocationInfo);
+      await expect(gameRoom.alarm({} as AlarmInvocationInfo)).rejects.toThrow('storage unavailable');
       expect(log).toHaveBeenCalledWith('robot alarm received malformed invocation');
       expect(storage.setAlarmCount).toBe(1);
       expect(bob.messages.received).toHaveLength(1);
 
-      storage.failPuts = false;
       storage.alarm = null;
       await gameRoom.alarm({ isRetry: true, retryCount: 1, scheduledTime: Date.now() });
 
@@ -874,5 +894,93 @@ describe('GameRoom protocol helpers', () => {
       log.mockRestore();
       closeConnections(gameRoom);
     }
+  });
+
+  it('rethrows getAlarm failures without broadcasting and progresses on a later alarm', async () => {
+    const { gameRoom, storage } = roomWithStorage(robotTurnGame());
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+    storage.remainingGamePutFailures = 1;
+    storage.failGetAlarm = true;
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(gameRoom.alarm({ isRetry: false, retryCount: 0, scheduledTime: Date.now() }))
+        .rejects.toThrow('getAlarm unavailable');
+      expect(storage.robotAlarmInfo).toEqual({ retryCount: 1 });
+      expect(storage.alarm).toBeNull();
+      expect(bob.messages.received).toHaveLength(1);
+
+      storage.failGetAlarm = false;
+      await gameRoom.alarm({ isRetry: true, retryCount: 1, scheduledTime: Date.now() });
+
+      expect(hydrateGame(storage.value).turnIndex).toBe(1);
+      await expect(bob.messages.next()).resolves.toMatchObject({ type: 'state' });
+      expect(storage.robotAlarmInfo).toEqual({ retryCount: 0 });
+    } finally {
+      log.mockRestore();
+      closeConnections(gameRoom);
+    }
+  });
+
+  it('rethrows setAlarm failures without broadcasting and progresses on a later alarm', async () => {
+    const { gameRoom, storage } = roomWithStorage(robotTurnGame());
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+    storage.remainingGamePutFailures = 1;
+    storage.failSetAlarm = true;
+
+    await expect(gameRoom.alarm({ isRetry: false, retryCount: 0, scheduledTime: Date.now() }))
+      .rejects.toThrow('setAlarm unavailable');
+    expect(storage.robotAlarmInfo).toEqual({ retryCount: 1 });
+    expect(storage.alarm).toBeNull();
+    expect(bob.messages.received).toHaveLength(1);
+
+    storage.failSetAlarm = false;
+    await gameRoom.alarm({ isRetry: true, retryCount: 1, scheduledTime: Date.now() });
+
+    expect(hydrateGame(storage.value).turnIndex).toBe(1);
+    await expect(bob.messages.next()).resolves.toMatchObject({ type: 'state' });
+    expect(storage.robotAlarmInfo).toEqual({ retryCount: 0 });
+    closeConnections(gameRoom);
+  });
+
+  it('hydrates retry backoff in a fresh GameRoom instance', async () => {
+    const first = roomWithStorage(robotTurnGame());
+    await connectJoinedPlayer(first.gameRoom, 'bob');
+    first.storage.remainingGamePutFailures = 1;
+
+    await first.gameRoom.maybeRunRobot();
+
+    const firstAlarm = first.storage.alarm;
+    expect(firstAlarm).not.toBeNull();
+    expect(first.storage.robotAlarmInfo).toEqual({ retryCount: 1 });
+    closeConnections(first.gameRoom);
+    const reloaded = roomWithStorage(first.storage.value, first.storage.lobby);
+    reloaded.storage.robotAlarmInfo = first.storage.robotAlarmInfo;
+    const secondBob = await connectJoinedPlayer(reloaded.gameRoom, 'bob');
+    reloaded.storage.remainingGamePutFailures = 1;
+    reloaded.storage.alarm = null;
+
+    await expect(reloaded.gameRoom.alarm({
+      isRetry: false,
+      retryCount: 0,
+      scheduledTime: firstAlarm!,
+    })).rejects.toThrow('storage unavailable');
+
+    expect(reloaded.storage.robotAlarmInfo).toEqual({ retryCount: 2 });
+    const secondAlarm = reloaded.storage.alarm;
+    expect(secondAlarm).toBeGreaterThan(firstAlarm!);
+    expect(secondBob.messages.received).toHaveLength(1);
+
+    reloaded.storage.alarm = null;
+    await reloaded.gameRoom.alarm({
+      isRetry: true,
+      retryCount: 1,
+      scheduledTime: secondAlarm!,
+    });
+
+    expect(hydrateGame(reloaded.storage.value).turnIndex).toBe(1);
+    await expect(secondBob.messages.next()).resolves.toMatchObject({ type: 'state' });
+    expect(reloaded.storage.robotAlarmInfo).toEqual({ retryCount: 0 });
+    closeConnections(reloaded.gameRoom);
   });
 });
