@@ -540,14 +540,18 @@ describe('applyIntent', () => {
     ];
 
     for (const [pendingReveal, message] of cases) {
-      for (const intent of [{ kind: 'roll' as const }, { kind: 'declineReveal' as const }]) {
+      for (const [playerIndex, intent] of [
+        [0, { kind: 'roll' as const }],
+        [0, { kind: 'declineReveal' as const }],
+        [1, { kind: 'showCard' as const, card: { type: 'suspect' as const, suspect: 'Professor Plum' as const } }],
+      ] as const) {
         const game = playingGame([
           player('Miss Scarlett', 0),
           player('Professor Plum', 1),
         ]);
         game.pendingReveal = pendingReveal as Game['pendingReveal'];
 
-        expect(() => applyIntent(game, 0, intent)).toThrow(message);
+        expect(() => applyIntent(game, playerIndex, intent)).toThrow(message);
         expect(game.hasRolledThisTurn).toBe(false);
         expect(game.pendingReveal).toBe(pendingReveal as Game['pendingReveal']);
       }

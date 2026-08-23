@@ -49,11 +49,15 @@ function playerAt(game: Game, playerIndex: number): Player {
   return player;
 }
 
+function validatedPendingReveal(game: Game): NonNullable<Game['pendingReveal']> | null {
+  if (game.pendingReveal === null) return null;
+  return clonePendingReveal(game.pendingReveal, game.players.length);
+}
+
 function requireGameplayTurn(game: Game, playerIndex: number): void {
   if (game.phase !== 'playing') throw new Error('game is not in the playing phase');
   if (game.turnIndex !== playerIndex) throw new Error(`it is not player ${playerIndex}'s turn`);
-  if (game.pendingReveal !== null) {
-    clonePendingReveal(game.pendingReveal, game.players.length);
+  if (validatedPendingReveal(game) !== null) {
     throw new Error('a card reveal is pending');
   }
 }
@@ -71,9 +75,7 @@ function requireMovementAvailable(player: Player, intent: Intent): void {
 
 function requireRevealTurn(game: Game, playerIndex: number): NonNullable<Game['pendingReveal']> {
   if (game.phase !== 'playing') throw new Error('game is not in the playing phase');
-  const pending = game.pendingReveal === null
-    ? null
-    : clonePendingReveal(game.pendingReveal, game.players.length);
+  const pending = validatedPendingReveal(game);
   if (pending === null) throw new Error('there is no pending reveal');
   if (pending.revealerIndex !== playerIndex) {
     throw new Error('player is not the current revealer');
