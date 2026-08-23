@@ -22,7 +22,7 @@ function mkPlayer(suspect: Suspect, idx: number, cards: Card[] = [], isRobot = t
 
 describe('begin', () => {
   it('selects one suspect/weapon/room as solution and deals all others', () => {
-    const p1 = mkPlayer('Miss Scarlett', 0);
+    const p1 = mkPlayer('Miss Scarlett', 0, [], false);
     const p2 = mkPlayer('Professor Plum', 1);
     const p3 = mkPlayer('Mrs. Peacock', 2);
     const game = createGame([p1, p2, p3]);
@@ -35,7 +35,7 @@ describe('begin', () => {
   });
 
   it('exposes category-specific solution cards to consumers', () => {
-    const game = createGame([mkPlayer('Miss Scarlett', 0)]);
+    const game = createGame([mkPlayer('Miss Scarlett', 0, [], false)]);
     begin(game, () => 0);
 
     const solution: Solution = game.solution!;
@@ -54,8 +54,17 @@ describe('begin', () => {
     expect(() => begin(game, () => 0)).toThrow('cannot begin a game without players');
   });
 
+  it('rejects beginning a robot-only game', () => {
+    const game = createGame([
+      mkPlayer('Miss Scarlett', 0),
+      mkPlayer('Professor Plum', 1),
+    ]);
+
+    expect(() => begin(game, () => 0)).toThrow('at least one human player is required');
+  });
+
   it('rejects an unrecognized suspect before dealing', () => {
-    const player = mkPlayer('Miss Scarlett', 0);
+    const player = mkPlayer('Miss Scarlett', 0, [], false);
     (player as unknown as { suspect: string }).suspect = 'Unknown Suspect';
     const game = createGame([player]);
 
@@ -64,7 +73,7 @@ describe('begin', () => {
 
   it('rejects duplicate suspects before dealing', () => {
     const game = createGame([
-      mkPlayer('Miss Scarlett', 0),
+      mkPlayer('Miss Scarlett', 0, [], false),
       mkPlayer('Miss Scarlett', 1),
     ]);
 
@@ -72,7 +81,11 @@ describe('begin', () => {
   });
 
   it('alternates deal across 3 players as evenly as possible', () => {
-    const players = [mkPlayer('Miss Scarlett', 0), mkPlayer('Professor Plum', 1), mkPlayer('Mrs. Peacock', 2)];
+    const players = [
+      mkPlayer('Miss Scarlett', 0, [], false),
+      mkPlayer('Professor Plum', 1),
+      mkPlayer('Mrs. Peacock', 2),
+    ];
     const game = createGame(players);
     begin(game, () => 0);
     // 18 cards / 3 players = 6 each
@@ -80,7 +93,11 @@ describe('begin', () => {
   });
 
   it('resets cards and game state when beginning a reused game', () => {
-    const players = [mkPlayer('Miss Scarlett', 0), mkPlayer('Professor Plum', 1), mkPlayer('Mrs. Peacock', 2)];
+    const players = [
+      mkPlayer('Miss Scarlett', 0, [], false),
+      mkPlayer('Professor Plum', 1),
+      mkPlayer('Mrs. Peacock', 2),
+    ];
     const game = createGame(players);
     begin(game, () => 0);
     const firstSolution = game.solution;

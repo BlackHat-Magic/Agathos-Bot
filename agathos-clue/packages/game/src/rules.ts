@@ -60,6 +60,9 @@ export function begin(game: Game, rng: RNG = Math.random): void {
   if (game.players.length === 0) {
     throw new Error('cannot begin a game without players');
   }
+  if (game.players.every(player => player.isRobot)) {
+    throw new Error('at least one human player is required');
+  }
 
   const seenSuspects = new Set<string>();
   for (const player of game.players) {
