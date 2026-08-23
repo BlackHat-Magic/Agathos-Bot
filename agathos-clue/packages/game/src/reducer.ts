@@ -24,6 +24,11 @@ const INTENT_KINDS = [
   'roll', 'moveTo', 'suggest', 'showCard', 'declineReveal', 'accuse', 'endTurn', 'leave',
 ] as const;
 
+function isLifecycleIntent(kind: Intent['kind']): boolean {
+  return kind === 'join' || kind === 'claimSuspect' || kind === 'start' ||
+    kind === 'setOrder' || kind === 'leave';
+}
+
 function requireIntentKind(intent: Intent): Intent['kind'] {
   const value = intent as unknown;
   if (typeof value !== 'object' || value === null) {
@@ -102,15 +107,26 @@ function nextPlayerIndex(game: Game, index: number): number {
   return (index + 1) % game.players.length;
 }
 
-/** Apply one server-authoritative intent directly to the canonical game. */
+/**
+ * Apply one server-authoritative intent directly to the canonical game.
+ * Lobby lifecycle intents are delegated to the Durable Object/Lobby layer and
+ * return no events; this reducer only rejects them outside the lobby.
+ */
 export function applyIntent(
   game: Game,
   playerIndex: number,
   intent: Intent,
   rng: RNG = Math.random,
 ): Event[] {
-  requireIntentKind(intent);
+  const kind = requireIntentKind(intent);
   if (intent.kind === 'wait') return [];
+
+  if (isLifecycleIntent(kind)) {
+    if (game.phase !== 'lobby') {
+      throw new Error(`${kind} intent is only valid in the lobby`);
+    }
+    return [];
+  }
 
   if (intent.kind === 'suggest') {
     if (!isSuspect(intent.suspect)) {
@@ -134,14 +150,6 @@ export function applyIntent(
   if (intent.kind === 'showCard') assertCard(intent.card, 'reveal card');
 
   const player = playerAt(game, playerIndex);
-
-  if (intent.kind === 'join' || intent.kind === 'claimSuspect' || intent.kind === 'start' ||
-      intent.kind === 'setOrder' || intent.kind === 'leave') {
-    if (game.phase !== 'lobby') {
-      throw new Error(`${intent.kind} intent is only valid in the lobby`);
-    }
-    return [];
-  }
 
   if (intent.kind === 'showCard' || intent.kind === 'declineReveal') {
     requireRevealTurn(game, playerIndex);

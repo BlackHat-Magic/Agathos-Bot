@@ -56,8 +56,7 @@ describe('applyIntent', () => {
     expect(() => applyIntent(game, 0, bogus as Intent)).toThrow('unknown intent kind: bogus');
   });
 
-  it('rejects lobby lifecycle intents during active play', () => {
-    const game = playingGame([player('Miss Scarlett', 0)]);
+  it('delegates lifecycle intents before player lookup in the lobby and rejects them during play', () => {
     const lifecycleIntents: Intent[] = [
       { kind: 'join', userId: 'user', name: 'Player' },
       { kind: 'claimSuspect', suspect: 'Miss Scarlett' },
@@ -66,8 +65,14 @@ describe('applyIntent', () => {
       { kind: 'leave' },
     ];
 
+    const lobby = createGame([]);
     for (const intent of lifecycleIntents) {
-      expect(() => applyIntent(game, 0, intent)).toThrow(
+      expect(applyIntent(lobby, -1, intent)).toEqual([]);
+    }
+
+    const game = playingGame([player('Miss Scarlett', 0)]);
+    for (const intent of lifecycleIntents) {
+      expect(() => applyIntent(game, -1, intent)).toThrow(
         `${intent.kind} intent is only valid in the lobby`,
       );
     }
