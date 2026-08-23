@@ -202,4 +202,20 @@ describe('typed WebSocket transport', () => {
     expect(get(transport.error)).toBe('not your turn');
     transport.close();
   });
+
+  it('clears a transport error after a successful frame', () => {
+    const socket = new FakeSocket();
+    const transport = connect('game', 'jwt', {
+      origin: 'https://example.test',
+      socketFactory: () => socket,
+    });
+    socket.open();
+    socket.message(JSON.stringify({ type: 'error', message: 'game is full' }));
+    expect(get(transport.error)).toBe('game is full');
+    socket.message(JSON.stringify({
+      type: 'lobby', gameId: 'game', hostUserId: null, players: [],
+    }));
+    expect(get(transport.error)).toBeNull();
+    transport.close();
+  });
 });

@@ -3,9 +3,13 @@ import './styles/app.css';
 import App from './App.svelte';
 import { initTheme } from './lib/theme';
 import { loadStandaloneSession, session } from './auth/standalone';
-import { error } from './game/stores';
+import { bootstrapGameFromUrl } from './game/bootstrap';
+import { error, gameId } from './game/stores';
 
 initTheme();
+
+const initialGameId = bootstrapGameFromUrl();
+if (initialGameId !== null) gameId.set(initialGameId);
 
 void loadStandaloneSession()
   .then(value => session.set(value))

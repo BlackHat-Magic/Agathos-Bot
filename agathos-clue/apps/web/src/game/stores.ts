@@ -61,12 +61,32 @@ function syncTransport(): void {
 }
 
 function subscribeToTransport(nextTransport: Transport): () => void {
+  let transportReady = false;
   const stops = [
-    nextTransport.view.subscribe(value => currentView.set(value)),
-    nextTransport.lobby.subscribe(value => lobby.set(value)),
-    nextTransport.status.subscribe(value => connectionStatus.set(value)),
+    nextTransport.view.subscribe(value => {
+      currentView.set(value);
+      if (value !== null) {
+        transportReady = true;
+        error.set(null);
+      }
+    }),
+    nextTransport.lobby.subscribe(value => {
+      lobby.set(value);
+      if (value !== null) {
+        transportReady = true;
+        error.set(null);
+      }
+    }),
+    nextTransport.status.subscribe(value => {
+      connectionStatus.set(value);
+      if (value === 'open') {
+        transportReady = true;
+        error.set(null);
+      }
+    }),
     nextTransport.error.subscribe(value => {
       if (value !== null) error.set(value);
+      else if (transportReady) error.set(null);
     }),
   ];
   return () => stops.forEach(stop => stop());

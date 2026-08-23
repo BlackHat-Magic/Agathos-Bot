@@ -2,6 +2,13 @@
   import Icon from '@iconify/svelte';
   import { SUSPECTS, type Suspect } from '@agathos/game';
   import { beginStandaloneAuth, session } from '../../auth/standalone';
+  import { bootstrapGameFromUrl } from '../bootstrap';
+  import {
+    canManageLobby as canManageLobbyState,
+    canStartLobby as canStartLobbyState,
+    enqueueLeave,
+    shouldResetJoinedState,
+  } from '../lobby-lifecycle';
   import {
     connectionStatus,
     error,
@@ -18,11 +25,15 @@
   $: availableSuspects = SUSPECTS.filter(suspect =>
     !($lobby?.players.some(player => player.suspect === suspect) ?? false));
   $: isHost = $lobby?.hostUserId !== null && $lobby?.hostUserId === $session?.userId;
-  $: canManageLobby = hasJoined || isHost;
+  $: canManageLobby = canManageLobbyState(hasJoined);
+  $: canStartLobby = canStartLobbyState(hasJoined, isHost);
   $: allPlayersClaimed = ($lobby?.players.length ?? 0) > 0 &&
     ($lobby?.players.every(player => player.suspect !== null) ?? false);
   $: if (!availableSuspects.includes(selectedSuspect) && availableSuspects.length > 0) {
     selectedSuspect = availableSuspects[0];
+  }
+  $: if (shouldResetJoinedState(hasJoined, $connectionStatus, $error, $lobby !== null)) {
+    hasJoined = false;
   }
 
   function openGame(): void {
@@ -30,8 +41,12 @@
     if (id.length === 0) return;
     const url = new URL(window.location.href);
     url.searchParams.set('game', id);
-    window.history.replaceState({}, '', url);
-    gameId.set(id);
+    const selectedGameId = bootstrapGameFromUrl(
+      url,
+      url => window.history.replaceState({}, '', url),
+    );
+    if (selectedGameId === null) return;
+    gameId.set(selectedGameId);
     hasJoined = false;
   }
 
@@ -48,6 +63,10 @@
 
   function startGame(): void {
     send({ kind: 'start' });
+  }
+
+  function leaveLobby(): void {
+    if (enqueueLeave(send)) hasJoined = false;
   }
 </script>
 
@@ -198,7 +217,7 @@
             </div>
           {/if}
 
-          {#if isHost}
+          {#if canStartLobby}
             <button
               class="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-mocha-green px-4 py-3 font-semibold text-mocha-crust transition hover:brightness-110 focus:outline-2 focus:outline-offset-2 focus:outline-mocha-green disabled:cursor-not-allowed disabled:opacity-50"
               type="button"
@@ -212,6 +231,20 @@
               <p class="mt-2 text-center text-sm text-mocha-overlay2">Every detective must choose a suspect first.</p>
             {/if}
           {/if}
+
+          {#if canManageLobby}
+            <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-mocha-surface1/70 bg-mocha-mantle px-4 py-3">
+              <span class="text-sm text-mocha-overlay2">Joined as <strong class="text-mocha-text">{playerName}</strong></span>
+              <button
+                class="inline-flex items-center justify-center gap-2 rounded-lg border border-mocha-red/40 px-3 py-2 text-sm font-semibold text-mocha-red transition hover:bg-mocha-red/10 focus:outline-2 focus:outline-offset-2 focus:outline-mocha-red"
+                type="button"
+                onclick={leaveLobby}
+              >
+                <Icon icon="hugeicons:logout-03" width="18" height="18" aria-hidden="true" />
+                Leave lobby
+              </button>
+            </div>
+          {/if}
         {:else}
           <div class="rounded-2xl border border-mocha-surface1 bg-mocha-mantle p-5 text-mocha-subtext0">
             <div class="flex items-center gap-3">
@@ -223,7 +256,7 @@
       {/if}
 
       {#if $connectionStatus !== 'idle'}
-        <p class="mt-5 text-xs uppercase tracking-[0.14em] text-mocha-overlay1">Connection: {$connectionStatus}</p>
+        <p class="mt-5 text-xs uppercase tracking-[0.14em] text-mocha-overlay1" role="status" aria-live="polite">Connection: {$connectionStatus}</p>
       {/if}
       {#if $error}
         <p class="mt-3 rounded-xl border border-mocha-red/30 bg-mocha-red/10 px-4 py-3 text-sm text-mocha-red" role="alert">{$error}</p>
