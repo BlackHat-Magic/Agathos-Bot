@@ -5,6 +5,7 @@
     "dev": "wrangler dev --local",
     "deploy": "wrangler deploy",
     "test": "vitest run --config vitest.config.ts",
+    "verify:migration": "bun scripts/verify-schema-migration.ts",
     "typecheck": "wrangler types && tsc --noEmit",
     "cf-typegen": "wrangler types"
   },

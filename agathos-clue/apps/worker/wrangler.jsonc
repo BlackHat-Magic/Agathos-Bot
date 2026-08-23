@@ -13,7 +13,12 @@
     ]
   },
   "d1_databases": [
-    { "binding": "LOBBY_DB", "database_name": "agathos-clue-lobby", "database_id": "local" }
+    {
+      "binding": "LOBBY_DB",
+      "database_name": "agathos-clue-lobby",
+      "database_id": "local",
+      "migrations_dir": "migrations"
+    }
   ],
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["GameRoom"] }
