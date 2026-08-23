@@ -24,7 +24,7 @@ describe('decideRobotIntent', () => {
     applyIntent(g, 0, roll, () => 0);
 
     const move = decideRobotIntent(g, 0, () => 0.5);
-    expect(move.kind).toBe('moveTo');
+    expect(move).toEqual({ kind: 'moveTo', destination: '15,23' });
     applyIntent(g, 0, move);
 
     expect(g.players[0]!.piece.location.room).toBeNull();
@@ -65,6 +65,39 @@ describe('decideRobotIntent', () => {
     g.hasMovedThisTurn = true;
 
     expect(decideRobotIntent(g, 0, () => 0.5)).toEqual({ kind: 'endTurn' });
+  });
+
+  it('waits during the lobby even when it is the robot turn', () => {
+    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    g.phase = 'lobby';
+    g.turnIndex = 0;
+
+    expect(decideRobotIntent(g, 0)).toEqual({ kind: 'wait' });
+  });
+
+  it('waits after the game has finished even when a reveal is pending', () => {
+    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    g.phase = 'finished';
+    g.turnIndex = 0;
+    g.pendingReveal = {
+      suggesterIndex: 0,
+      suspect: 'Professor Plum',
+      weapon: 'Rope',
+      room: 'Hall',
+      revealerIndex: 0,
+    };
+
+    expect(decideRobotIntent(g, 0)).toEqual({ kind: 'wait' });
+  });
+
+  it('suggests from a corner room after being moved by a suggestion', () => {
+    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    g.turnIndex = 0;
+    g.phase = 'playing';
+    g.players[0]!.piece.location = spaceAt(g.board, 2, 1); // Conservatory
+    g.players[0]!.movedBySuggestion = true;
+
+    expect(decideRobotIntent(g, 0, () => 0.4).kind).toBe('suggest');
   });
 
   // NOTE: spec used `() => 0.5`; the implementation uses strict `< 0.5`,

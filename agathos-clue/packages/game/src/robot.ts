@@ -28,6 +28,8 @@ export function decideRobotIntent(
   const player = game.players[robotIndex];
   const pending = game.pendingReveal;
 
+  if (game.phase !== 'playing') return { kind: 'wait' };
+
   if (pending) {
     if (pending.revealerIndex !== robotIndex) return { kind: 'wait' };
 
@@ -65,7 +67,6 @@ export function decideRobotIntent(
   if (
     !game.hasRolledThisTurn &&
     inRoom &&
-    !cornerRoomHasPassage &&
     !player.guessedHere &&
     (player.enteredRoomThisTurn || player.movedBySuggestion)
   ) {
