@@ -33,8 +33,8 @@ import {
 import type { LobbyState } from './lobbies';
 import {
   assertIntentAuthority,
-  authenticateDevProtocol,
-  negotiateDevProtocol,
+  authenticateJwtProtocol,
+  negotiateJwtProtocol,
   parseIntentEnvelope,
   resolveViewerIndex,
 } from './game-room-protocol';
@@ -43,8 +43,8 @@ import type { RobotPrivateReveal } from './robots/scheduler';
 import type { PrivateRevealFrame } from './game-room-protocol';
 export {
   assertIntentAuthority,
-  authenticateDevProtocol,
-  negotiateDevProtocol,
+  authenticateJwtProtocol,
+  negotiateJwtProtocol,
   parseIntentEnvelope,
   resolveViewerIndex,
 } from './game-room-protocol';
@@ -89,7 +89,10 @@ export class GameRoom extends DurableObject<Env> {
       return new Response('Expected WebSocket upgrade', { status: 426 });
     }
 
-    const negotiated = negotiateDevProtocol(req.headers.get('Sec-WebSocket-Protocol'));
+    const negotiated = await negotiateJwtProtocol(
+      req.headers.get('Sec-WebSocket-Protocol'),
+      this.env.JWT_SECRET,
+    );
     if (negotiated === null) return new Response('Unauthorized', { status: 401 });
 
     let server: WebSocket | undefined;
@@ -144,7 +147,7 @@ export class GameRoom extends DurableObject<Env> {
           // The socket may not have been accepted; removal above is authoritative.
         }
       }
-      return new Response(errorMessage(error), { status: 500 });
+      return new Response('internal server error', { status: 500 });
     }
   }
 

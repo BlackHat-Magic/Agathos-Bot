@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Env } from './index';
 import { handleLobby } from './Lobby';
+import { mintJwt } from './auth/jwt';
+
+const JWT_SECRET = 'test-secret';
 
 interface GameRow {
   id: string;
@@ -125,31 +128,33 @@ class FakeStatement {
 }
 
 function environment(db: FakeD1, gameRoom = new FakeGameRoomNamespace()): Env {
-  return { LOBBY_DB: db, GAME_ROOM: gameRoom } as unknown as Env;
+  return { LOBBY_DB: db, GAME_ROOM: gameRoom, JWT_SECRET } as unknown as Env;
 }
 
-function request(
+async function request(
   path: string,
   method: 'GET' | 'POST',
   body?: unknown,
   userId?: string,
-): Request {
+): Promise<Request> {
+  const token = userId === undefined ? undefined : await mintJwt({ userId }, JWT_SECRET, 60);
   return new Request(`https://example.test${path}`, {
     method,
     headers: {
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      ...(userId === undefined ? {} : { Authorization: `Bearer dev-token-${userId}` }),
+      ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
 
-function malformedRequest(path: string, rawBody: string, userId: string): Request {
+async function malformedRequest(path: string, rawBody: string, userId: string): Promise<Request> {
+  const token = await mintJwt({ userId }, JWT_SECRET, 60);
   return new Request(`https://example.test${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer dev-token-${userId}`,
+      Authorization: `Bearer ${token}`,
     },
     body: rawBody,
   });
@@ -178,7 +183,7 @@ describe('D1 lobby HTTP registry', () => {
   it('uses the bounded Authorization identity and creates the indexed host', async () => {
     const db = new FakeD1();
     const response = await handleLobby(
-      request('/api/games', 'POST', {
+      await request('/api/games', 'POST', {
         hostUserId: 'attacker',
         botCount: 2,
         config: { timerSeconds: 60 },
@@ -201,12 +206,16 @@ describe('D1 lobby HTTP registry', () => {
     }]);
 
     const acceptedBoundary = await handleLobby(
-      request('/api/games', 'POST', {}, 'x'.repeat(128)),
+      await request('/api/games', 'POST', {}, 'x'.repeat(128)),
       environment(new FakeD1()),
     );
     expect(acceptedBoundary.status).toBe(200);
     const rejectedBoundary = await handleLobby(
-      request('/api/games', 'POST', {}, 'x'.repeat(129)),
+      new Request('https://example.test/api/games', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer invalid' },
+        body: '{}',
+      }),
       environment(new FakeD1()),
     );
     expect(rejectedBoundary.status).toBe(401);
@@ -214,9 +223,9 @@ describe('D1 lobby HTTP registry', () => {
 
   it('requires valid Authorization and ignores body identity on join', async () => {
     const db = new FakeD1();
-    expect((await handleLobby(request('/api/games', 'POST', {}), environment(db))).status).toBe(401);
+    expect((await handleLobby(await request('/api/games', 'POST', {}), environment(db))).status).toBe(401);
     expect((await handleLobby(
-      new Request('https://example.test/api/games', { method: 'POST', headers: { Authorization: 'Basic attacker' }, body: '{}' }),
+      new Request('https://example.test/api/games', { method: 'POST', headers: { Authorization: 'Bearer dev-token-attacker' }, body: '{}' }),
       environment(db),
     )).status).toBe(401);
 
@@ -230,7 +239,7 @@ describe('D1 lobby HTTP registry', () => {
       is_bot: 0,
     });
     const joined = await handleLobby(
-      request(`/api/games/${gameId}/join`, 'POST', { userId: 'attacker' }, 'bob'),
+      await request(`/api/games/${gameId}/join`, 'POST', { userId: 'attacker' }, 'bob'),
       environment(db),
     );
     expect(joined.status).toBe(200);
@@ -255,28 +264,28 @@ describe('D1 lobby HTTP registry', () => {
       is_bot: 0,
     });
 
-    const omitted = await handleLobby(request(`/api/games/${gameId}/join`, 'POST', {}, 'bob'), environment(db));
+    const omitted = await handleLobby(await request(`/api/games/${gameId}/join`, 'POST', {}, 'bob'), environment(db));
     expect(omitted.status).toBe(200);
     expect(db.players.get(`${gameId}:bob`)?.suspect).toBeNull();
     const explicitNull = await handleLobby(
-      request(`/api/games/${gameId}/join`, 'POST', { suspect: null }, 'bob'),
+      await request(`/api/games/${gameId}/join`, 'POST', { suspect: null }, 'bob'),
       environment(db),
     );
     expect(explicitNull.status).toBe(200);
     expect(db.games.get(gameId)?.player_count).toBe(2);
 
     const invalid = await handleLobby(
-      request(`/api/games/${gameId}/join`, 'POST', { suspect: '' }, 'carol'),
+      await request(`/api/games/${gameId}/join`, 'POST', { suspect: '' }, 'carol'),
       environment(db),
     );
     expect(invalid.status).toBe(400);
     const claimed = await handleLobby(
-      request(`/api/games/${gameId}/join`, 'POST', { suspect: 'Miss Scarlett' }, 'carol'),
+      await request(`/api/games/${gameId}/join`, 'POST', { suspect: 'Miss Scarlett' }, 'carol'),
       environment(db),
     );
     expect(claimed.status).toBe(200);
     const duplicate = await handleLobby(
-      request(`/api/games/${gameId}/join`, 'POST', { suspect: 'Miss Scarlett' }, 'dave'),
+      await request(`/api/games/${gameId}/join`, 'POST', { suspect: 'Miss Scarlett' }, 'dave'),
       environment(db),
     );
     expect(duplicate.status).toBe(409);
@@ -284,11 +293,11 @@ describe('D1 lobby HTTP registry', () => {
 
   it('fills six indexed players, keeps duplicate joins at one count, and rejects a seventh', async () => {
     const db = new FakeD1();
-    const create = await handleLobby(request('/api/games', 'POST', {}, 'alice'), environment(db));
+    const create = await handleLobby(await request('/api/games', 'POST', {}, 'alice'), environment(db));
     const gameId = String((await responseBody(create)).id);
     for (const userId of ['bob', 'carol', 'dave', 'erin', 'frank']) {
       expect((await handleLobby(
-        request(`/api/games/${gameId}/join`, 'POST', {}, userId),
+        await request(`/api/games/${gameId}/join`, 'POST', {}, userId),
         environment(db),
       )).status).toBe(200);
     }
@@ -296,22 +305,22 @@ describe('D1 lobby HTTP registry', () => {
     expect([...db.players.values()].map(player => player.player_index)).toEqual([0, 1, 2, 3, 4, 5]);
 
     const duplicate = await handleLobby(
-      request(`/api/games/${gameId}/join`, 'POST', { suspect: null }, 'frank'),
+      await request(`/api/games/${gameId}/join`, 'POST', { suspect: null }, 'frank'),
       environment(db),
     );
     expect(duplicate.status).toBe(200);
     expect(db.games.get(gameId)?.player_count).toBe(6);
     expect((await handleLobby(
-      request(`/api/games/${gameId}/join`, 'POST', {}, 'grace'),
+      await request(`/api/games/${gameId}/join`, 'POST', {}, 'grace'),
       environment(db),
     )).status).toBe(409);
   });
 
   it('reserves bot slots when enforcing the six-player limit', async () => {
     const db = new FakeD1();
-    const create = await handleLobby(request('/api/games', 'POST', { botCount: 5 }, 'alice'), environment(db));
+    const create = await handleLobby(await request('/api/games', 'POST', { botCount: 5 }, 'alice'), environment(db));
     const gameId = String((await responseBody(create)).id);
-    const join = await handleLobby(request(`/api/games/${gameId}/join`, 'POST', {}, 'bob'), environment(db));
+    const join = await handleLobby(await request(`/api/games/${gameId}/join`, 'POST', {}, 'bob'), environment(db));
     expect(join.status).toBe(409);
     expect(db.games.get(gameId)?.player_count).toBe(1);
   });
@@ -325,7 +334,7 @@ describe('D1 lobby HTTP registry', () => {
       config_json: JSON.stringify({ solution: 'secret', cards: ['private'] }),
     });
     db.games.set('clue-game:playing', { ...game('clue-game:playing'), state: 'playing' });
-    const response = await handleLobby(request('/api/games', 'GET'), environment(db));
+    const response = await handleLobby(await request('/api/games', 'GET'), environment(db));
     expect(response.status).toBe(200);
     expect(await responseBody(response)).toEqual({ games: [{
       id: 'clue-game:public',
@@ -340,15 +349,15 @@ describe('D1 lobby HTTP registry', () => {
   it('rejects malformed JSON and invalid object shapes', async () => {
     const db = new FakeD1();
     expect((await handleLobby(
-      malformedRequest('/api/games', '{', 'alice'),
+      await malformedRequest('/api/games', '{', 'alice'),
       environment(db),
     )).status).toBe(400);
     expect((await handleLobby(
-      request('/api/games', 'POST', [], 'alice'),
+      await request('/api/games', 'POST', [], 'alice'),
       environment(db),
     )).status).toBe(400);
     expect((await handleLobby(
-      request('/api/games', 'POST', { botCount: 6 }, 'alice'),
+      await request('/api/games', 'POST', { botCount: 6 }, 'alice'),
       environment(db),
     )).status).toBe(400);
   });
@@ -356,12 +365,12 @@ describe('D1 lobby HTTP registry', () => {
   it('maps D1 failures to safe internal errors', async () => {
     const db = new FakeD1();
     db.failNext = true;
-    const create = await handleLobby(request('/api/games', 'POST', {}, 'alice'), environment(db));
+    const create = await handleLobby(await request('/api/games', 'POST', {}, 'alice'), environment(db));
     expect(create.status).toBe(500);
     expect(await responseBody(create)).toEqual({ error: 'internal server error' });
 
     db.failNext = true;
-    const list = await handleLobby(request('/api/games', 'GET'), environment(db));
+    const list = await handleLobby(await request('/api/games', 'GET'), environment(db));
     expect(list.status).toBe(500);
     expect(await responseBody(list)).toEqual({ error: 'internal server error' });
   });
@@ -381,7 +390,7 @@ describe('D1 lobby HTTP registry', () => {
     const before = JSON.stringify(row);
     const gameRoom = new FakeGameRoomNamespace();
     const response = await handleLobby(
-      request(`/api/games/${gameId}/start`, 'POST', undefined, 'alice'),
+      await request(`/api/games/${gameId}/start`, 'POST', undefined, 'alice'),
       environment(db, gameRoom),
     );
     expect(response.status).toBe(409);
@@ -389,7 +398,7 @@ describe('D1 lobby HTTP registry', () => {
     expect(JSON.stringify(db.games.get(gameId))).toBe(before);
     expect(gameRoom.fetchCalls).toBe(0);
 
-    const notHost = await handleLobby(request(`/api/games/${gameId}/start`, 'POST', undefined, 'bob'), environment(db));
+    const notHost = await handleLobby(await request(`/api/games/${gameId}/start`, 'POST', undefined, 'bob'), environment(db));
     expect(notHost.status).toBe(403);
   });
 });

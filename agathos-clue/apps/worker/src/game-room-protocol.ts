@@ -1,4 +1,5 @@
 import type { Card, Game, Intent } from '@agathos/game';
+import { verifyJwt } from './auth/jwt';
 
 const LIFECYCLE_INTENTS = new Set([
   'join', 'claimSuspect', 'start', 'setOrder', 'leave',
@@ -12,9 +13,10 @@ export type PrivateRevealFrame =
   | { type: 'private'; reveal: { fromIndex: number; card: Card } }
   | { type: 'private'; reveal: { fromIndex: number } };
 
-export interface AuthenticatedDevProtocol {
+export interface AuthenticatedJwtProtocol {
   protocol: string;
   userId: string;
+  claims: Record<string, unknown>;
 }
 
 /** Parse a client envelope without trusting any client-supplied player index. */
@@ -35,26 +37,29 @@ export function parseIntentEnvelope(data: string | ArrayBuffer): IntentEnvelope 
   return { intent: decoded.intent as Intent };
 }
 
-/**
- * Temporary Task 13 verifier. Task 18 replaces this with real JWT validation.
- * The direct `dev-token-` form is retained for the scaffold's legacy clients.
- */
-export function authenticateDevProtocol(protocolHeader: string | null): string | null {
-  if (protocolHeader === null) return null;
-  for (const protocol of protocolHeader.split(',').map(value => value.trim())) {
-    const match = /^(?:bearer\.dev-token-|dev-token-|bearer\s+dev-token-)(\S+)$/i.exec(protocol);
-    if (match?.[1]) return match[1];
-  }
-  return null;
+/** Verify one offered bearer subprotocol without accepting legacy dev tokens. */
+export async function authenticateJwtProtocol(
+  protocol: string,
+  secret: string,
+): Promise<AuthenticatedJwtProtocol | null> {
+  if (!protocol.startsWith('bearer.')) return null;
+  const token = protocol.slice('bearer.'.length);
+  if (token.length === 0) return null;
+  const claims = await verifyJwt(token, secret);
+  if (claims === null || typeof claims.userId !== 'string') return null;
+  return { protocol, userId: claims.userId, claims };
 }
 
 /** Select the first authenticated protocol while preserving its offered value. */
-export function negotiateDevProtocol(protocolHeader: string | null): AuthenticatedDevProtocol | null {
+export async function negotiateJwtProtocol(
+  protocolHeader: string | null,
+  secret: string,
+): Promise<AuthenticatedJwtProtocol | null> {
   if (protocolHeader === null) return null;
   for (const value of protocolHeader.split(',')) {
     const protocol = value.trim();
-    const userId = authenticateDevProtocol(protocol);
-    if (userId !== null) return { protocol, userId };
+    const authenticated = await authenticateJwtProtocol(protocol, secret);
+    if (authenticated !== null) return authenticated;
   }
   return null;
 }

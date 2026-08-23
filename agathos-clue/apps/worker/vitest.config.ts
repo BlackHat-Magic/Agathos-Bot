@@ -8,6 +8,6 @@ export default defineWorkersConfig({
         wrangler: { configPath: './wrangler.jsonc' },
       },
     },
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
   },
 });

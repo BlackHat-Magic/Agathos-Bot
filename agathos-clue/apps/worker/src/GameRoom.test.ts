@@ -3,13 +3,16 @@ import { buildBoard, createGame, spaceAt } from '@agathos/game';
 import type { Card, Intent, Player } from '@agathos/game';
 import { hydrateGame, serializeGame } from './game-storage';
 import type { Env } from './index';
+import { mintJwt } from './auth/jwt';
 import {
   assertIntentAuthority,
-  authenticateDevProtocol,
-  negotiateDevProtocol,
+  authenticateJwtProtocol,
+  negotiateJwtProtocol,
   parseIntentEnvelope,
   resolveViewerIndex,
 } from './game-room-protocol';
+
+const JWT_SECRET = 'test-secret';
 
 type TestWebSocketListener = (event: { data?: unknown }) => void;
 type TestMessage =
@@ -226,14 +229,14 @@ function roomWithStorage(
     },
     blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
   } as unknown as DurableObjectState;
-  return { gameRoom: new GameRoomClass(ctx, {} as Env), storage };
+  return { gameRoom: new GameRoomClass(ctx, { JWT_SECRET } as Env), storage };
 }
 
 function room(stored?: unknown): GameRoom {
   return roomWithStorage(stored).gameRoom;
 }
 
-function upgradeRequest(protocol: string): Request {
+async function upgradeRequest(protocol: string): Promise<Request> {
   return new Request('https://example.test/ws?gameId=game-1', {
     headers: {
       Upgrade: 'websocket',
@@ -280,7 +283,8 @@ async function connectJoinedPlayer(
   gameRoom: GameRoom,
   userId: string,
 ): Promise<{ client: WebSocket; messages: ReturnType<typeof messageQueue>; initial: TestMessage }> {
-  const response = await gameRoom.fetch(upgradeRequest(`bearer.dev-token-${userId}`));
+  const token = await mintJwt({ userId }, JWT_SECRET, 60);
+  const response = await gameRoom.fetch(await upgradeRequest(`bearer.${token}`));
   expect(response.status).toBe(101);
   let client = response.webSocket;
   if (client === null || client === undefined) {
@@ -335,19 +339,24 @@ function pendingRevealGame(revealerIsRobot: boolean, revealerCards: Card[]): Ret
 }
 
 describe('GameRoom protocol helpers', () => {
-  it('accepts the dev protocol and legacy direct forms', () => {
-    expect(authenticateDevProtocol('bearer.dev-token-alice')).toBe('alice');
-    expect(authenticateDevProtocol('dev-token-bob')).toBe('bob');
-    expect(authenticateDevProtocol('Bearer dev-token-carol')).toBe('carol');
-    expect(authenticateDevProtocol('bearer.dev-token-')).toBeNull();
-    expect(authenticateDevProtocol(null)).toBeNull();
+  it('accepts only a verified bearer JWT protocol', async () => {
+    const token = await mintJwt({ userId: 'alice', scope: 'game' }, JWT_SECRET, 60);
+    await expect(authenticateJwtProtocol(`bearer.${token}`, JWT_SECRET)).resolves.toMatchObject({
+      protocol: `bearer.${token}`,
+      userId: 'alice',
+      claims: { userId: 'alice', scope: 'game' },
+    });
+    await expect(authenticateJwtProtocol('bearer.dev-token-alice', JWT_SECRET)).resolves.toBeNull();
+    await expect(authenticateJwtProtocol(`Bearer.${token}`, JWT_SECRET)).resolves.toBeNull();
+    await expect(authenticateJwtProtocol('bearer.', JWT_SECRET)).resolves.toBeNull();
   });
 
   it('selects and preserves the offered authenticated protocol', () => {
-    expect(negotiateDevProtocol('other, bearer.dev-token-user')).toEqual({
-      protocol: 'bearer.dev-token-user',
-      userId: 'user',
-    });
+    return mintJwt({ userId: 'user' }, JWT_SECRET, 60).then(token =>
+      expect(negotiateJwtProtocol(`other, bearer.${token}`, JWT_SECRET)).resolves.toMatchObject({
+        protocol: `bearer.${token}`,
+        userId: 'user',
+      }));
   });
 
   it('rejects malformed JSON and envelopes', () => {
@@ -395,10 +404,11 @@ describe('GameRoom protocol helpers', () => {
   it('echoes the selected WebSocket protocol in the upgrade response', async () => {
     const gameRoom = room();
 
-    const response = await gameRoom.fetch(upgradeRequest('bearer.dev-token-user'));
+    const token = await mintJwt({ userId: 'user' }, JWT_SECRET, 60);
+    const response = await gameRoom.fetch(await upgradeRequest(`bearer.${token}`));
 
     expect(response.status).toBe(101);
-    expect(response.headers.get('Sec-WebSocket-Protocol')).toBe('bearer.dev-token-user');
+    expect(response.headers.get('Sec-WebSocket-Protocol')).toBe(`bearer.${token}`);
     response.webSocket?.accept();
     response.webSocket?.close();
     closeConnections(gameRoom);
@@ -406,7 +416,8 @@ describe('GameRoom protocol helpers', () => {
 
   it('processes queued WebSocket messages in arrival order', async () => {
     const gameRoom = room();
-    const response = await gameRoom.fetch(upgradeRequest('bearer.dev-token-user'));
+    const token = await mintJwt({ userId: 'user' }, JWT_SECRET, 60);
+    const response = await gameRoom.fetch(await upgradeRequest(`bearer.${token}`));
     const client = response.webSocket;
     if (client === undefined) {
       // Bun's Response implementation drops the non-standard webSocket field.
@@ -446,7 +457,8 @@ describe('GameRoom protocol helpers', () => {
     stored.solution = null;
     const gameRoom = room(stored);
 
-    const response = await gameRoom.fetch(upgradeRequest('bearer.dev-token-user'));
+    const token = await mintJwt({ userId: 'user' }, JWT_SECRET, 60);
+    const response = await gameRoom.fetch(await upgradeRequest(`bearer.${token}`));
 
     expect(response.status).toBe(500);
     expect(connectionCount(gameRoom)).toBe(0);

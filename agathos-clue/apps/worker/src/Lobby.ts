@@ -1,6 +1,6 @@
 import { isSuspect } from '@agathos/game';
 import type { Env } from './index';
-import { authenticateDevProtocol } from './game-room-protocol';
+import { verifyJwt } from './auth/jwt';
 
 const MAX_GAME_ID_LENGTH = 80;
 const MAX_CONFIG_BYTES = 4_096;
@@ -56,20 +56,20 @@ export async function handleLobby(req: Request, env: Env): Promise<Response> {
       return await listGames(env);
     }
     if (url.pathname === '/api/games' && req.method === 'POST') {
-      const userId = requireIdentity(req);
+      const userId = await requireIdentity(req, env);
       return await createGame(req, env, userId);
     }
     if (gamePath !== null && isMutation) {
-      const userId = requireIdentity(req);
+      const userId = await requireIdentity(req, env);
       const gameId = parseGameId(gamePath[1]);
       if (gamePath[2] === 'join') return await joinGame(req, env, gameId, userId);
       return await startGame(env, gameId, userId);
     }
-    if (isMutation && url.pathname.startsWith('/api/')) requireIdentity(req);
+    if (isMutation && url.pathname.startsWith('/api/')) await requireIdentity(req, env);
     return json({ error: 'not found' }, 404);
   } catch (error) {
     if (error instanceof LobbyHttpError) return json({ error: error.message }, error.status);
-    console.error(`lobby request failed: ${safeErrorMessage(error)}`);
+    console.error('lobby request failed');
     return json({ error: 'internal server error' }, 500);
   }
 }
@@ -164,9 +164,12 @@ async function findGame(env: Env, gameId: string): Promise<GameRow | null> {
   return value === undefined ? null : parseGameRow(value);
 }
 
-function requireIdentity(req: Request): string {
-  const userId = authenticateDevProtocol(req.headers.get('Authorization'));
-  if (userId === null || userId.length < 1 || userId.length > MAX_DEV_ID_LENGTH) {
+async function requireIdentity(req: Request, env: Env): Promise<string> {
+  const authorization = req.headers.get('Authorization');
+  const match = authorization === null ? null : /^Bearer ([^\s]+)$/i.exec(authorization);
+  const claims = match === null ? null : await verifyJwt(match[1]!, env.JWT_SECRET);
+  const userId = claims?.userId;
+  if (typeof userId !== 'string' || !isValidDevId(userId)) {
     throw new LobbyHttpError(401, 'unauthorized');
   }
   return userId;
@@ -320,8 +323,4 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
-}
-
-function safeErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'unknown error';
 }
