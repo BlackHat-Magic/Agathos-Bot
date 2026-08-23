@@ -14,6 +14,12 @@ import {
 type TestWebSocketListener = (event: { data?: unknown }) => void;
 type TestMessage =
   | { type: 'ready' }
+  | {
+    type: 'lobby';
+    gameId: string;
+    hostUserId: string | null;
+    players: Array<{ name: string; suspect: Player['suspect'] | null; isHost: boolean }>;
+  }
   | { type: 'error'; message: string }
   | {
     type: 'state';
@@ -119,19 +125,22 @@ function player(
 
 interface TestStorage {
   value: unknown;
+  lobby: unknown;
   failPuts: boolean;
   putCount: number;
 }
 
-function roomWithStorage(stored?: unknown): { gameRoom: GameRoom; storage: TestStorage } {
-  const storage: TestStorage = { value: stored, failPuts: false, putCount: 0 };
+function roomWithStorage(stored?: unknown, storedLobby?: unknown): { gameRoom: GameRoom; storage: TestStorage } {
+  const storage: TestStorage = { value: stored, lobby: storedLobby, failPuts: false, putCount: 0 };
   const ctx = {
     storage: {
-      get: async <T>() => storage.value as T | undefined,
-      put: async (_key: string, value: unknown) => {
+      get: async <T>(key: string) =>
+        (key === 'lobby' ? storage.lobby : storage.value) as T | undefined,
+      put: async (key: string, value: unknown) => {
         storage.putCount += 1;
         if (storage.failPuts) throw new Error('storage unavailable');
-        storage.value = value;
+        if (key === 'lobby') storage.lobby = value;
+        else storage.value = value;
       },
     },
     blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
@@ -314,7 +323,12 @@ describe('GameRoom protocol helpers', () => {
     client!.send(JSON.stringify({ intent: null }));
 
     await expect(received).resolves.toEqual([
-      { type: 'ready' },
+        {
+          type: 'lobby',
+          gameId: 'game-1',
+          hostUserId: null,
+          players: [],
+        },
       { type: 'error', message: 'malformed JSON message' },
       { type: 'error', message: 'invalid intent envelope' },
     ]);
@@ -402,5 +416,162 @@ describe('GameRoom protocol helpers', () => {
     expect(hydrateGame(storage.value).turnIndex).toBe(1);
 
     closeConnections(gameRoom);
+  });
+
+  it('handles lobby membership, claims, host order, and redacted broadcasts', async () => {
+    const { gameRoom, storage } = roomWithStorage();
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    expect(alice.initial).toEqual({
+      type: 'lobby',
+      gameId: 'game-1',
+      hostUserId: null,
+      players: [],
+    });
+
+    alice.client.send(JSON.stringify({
+      intent: { kind: 'join', userId: 'attacker', name: ' Alice ' },
+    }));
+    await expect(alice.messages.next()).resolves.toEqual({
+      type: 'lobby',
+      gameId: 'game-1',
+      hostUserId: 'alice',
+      players: [{ name: 'Alice', suspect: null, isHost: true }],
+    });
+
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+    expect(bob.initial).toMatchObject({ type: 'lobby', hostUserId: 'alice' });
+    bob.client.send(JSON.stringify({ intent: { kind: 'join', userId: 'alice', name: 'Bob' } }));
+    await expect(alice.messages.next()).resolves.toMatchObject({
+      type: 'lobby',
+      hostUserId: 'alice',
+      players: [
+        { name: 'Alice', suspect: null, isHost: true },
+        { name: 'Bob', suspect: null, isHost: false },
+      ],
+    });
+    await expect(bob.messages.next()).resolves.toMatchObject({ type: 'lobby', hostUserId: 'alice' });
+
+    bob.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'Miss Scarlett' } }));
+    await expect(bob.messages.next()).resolves.toMatchObject({ type: 'lobby' });
+    await expect(alice.messages.next()).resolves.toMatchObject({ type: 'lobby' });
+    alice.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'Miss Scarlett' } }));
+    await expect(alice.messages.next()).resolves.toEqual({
+      type: 'error', message: 'suspect is already claimed: Miss Scarlett',
+    });
+    expect(storage.putCount).toBe(3);
+    expect(JSON.stringify(alice.messages.received)).not.toContain('solution');
+    expect(JSON.stringify(alice.messages.received)).not.toContain('cards');
+
+    closeConnections(gameRoom);
+  });
+
+  it('persists and reloads the lobby snapshot, reassigning its host on leave', async () => {
+    const first = roomWithStorage();
+    const alice = await connectJoinedPlayer(first.gameRoom, 'alice');
+    alice.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Alice' } }));
+    await alice.messages.next();
+    const bob = await connectJoinedPlayer(first.gameRoom, 'bob');
+    bob.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Bob' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    closeConnections(first.gameRoom);
+
+    const reloaded = roomWithStorage(first.storage.value, first.storage.lobby);
+    const bobReloaded = await connectJoinedPlayer(reloaded.gameRoom, 'bob');
+    expect(bobReloaded.initial).toMatchObject({
+      type: 'lobby',
+      hostUserId: 'alice',
+      players: [
+        { name: 'Alice', suspect: null, isHost: true },
+        { name: 'Bob', suspect: null, isHost: false },
+      ],
+    });
+    bobReloaded.client.send(JSON.stringify({ intent: { kind: 'leave' } }));
+    await expect(bobReloaded.messages.next()).resolves.toEqual({
+      type: 'lobby',
+      gameId: 'game-1',
+      hostUserId: 'alice',
+      players: [{ name: 'Alice', suspect: null, isHost: true }],
+    });
+    closeConnections(reloaded.gameRoom);
+  });
+
+  it('enforces host-only start/order and rejects invalid lifecycle payloads without mutation', async () => {
+    const { gameRoom, storage } = roomWithStorage();
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+    alice.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Alice' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    bob.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Bob' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+
+    const beforeStart = JSON.stringify(storage.lobby);
+    alice.client.send(JSON.stringify({ intent: { kind: 'start' } }));
+    await expect(alice.messages.next()).resolves.toEqual({
+      type: 'error', message: 'every lobby player must claim a suspect before starting',
+    });
+    expect(JSON.stringify(storage.lobby)).toBe(beforeStart);
+    bob.client.send(JSON.stringify({ intent: { kind: 'start' } }));
+    await expect(bob.messages.next()).resolves.toEqual({
+      type: 'error', message: 'only the host can perform this lobby action',
+    });
+    bob.client.send(JSON.stringify({ intent: { kind: 'setOrder', order: ['Miss Scarlett'] } }));
+    await expect(bob.messages.next()).resolves.toEqual({
+      type: 'error', message: 'only the host can perform this lobby action',
+    });
+    const beforeInvalid = JSON.stringify(storage.lobby);
+    alice.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'invalid' } }));
+    await expect(alice.messages.next()).resolves.toEqual({
+      type: 'error', message: 'invalid suspect: invalid',
+    });
+    expect(JSON.stringify(storage.lobby)).toBe(beforeInvalid);
+    closeConnections(gameRoom);
+  });
+
+  it('starts valid canonical humans plus robots and invokes the robot hook', async () => {
+    const { gameRoom, storage } = roomWithStorage();
+    const hook = vi.spyOn(GameRoomClass.prototype, 'maybeRunRobot');
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    const bob = await connectJoinedPlayer(gameRoom, 'bob');
+    const spectator = await connectJoinedPlayer(gameRoom, 'spectator');
+
+    alice.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Alice' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    await spectator.messages.next();
+    bob.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Bob' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    await spectator.messages.next();
+    alice.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'Miss Scarlett' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    await spectator.messages.next();
+    bob.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'Professor Plum' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    await spectator.messages.next();
+
+    alice.client.send(JSON.stringify({ intent: { kind: 'start' } }));
+    await expect(alice.messages.next()).resolves.toMatchObject({ type: 'state', view: { myIndex: 0 } });
+    await expect(bob.messages.next()).resolves.toMatchObject({ type: 'state', view: { myIndex: 1 } });
+    await expect(spectator.messages.next()).resolves.toEqual({ type: 'ready' });
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(hydrateGame(storage.value).players).toHaveLength(6);
+    expect(hydrateGame(storage.value).phase).toBe('playing');
+    expect(hydrateGame(storage.value).players.slice(0, 2).map(player => player.userId)).toEqual(['alice', 'bob']);
+    expect(hydrateGame(storage.value).players.slice(2).every(player => player.isRobot)).toBe(true);
+    expect(storage.lobby).toEqual({ players: [] });
+    hook.mockRestore();
+    closeConnections(gameRoom);
+  });
+
+  it('fails closed on corrupt lobby persistence', async () => {
+    const { gameRoom } = roomWithStorage(undefined, { players: [{ bad: true }] });
+    const response = await gameRoom.fetch(upgradeRequest('bearer.dev-token-user'));
+    expect(response.status).toBe(500);
+    expect(await response.text()).toContain('invalid persisted lobby');
   });
 });

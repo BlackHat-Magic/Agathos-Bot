@@ -1,15 +1,31 @@
 import { DurableObject } from 'cloudflare:workers';
 import {
   applyIntent,
+  begin,
+  createGame,
   toView,
 } from '@agathos/game';
-import type { Game } from '@agathos/game';
+import type { Game, Intent } from '@agathos/game';
 import type { Env } from './index';
 import {
   createInitialGame,
   hydrateGame,
   serializeGame,
 } from './game-storage';
+import {
+  LOBBY_STORAGE_KEY,
+  claimLobbySuspect,
+  createLobby,
+  createStartPlayers,
+  hydrateLobby,
+  joinLobby,
+  leaveLobby,
+  lobbyView,
+  requireLobbyHost,
+  serializeLobby,
+  setLobbyOrder,
+} from './lobbies';
+import type { LobbyState } from './lobbies';
 import {
   assertIntentAuthority,
   authenticateDevProtocol,
@@ -35,9 +51,11 @@ interface Connection {
 
 export class GameRoom extends DurableObject<Env> {
   private game: Game | undefined;
+  private lobby: LobbyState | undefined;
   private gameLoad: Promise<Game> | undefined;
   private messageQueue: Promise<void> = Promise.resolve();
   private readonly connections = new Map<WebSocket, Connection>();
+  private gameId = '';
 
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
@@ -45,6 +63,7 @@ export class GameRoom extends DurableObject<Env> {
     if (url.searchParams.get('gameId') === null || url.searchParams.get('gameId') === '') {
       return new Response('gameId is required', { status: 400 });
     }
+    this.gameId = url.searchParams.get('gameId')!;
     if (req.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('Expected WebSocket upgrade', { status: 426 });
     }
@@ -62,15 +81,17 @@ export class GameRoom extends DurableObject<Env> {
       const connection: Connection = {
         ws: serverSocket,
         userId: negotiated.userId,
-        viewerIndex: resolveViewerIndex(game, negotiated.userId),
+        viewerIndex: game.phase === 'lobby' ? null : resolveViewerIndex(game, negotiated.userId),
       };
-      const initialPayload = connection.viewerIndex === null
-        ? { type: 'ready' as const }
-        : {
-          type: 'state' as const,
-          view: toView(game, connection.viewerIndex),
-          events: [],
-        };
+      const initialPayload = game.phase === 'lobby'
+        ? lobbyView(this.lobby!, this.gameId)
+        : connection.viewerIndex === null
+          ? { type: 'ready' as const }
+          : {
+            type: 'state' as const,
+            view: toView(game, connection.viewerIndex),
+            events: [],
+          };
 
       this.connections.set(serverSocket, connection);
       serverSocket.accept();
@@ -111,10 +132,12 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   private async loadGame(): Promise<Game> {
-    if (this.game !== undefined) return this.game;
+    if (this.game !== undefined && this.lobby !== undefined) return this.game;
     this.gameLoad ??= this.ctx.blockConcurrencyWhile(async () => {
-      const stored = await this.ctx.storage.get<unknown>(STORAGE_KEY);
-      this.game = stored === undefined ? createInitialGame() : hydrateGame(stored);
+      const storedGame = await this.ctx.storage.get<unknown>(STORAGE_KEY);
+      const storedLobby = await this.ctx.storage.get<unknown>(LOBBY_STORAGE_KEY);
+      this.game = storedGame === undefined ? createInitialGame() : hydrateGame(storedGame);
+      this.lobby = storedLobby === undefined ? createLobby() : hydrateLobby(storedLobby);
       return this.game;
     });
     return this.gameLoad;
@@ -134,6 +157,10 @@ export class GameRoom extends DurableObject<Env> {
   private async handleMessage(connection: Connection, data: string | ArrayBuffer): Promise<void> {
     const { intent } = parseIntentEnvelope(data);
     const game = await this.loadGame();
+    if (game.phase === 'lobby' && isLobbyIntent(intent)) {
+      await this.handleLobbyIntent(connection, intent);
+      return;
+    }
     connection.viewerIndex = resolveViewerIndex(game, connection.userId);
     assertIntentAuthority(game, connection.viewerIndex, intent);
 
@@ -149,6 +176,82 @@ export class GameRoom extends DurableObject<Env> {
     this.broadcast(events);
   }
 
+  private async handleLobbyIntent(
+    connection: Connection,
+    intent: Extract<Parameters<typeof applyIntent>[2], { kind: 'join' | 'claimSuspect' | 'start' | 'setOrder' | 'leave' }>,
+  ): Promise<void> {
+    const lobby = this.lobby;
+    const game = this.game;
+    if (lobby === undefined || game === undefined) throw new Error('room state is not loaded');
+
+    switch (intent.kind) {
+      case 'join': {
+        const nextLobby = joinLobby(lobby, connection.userId, intent.name);
+        await this.persistLobby(nextLobby);
+        this.broadcastLobby();
+        return;
+      }
+      case 'claimSuspect': {
+        const nextLobby = claimLobbySuspect(lobby, connection.userId, intent.suspect);
+        await this.persistLobby(nextLobby);
+        this.broadcastLobby();
+        return;
+      }
+      case 'setOrder': {
+        const nextLobby = setLobbyOrder(lobby, connection.userId, intent.order);
+        await this.persistLobby(nextLobby);
+        this.broadcastLobby();
+        return;
+      }
+      case 'leave': {
+        const nextLobby = leaveLobby(lobby, connection.userId);
+        await this.persistLobby(nextLobby);
+        this.broadcastLobby();
+        return;
+      }
+      case 'start': {
+        requireLobbyHost(lobby, connection.userId);
+        const nextGame = createGame(createStartPlayers(lobby));
+        begin(nextGame);
+        const nextLobby = createLobby();
+        await this.persistStartedGame(game, lobby, nextGame, nextLobby);
+        this.game = nextGame;
+        this.lobby = nextLobby;
+        this.broadcast([]);
+        await this.maybeRunRobot();
+        return;
+      }
+    }
+  }
+
+  private async persistLobby(nextLobby: LobbyState): Promise<void> {
+    const persisted = serializeLobby(nextLobby);
+    await this.ctx.storage.put(LOBBY_STORAGE_KEY, persisted);
+    this.lobby = nextLobby;
+  }
+
+  private async persistStartedGame(
+    previousGame: Game,
+    previousLobby: LobbyState,
+    nextGame: Game,
+    nextLobby: LobbyState,
+  ): Promise<void> {
+    const previousPersistedGame = serializeGame(previousGame);
+    const previousPersistedLobby = serializeLobby(previousLobby);
+    try {
+      await this.ctx.storage.put(STORAGE_KEY, serializeGame(nextGame));
+      await this.ctx.storage.put(LOBBY_STORAGE_KEY, serializeLobby(nextLobby));
+    } catch (error) {
+      try {
+        await this.ctx.storage.put(STORAGE_KEY, previousPersistedGame);
+        await this.ctx.storage.put(LOBBY_STORAGE_KEY, previousPersistedLobby);
+      } catch {
+        // Keep the in-memory state unchanged; the next DO invocation will fail closed if needed.
+      }
+      throw error;
+    }
+  }
+
   private broadcast(events: ReturnType<typeof applyIntent>): void {
     const game = this.game;
     if (game === undefined) return;
@@ -160,6 +263,19 @@ export class GameRoom extends DurableObject<Env> {
         } else {
           this.sendState(connection, events);
         }
+      } catch (error) {
+        this.sendError(connection, error);
+      }
+    }
+  }
+
+  private broadcastLobby(): void {
+    if (this.lobby === undefined) return;
+    const payload = lobbyView(this.lobby, this.gameId);
+    for (const connection of [...this.connections.values()]) {
+      try {
+        connection.viewerIndex = null;
+        this.sendJson(connection, payload);
       } catch (error) {
         this.sendError(connection, error);
       }
@@ -203,6 +319,13 @@ export class GameRoom extends DurableObject<Env> {
   private removeConnection(ws: WebSocket): void {
     this.connections.delete(ws);
   }
+}
+
+function isLobbyIntent(
+  intent: Intent,
+): intent is Extract<Intent, { kind: 'join' | 'claimSuspect' | 'start' | 'setOrder' | 'leave' }> {
+  return intent.kind === 'join' || intent.kind === 'claimSuspect' || intent.kind === 'start' ||
+    intent.kind === 'setOrder' || intent.kind === 'leave';
 }
 
 function errorMessage(error: unknown): string {
