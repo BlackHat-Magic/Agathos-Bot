@@ -129,7 +129,7 @@ export interface Game {
   board: BoardSpace[][];            // [24][25] like clue.py:114
   phase: Phase;
   turnIndex: number;
-  weapons: WeaponPiece[];          // each weapon starts on a valid board cell
+  weapons: WeaponPiece[];          // each weapon starts in a canonical room
   pendingReveal: {
     suggesterIndex: number;
     suspect: Suspect; weapon: Weapon; room: Room;

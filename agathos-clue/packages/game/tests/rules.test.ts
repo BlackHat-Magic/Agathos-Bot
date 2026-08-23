@@ -48,6 +48,21 @@ describe('begin', () => {
     expect(readSolution(solution)).toEqual(['Miss Scarlett', 'Candlestick', 'Ballroom']);
   });
 
+  it('places each weapon in a distinct canonical room', () => {
+    const game = createGame([mkPlayer('Miss Scarlett', 0, [], false)]);
+    begin(game, () => 0);
+    const canonicalRooms = new Set(
+      game.board.flat().filter(space => space != null && space.room !== null),
+    );
+
+    expect(game.weapons).toHaveLength(6);
+    expect(new Set(game.weapons.map(piece => piece.location)).size).toBe(6);
+    for (const piece of game.weapons) {
+      expect(piece.location.room).not.toBeNull();
+      expect(canonicalRooms.has(piece.location)).toBe(true);
+    }
+  });
+
   it('rejects beginning a game without players', () => {
     const game = createGame([]);
 

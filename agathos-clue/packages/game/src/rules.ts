@@ -33,6 +33,16 @@ function canonicalLocation(game: Game, player: Player) {
   throw new Error('player location is not a room or board cell');
 }
 
+function roomAt(game: Game, room: Room) {
+  for (const column of game.board) {
+    for (const space of column) {
+      if (!space) continue;
+      if (space.room === room) return space;
+    }
+  }
+  throw new Error(`room is not on the board: ${room}`);
+}
+
 /** Create a game whose player indexes are always their Game.players offsets. */
 export function createGame(players: Player[]): Game {
   const game: Game = {
@@ -111,11 +121,9 @@ export function begin(game: Game, rng: RNG = Math.random): void {
     rng,
   );
 
-  game.weapons = WEAPONS.map(weapon => ({
+  game.weapons = WEAPONS.map((weapon, index) => ({
     weapon,
-    // placeholder; actual placement happens during suggest (Task 11). (0,0) is
-    // not a valid cell on this board, so use a known-valid starting cell.
-    location: spaceAt(game.board, 16, 24),
+    location: roomAt(game, ROOMS[index]!),
   }));
 
   let i = 0;
