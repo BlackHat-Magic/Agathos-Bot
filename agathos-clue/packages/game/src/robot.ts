@@ -45,28 +45,45 @@ export function decideRobotIntent(
   const cornerRoomHasPassage =
     inRoom && player.piece.location.accesses.some(a => a.room != null);
 
-  // 1. secret passage from corner room (50% per clue.py:407)
+  // A movement action is terminal unless it entered an eligible room.
+  if (game.hasMovedThisTurn) {
+    if (
+      inRoom &&
+      !player.guessedHere &&
+      (player.enteredRoomThisTurn || player.movedBySuggestion)
+    ) {
+      return {
+        kind: 'suggest',
+        suspect: randomOf(SUSPECTS, rng),
+        weapon: randomOf(WEAPONS, rng),
+      };
+    }
+    return { kind: 'endTurn' };
+  }
+
+  // Preserve room-entry state when a caller has not yet reflected the move flag.
   if (
-    cornerRoomHasPassage &&
     !game.hasRolledThisTurn &&
-    !game.hasMovedThisTurn &&
+    inRoom &&
+    !cornerRoomHasPassage &&
     !player.guessedHere &&
-    rng() < 0.5
+    (player.enteredRoomThisTurn || player.movedBySuggestion)
   ) {
-    return { kind: 'useSecretPassage' };
+    return {
+      kind: 'suggest',
+      suspect: randomOf(SUSPECTS, rng),
+      weapon: randomOf(WEAPONS, rng),
+    };
   }
 
-  // 2. roll if not in a room — robots always roll (clue.py:419-420)
-  if (!inRoom && game.lastDieRoll == null) {
-    return { kind: 'roll' };
-  }
+  if (player.guessedHere) return { kind: 'endTurn' };
 
-  // 3. after rolling, choose destination = farthest reachable room
+  // After rolling, choose destination = farthest reachable room
   //    (or farthest reachable space). clue.py:432-438 picks
   //    `max(zip(dests, costs), key=lambda x: x[1]+100 if x[0].room else x[1])`;
   //    filtering to rooms first then taking the highest-cost room has the
   //    same effect: prefer rooms, and among rooms prefer the farthest.
-  if (!inRoom && game.lastDieRoll != null) {
+  if (game.hasRolledThisTurn && game.lastDieRoll !== null) {
     const r = reachable(player.piece.location, game.lastDieRoll);
     const roomSpaces = r.spaces.filter(s => s.room != null);
     if (roomSpaces.length) {
@@ -76,24 +93,24 @@ export function decideRobotIntent(
       }
       return { kind: 'moveTo', destination: dest.room! };
     }
-    if (r.spaces.length) {
-      const last = r.spaces[r.spaces.length - 1]!;
-      return { kind: 'moveTo', destination: last.pos!.join(',') };
+    const corridorSpaces = r.spaces.filter(s => s.room == null);
+    if (corridorSpaces.length) {
+      let dest = corridorSpaces[0]!;
+      for (const s of corridorSpaces) {
+        if ((r.cost.get(s) ?? -1) > (r.cost.get(dest) ?? -1)) dest = s;
+      }
+      return { kind: 'moveTo', destination: dest.pos!.join(',') };
     }
     return { kind: 'endTurn' };
   }
 
-  // 4. in a room — suggest if not already suggested this turn (clue.py:510-523)
-  if (inRoom && !player.guessedHere &&
-      (player.enteredRoomThisTurn || player.movedBySuggestion)) {
-    return {
-      kind: 'suggest',
-      suspect: randomOf(SUSPECTS, rng),
-      weapon: randomOf(WEAPONS, rng),
-    };
+  // At the start of a turn, robots either take a passage or roll.
+  if (!game.hasRolledThisTurn && !game.hasMovedThisTurn) {
+    if (cornerRoomHasPassage && rng() < 0.5) return { kind: 'useSecretPassage' };
+    return { kind: 'roll' };
   }
 
-  // 5. robots never accuse (clue.py:632-737) — end the turn
+  // Robots never accuse (clue.py:632-737).
   return { kind: 'endTurn' };
 }
 

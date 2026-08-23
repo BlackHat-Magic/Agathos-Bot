@@ -15,12 +15,36 @@ function mkRobot(suspect: any, idx: number): Player {
 }
 
 describe('decideRobotIntent', () => {
-  it('rolls when not in a room', () => {
+  it('rolls from a corridor and ends after corridor movement', () => {
     const g = createGame([mkRobot('Miss Scarlett', 0)]);
     g.turnIndex = 0;
     g.phase = 'playing';
-    const intent = decideRobotIntent(g, 0, () => 0.5);
-    expect(intent.kind === 'roll' || intent.kind === 'endTurn').toBe(true);
+    const roll = decideRobotIntent(g, 0, () => 0.5);
+    expect(roll).toEqual({ kind: 'roll' });
+    applyIntent(g, 0, roll, () => 0);
+
+    const move = decideRobotIntent(g, 0, () => 0.5);
+    expect(move.kind).toBe('moveTo');
+    applyIntent(g, 0, move);
+
+    expect(g.players[0]!.piece.location.room).toBeNull();
+    expect(decideRobotIntent(g, 0, () => 0.5)).toEqual({ kind: 'endTurn' });
+  });
+
+  it('rolls from an ordinary room and then chooses a destination', () => {
+    const g = createGame([mkRobot('Miss Scarlett', 0)]);
+    g.turnIndex = 0; g.phase = 'playing';
+    g.players[0]!.piece.location = spaceAt(g.board, 10, 18);
+
+    const roll = decideRobotIntent(g, 0, () => 0.4);
+    expect(roll).toEqual({ kind: 'roll' });
+    applyIntent(g, 0, roll, () => 0);
+
+    const move = decideRobotIntent(g, 0, () => 0.5);
+    expect(move.kind).toBe('moveTo');
+    applyIntent(g, 0, move);
+
+    expect(g.players[0]!.piece.location.room).toBeNull();
   });
 
   it('suggests when in a room and not yet guessed this turn', () => {
@@ -29,6 +53,7 @@ describe('decideRobotIntent', () => {
     // Place Scarlett in Hall
     g.players[0].piece.location = spaceAt(g.board, 10, 18);
     g.players[0].enteredRoomThisTurn = true;
+    g.hasMovedThisTurn = true;
     const intent = decideRobotIntent(g, 0, () => 0.5);
     expect(intent.kind).toBe('suggest');
   });
@@ -37,6 +62,7 @@ describe('decideRobotIntent', () => {
     const g = createGame([mkRobot('Miss Scarlett', 0)]);
     g.turnIndex = 0; g.phase = 'playing';
     g.players[0].piece.location = spaceAt(g.board, 10, 18);
+    g.hasMovedThisTurn = true;
 
     expect(decideRobotIntent(g, 0, () => 0.5)).toEqual({ kind: 'endTurn' });
   });
@@ -122,6 +148,7 @@ describe('decideRobotIntent', () => {
     g.phase = 'playing';
     g.players[0]!.piece.location = spaceAt(g.board, 10, 18);
     g.players[0]!.enteredRoomThisTurn = true;
+    g.hasMovedThisTurn = true;
 
     const suggestion = decideRobotIntent(g, 0, () => 0.5);
     expect(suggestion.kind).toBe('suggest');
