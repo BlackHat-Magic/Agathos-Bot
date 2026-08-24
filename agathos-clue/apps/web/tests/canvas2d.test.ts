@@ -232,7 +232,11 @@ class FakeContext {
   clearRect(): void { this.calls.push('clearRect'); }
   fillRect(): void { this.calls.push('fillRect'); }
   strokeRect(): void { this.calls.push('strokeRect'); }
-  fillText(): void { this.calls.push('fillText'); }
+   fillText(): void { this.calls.push('fillText'); }
+   measureText(text: string): { width: number } {
+     this.calls.push('measureText');
+     return { width: text.length * 7 };
+   }
   beginPath(): void { this.calls.push('beginPath'); }
   arc(_x: number, _y: number, radius: number): void { this.calls.push('arc'); this.arcRadii.push(radius); }
   fill(): void { this.calls.push('fill'); }

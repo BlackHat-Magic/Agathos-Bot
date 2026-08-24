@@ -10,6 +10,7 @@ import {
 } from '@agathos/game';
 import type { CellId, GameView, Room, Suspect, Weapon } from '@agathos/game';
 import type { BoardRenderer, BoardLocation } from './BoardRenderer';
+import { hopPath, roomSpread } from './movement-path';
 import {
   boardOrigin,
   canonicalRoomAt,
@@ -58,6 +59,8 @@ const HIGHLIGHT_COLOR = '#89b4fa';
 const TOKEN_HALO_COLOR = '#1e1e2e';
 const CURRENT_PLAYER_COLOR = '#f9e2af';
 const ANIMATION_MS = 180;
+/** Quick per-cell taps: fast enough to read as walking, slow enough to see. */
+const HOP_MS = 150;
 
 type Animation =
   | { kind: 'move' | 'suggestion'; suspect: Suspect; from: BoardLocation; to: BoardLocation; progress: number }
@@ -121,9 +124,29 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
   }
 
   animateMove(from: BoardLocation, to: BoardLocation): Promise<void> {
-    const suspect = this.currentView?.players.find(player => player.location === from)?.suspect;
+    const suspect = this.currentView?.players.find(player => player.location === to)?.suspect ??
+      this.currentView?.players.find(player => player.location === from)?.suspect;
     if (!suspect || !isCanonicalLocation(from) || !isCanonicalLocation(to)) return Promise.resolve();
-    return this.animate({ kind: 'move', suspect, from, to, progress: 0 });
+    return this.animateHopPath(suspect, hopPath(from, to));
+  }
+
+  /** Tap each square on the way: sequential per-hop tweens with a small lift. */
+  private animateHopPath(
+    suspect: Suspect,
+    waypoints: BoardLocation[],
+    segmentMs = HOP_MS,
+  ): Promise<void> {
+    let chain: Promise<void> = Promise.resolve();
+    for (let index = 1; index < waypoints.length; index += 1) {
+      const from = waypoints[index - 1]!;
+      const to = waypoints[index]!;
+      chain = chain.then(() => this.animate(
+        { kind: 'move', suspect, from, to, progress: 0 },
+        segmentMs,
+      ));
+      if (waypoints.length > 12) break; // absurd paths still finish quickly
+    }
+    return chain;
   }
 
   animateSuggestion(suspect: Suspect, from: BoardLocation, to: BoardLocation): Promise<void> {
@@ -177,7 +200,7 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     this.clickCb(space.room ?? `${point.col},${point.row}`);
   };
 
-  private animate(animation: Animation): Promise<void> {
+  private animate(animation: Animation, durationMs = ANIMATION_MS): Promise<void> {
     if (!this.canvas || !this.ctx || !this.layout || !isUsableLayout(this.layout)) return Promise.resolve();
     this.cancelAnimation();
 
@@ -200,7 +223,7 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
           active.resolve();
           return;
         }
-        const progress = Math.min(1, Math.max(0, (timestamp - start) / ANIMATION_MS));
+        const progress = Math.min(1, Math.max(0, (timestamp - start) / durationMs));
         active.animation = { ...animation, progress };
         this.draw();
         if (progress >= 1) {
@@ -241,7 +264,8 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
   }
 
   private drawBoard(ctx: CanvasRenderingContext2D, layout: BoardLayout): void {
-    ctx.font = `${Math.max(8, Math.floor(layout.cellW * 0.38))}px sans-serif`;
+    const fontSize = Math.max(8, Math.floor(layout.cellW * 0.38));
+    ctx.font = `${fontSize}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let col = 0; col < BOARD_WIDTH; col += 1) {
@@ -262,8 +286,14 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     for (const room of ROOMS) {
       const cells = roomCells(room);
       if (cells.length === 0) continue;
-      const [x, y] = averageCellCenter(cells, layout);
-      ctx.fillStyle = '#1e1e2e';
+      const [x, y] = roomLabelAnchor(cells, layout, fontSize);
+      const width = ctx.measureText(room).width;
+      const padX = layout.cellW * 0.3;
+      const padY = fontSize * 0.35;
+      ctx.fillStyle = 'rgba(17, 17, 27, 0.78)';
+      ctx.fillRect(x - width / 2 - padX, y - fontSize / 2 - padY,
+        width + padX * 2, fontSize + padY * 2);
+      ctx.fillStyle = '#cdd6f4';
       ctx.fillText(room, x, y);
     }
   }
@@ -289,28 +319,45 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     layout: BoardLayout,
     view: GameView,
   ): void {
-    const locations = new Map<BoardLocation, number>();
+    // Ring offsets are computed per location so pieces sharing a room fan out
+    // around its center instead of stacking on one point.
+    const perLocation = new Map<BoardLocation, number>();
+    for (const player of view.players) {
+      perLocation.set(player.location, (perLocation.get(player.location) ?? 0) + 1);
+    }
+    const seen = new Map<BoardLocation, number>();
     for (const [index, player] of view.players.entries()) {
       if (!isSuspect(player.suspect)) continue;
       const center = locationCenter(player.location, layout);
       if (!center) continue;
-      const [x, y] = center;
-      const offset = locations.get(player.location) ?? 0;
-      locations.set(player.location, offset + 1);
-      const angle = offset * Math.PI / 3;
-      const radius = Math.min(layout.cellW, layout.cellH) * 0.18;
+      const total = perLocation.get(player.location) ?? 1;
+      const ordinal = seen.get(player.location) ?? 0;
+      seen.set(player.location, ordinal + 1);
+      let [x, y] = center;
+      if (isRoom(player.location)) {
+        const [halfW, halfH] = locationHalfExtents(player.location, layout);
+        const [dx, dy] = roomSpread(total, halfW, halfH)[ordinal] ?? [0, 0];
+        x += dx;
+        y += dy;
+      } else if (total > 1) {
+        // Corridors hold one piece per cell; a collision means an animation is
+        // mid-flight, so nudge slightly apart.
+        const angle = ordinal * Math.PI / 3;
+        x += Math.cos(angle) * layout.cellW * 0.18;
+        y += Math.sin(angle) * layout.cellH * 0.18;
+      }
       const isCurrent = index === view.myIndex;
       const tokenRadius = layout.cellW * (isCurrent ? 0.34 : 0.28);
       ctx.fillStyle = SUSPECT_COLORS[player.suspect];
       ctx.beginPath();
-      ctx.arc(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius, tokenRadius, 0, Math.PI * 2);
+      ctx.arc(x, y, tokenRadius, 0, Math.PI * 2);
       ctx.strokeStyle = TOKEN_HALO_COLOR;
       ctx.lineWidth = Math.max(2, tokenRadius * 0.2);
       ctx.stroke();
       ctx.fill();
       if (isCurrent) {
         ctx.beginPath();
-        ctx.arc(x + Math.cos(angle) * radius, y + Math.sin(angle) * radius, tokenRadius + 2, 0, Math.PI * 2);
+        ctx.arc(x, y, tokenRadius + 2, 0, Math.PI * 2);
         ctx.strokeStyle = CURRENT_PLAYER_COLOR;
         ctx.lineWidth = Math.max(2, layout.cellW * 0.08);
         ctx.stroke();
@@ -352,7 +399,9 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     const to = locationCenter(animation.animation.to, layout);
     if (!from || !to) return;
     const x = from[0] + (to[0] - from[0]) * animation.animation.progress;
-    const y = from[1] + (to[1] - from[1]) * animation.animation.progress;
+    const y = from[1] + (to[1] - from[1]) * animation.animation.progress -
+      // A hop: lift off the ground mid-segment, like tapping each square.
+      Math.sin(animation.animation.progress * Math.PI) * layout.cellH * 0.35;
     ctx.fillStyle = SUSPECT_COLORS[animation.animation.suspect];
     ctx.beginPath();
     ctx.arc(x, y, layout.cellW * 0.3, 0, Math.PI * 2);
@@ -402,9 +451,33 @@ function averageCellCenter(cells: Array<[number, number]>, layout: BoardLayout):
   return [x / cells.length, y / cells.length];
 }
 
+/** Horizontal center of the room, vertically just above its topmost cells. */
+function roomLabelAnchor(
+  cells: Array<[number, number]>,
+  layout: BoardLayout,
+  fontSize: number,
+): [number, number] {
+  const minRow = Math.min(...cells.map(([, row]) => row));
+  const x = averageCellCenter(cells, layout)[0];
+  const y = Math.max(fontSize, minRow * layout.cellH - fontSize * 0.55);
+  return [x, y];
+}
+
 function locationCenter(location: BoardLocation, layout: BoardLayout): [number, number] | null {
   const cells = cellsForLocation(location);
   return cells.length > 0 ? averageCellCenter(cells, layout) : null;
+}
+
+/** Half width/height of a location's cell bounding box, for ring spreads. */
+function locationHalfExtents(location: BoardLocation, layout: BoardLayout): [number, number] {
+  const cells = cellsForLocation(location);
+  if (cells.length === 0) return [layout.cellW / 2, layout.cellH / 2];
+  const cols = cells.map(([col]) => col);
+  const rows = cells.map(([, row]) => row);
+  return [
+    Math.max(1, (Math.max(...cols) - Math.min(...cols) + 1) * layout.cellW / 2),
+    Math.max(1, (Math.max(...rows) - Math.min(...rows) + 1) * layout.cellH / 2),
+  ];
 }
 
 function isUsableLayout(layout: BoardLayout): boolean {

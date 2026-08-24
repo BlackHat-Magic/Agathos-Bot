@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import type { Event } from '@agathos/game';
-  import { currentView, events } from '../stores';
+  import { currentView, diceRolling, events } from '../stores';
   import { SUSPECT_COLORS } from '../canvas2d';
   import {
     DICE_SETTLE_HOLD_MS,
@@ -74,6 +74,7 @@
   function playNext(): void {
     const roll = queue.shift();
     if (roll === undefined) return;
+    diceRolling.set(true);
     rollSeq += 1;
     faces = splitRoll(roll.result);
     startTransforms = [
@@ -97,10 +98,17 @@
   function finishRoll(): void {
     phase = 'idle';
     // Skip the long victory-lap hold while a backlog of rolls is waiting.
-    if (queue.length > 0) playNext();
+    if (queue.length > 0) {
+      playNext();
+      return;
+    }
+    diceRolling.set(false);
   }
 
-  onDestroy(clearTimers);
+  onDestroy(() => {
+    clearTimers();
+    diceRolling.set(false);
+  });
 
   /** Jump to the start pose instantly, then transition into the resting face. */
   function tumble(node: HTMLDivElement, params: { start: string; end: string }): void {

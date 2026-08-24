@@ -4,7 +4,7 @@
   import { Canvas2DRenderer } from '../canvas2d';
   import { canClickMove } from '../movement-gating';
   import { finishedGameMessage } from '../result-message';
-  import { currentView, error, send } from '../stores';
+  import { currentView, diceRolling, error, send } from '../stores';
   import { createMoveToIntent } from '../../transport/intents';
   import IntentBar from './IntentBar.svelte';
   import Hand from './Hand.svelte';
@@ -65,7 +65,27 @@
 
   $: if (renderer !== null && $currentView !== null) {
     renderer.render($currentView);
-    renderer.highlightReachable($currentView.reachableSpacesHints ?? []);
+    // Highlights wait until the dice have settled so the roll reads first.
+    renderer.highlightReachable(
+      $diceRolling ? [] : $currentView.reachableSpacesHints ?? []);
+    animateArrivals($currentView);
+  }
+
+  /** Hop a piece along its path whenever the server reports it moved. */
+  let previousLocations: BoardLocation[] = [];
+  function animateArrivals(view: NonNullable<typeof $currentView>): void {
+    const next = view.players.map(player => player.location);
+    if (renderer === null) {
+      previousLocations = next;
+      return;
+    }
+    for (let index = 0; index < next.length; index += 1) {
+      const from = previousLocations[index];
+      const to = next[index];
+      if (from === undefined || to === undefined || from === to) continue;
+      void renderer.animateMove(from, to);
+    }
+    previousLocations = next;
   }
 
 </script>
@@ -105,18 +125,6 @@
             <RevealPrompt />
             <RevealAnnouncement />
           </div>
-          {#if $currentView.reachableSpacesHints?.length}
-            <div class="mt-3 rounded-2xl border border-mocha-mauve/30 bg-mocha-mauve/10 p-3" aria-labelledby="reachable-moves-title">
-              <p id="reachable-moves-title" class="text-xs font-semibold uppercase tracking-[0.16em] text-mocha-mauve">Keyboard moves</p>
-              <div class="mt-2 flex flex-wrap gap-2">
-                {#each $currentView.reachableSpacesHints as destination}
-                  <button class="game-button" type="button" aria-label={`Move to ${destination}`} onclick={() => moveTo(destination)}>
-                    {destination}
-                  </button>
-                {/each}
-              </div>
-            </div>
-          {/if}
         </section>
 
         <aside class="space-y-4">

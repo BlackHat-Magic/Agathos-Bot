@@ -18,6 +18,8 @@ export const lobby = writable<LobbySnapshot | null>(null);
 export const gameId = writable<string | null>(null);
 export const connectionStatus = writable<ConnectionStatus | 'idle'>('idle');
 export const error = writable<string | null>(null);
+/** True while the dice overlay is animating; gates hints and roll spoilers. */
+export const diceRolling = writable(false);
 
 let transport: Transport | null = null;
 let stopTransportSubscriptions: (() => void) | null = null;
