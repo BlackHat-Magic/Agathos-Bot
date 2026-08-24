@@ -4,10 +4,13 @@
   import { currentView, privateReveal } from '../stores';
   import { fanPlacements } from '../hand-fan';
 
+  let raised = false;
   let hoverIndex: number | null = null;
 
   $: cards = $currentView?.myHand ?? [];
   $: placements = fanPlacements(cards.length, hoverIndex);
+  // A fresh private reveal deserves attention even while tucked.
+  $: if ($privateReveal?.card !== undefined) raised = true;
 
   function cardLabel(card: Card): string {
     switch (card.type) {
@@ -25,23 +28,30 @@
     }
   }
 
-  function setHover(index: number): void {
-    hoverIndex = index;
+  function raise(): void {
+    raised = true;
   }
 
-  function clearHover(): void {
+  /** Lower again when the cursor exits toward the board, keeping hover state honest. */
+  function lowerFromFan(): void {
     hoverIndex = null;
+    raised = false;
   }
 </script>
 
 <section
-  class="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex flex-col items-center"
+  class="hand-dock pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center"
+  class:raised
   aria-label="Your private cards"
 >
   <ul
-    class="relative h-[178px] w-[min(94vw,780px)] min-w-[300px]"
-    onpointerleave={clearHover}
+    class="pointer-events-auto relative h-[178px] w-[min(94vw,780px)] min-w-[300px]"
+    tabindex="0"
     aria-label="Your private hand"
+    onpointerenter={raise}
+    onpointerleave={lowerFromFan}
+    onfocusin={raise}
+    onfocusout={() => (hoverIndex = null)}
   >
     {#each cards as card, index (index)}
       <li
@@ -62,14 +72,24 @@
     {/each}
   </ul>
 
-  {#if $privateReveal?.card}
-    <p class="reveal-chip pointer-events-auto absolute left-1/2 top-[-44px] -translate-x-1/2 whitespace-nowrap rounded-full border border-mocha-green/40 bg-mocha-mantle/95 px-4 py-1 text-xs text-mocha-green shadow-lg shadow-black/30 backdrop-blur" role="status" aria-live="polite">
+  {#if $privateReveal?.card && raised}
+    <p class="reveal-chip pointer-events-none absolute left-1/2 top-[-44px] -translate-x-1/2 whitespace-nowrap rounded-full border border-mocha-green/40 bg-mocha-mantle/95 px-4 py-1 text-xs text-mocha-green shadow-lg shadow-black/30 backdrop-blur" role="status" aria-live="polite">
       Shown privately: {cardLabel($privateReveal.card)}
     </p>
   {/if}
 </section>
 
 <style>
+  /* Tucked: sunk so only the top ~16px tips of the cards break the bottom edge. */
+  .hand-dock {
+    transform: translateY(calc(100% - 88px));
+    transition: transform 0.32s cubic-bezier(0.22, 0.9, 0.28, 1);
+  }
+  .hand-dock.raised,
+  .hand-dock:focus-within {
+    transform: translateY(0);
+  }
+
   .hand-card {
     width: 104px;
     height: 142px;
@@ -93,6 +113,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .hand-dock,
     .hand-card {
       transition: none;
     }
