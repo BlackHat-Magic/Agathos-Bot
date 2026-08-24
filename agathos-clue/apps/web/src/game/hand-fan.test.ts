@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   fanAngles,
   fanPlacements,
-  hoveredSlot,
-  slotCenters,
 } from './hand-fan';
 
 describe('fanAngles', () => {
@@ -21,33 +19,6 @@ describe('fanAngles', () => {
     for (let i = 0; i < 5; i++) {
       expect(five[i]).toBeCloseTo(-five[4 - i]!, 10);
     }
-  });
-});
-
-describe('slotCenters', () => {
-  it('handles empty and single hands', () => {
-    expect(slotCenters(0)).toEqual([]);
-    expect(slotCenters(1)).toEqual([0.5]);
-  });
-
-  it('spaces centers evenly across the fan', () => {
-    expect(slotCenters(4)).toEqual([0.125, 0.375, 0.625, 0.875]);
-  });
-});
-
-describe('hoveredSlot', () => {
-  it('maps a cursor to the nearest slot and clamps the last bucket', () => {
-    expect(hoveredSlot(4, 0)).toBe(0);
-    expect(hoveredSlot(4, 0.9)).toBe(3);
-    expect(hoveredSlot(4, 1)).toBe(3);
-    expect(hoveredSlot(4, 0.5)).toBe(2);
-  });
-
-  it('rejects empty hands and out-of-range cursors', () => {
-    expect(hoveredSlot(0, 0.5)).toBeNull();
-    expect(hoveredSlot(4, -0.1)).toBeNull();
-    expect(hoveredSlot(4, 1.1)).toBeNull();
-    expect(hoveredSlot(4, Number.NaN)).toBeNull();
   });
 });
 

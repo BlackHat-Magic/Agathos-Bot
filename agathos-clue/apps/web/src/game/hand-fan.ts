@@ -26,20 +26,6 @@ export function fanAngles(count: number): number[] {
     FAN_MAX_ANGLE_DEG * (2 * index / (count - 1) - 1));
 }
 
-/** Normalized slot centers (0..1); the cursor is matched against these. */
-export function slotCenters(count: number): number[] {
-  if (count <= 0) return [];
-  return Array.from({ length: count }, (_, index) =>
-    count === 1 ? 0.5 : (index + 0.5) / count);
-}
-
-/** Closest slot to a normalized cursor position, or null outside 0..1. */
-export function hoveredSlot(count: number, cursor: number): number | null {
-  if (count <= 0 || !Number.isFinite(cursor) || cursor < 0 || cursor > 1) return null;
-  const slot = Math.floor(cursor * count);
-  return Math.min(slot, count - 1);
-}
-
 export function fanPlacements(count: number, hoverIndex: number | null): FanPlacement[] {
   const angles = fanAngles(count);
   return angles.map((angle, index) => {
