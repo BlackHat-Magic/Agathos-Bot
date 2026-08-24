@@ -5,9 +5,9 @@
   import type { Event } from '@agathos/game';
 
   /** A title always stays readable for at least this long, bursts included. */
-  const MIN_VISIBLE_MS = 5_000;
+  const MIN_VISIBLE_MS = 2_5000;
   /** After this long without a successor, a title retires to the ticker. */
-  const HOLD_CAP_MS = 12_000;
+  const HOLD_CAP_MS = 5_000;
   const MAX_QUEUE = 8;
 
   let current: Event | null = null;
@@ -68,7 +68,9 @@
       advance();
       return;
     }
-    if (compact === null) titlesBusy.set(false);
+    // Idle. A lingering ticker is ambient context, not an active
+    // announcement, so it must not keep downstream prompts waiting.
+    titlesBusy.set(false);
   }
 
   function advance(): void {
@@ -98,23 +100,46 @@
     clearTimers();
     titlesBusy.set(false);
   });
+  /** Turn handoffs announce who acts next, not who just finished. */
+  function titleFor(event: Event): string {
+    if (event.type === 'turnEnded' && $currentView !== null) {
+      const next = $currentView.players[$currentView.turnIndex];
+      return `It's now ${next?.name ?? 'the next detective'}'s turn`;
+    }
+    return formatEvent(event, $currentView);
+  }
 </script>
 
 {#if current !== null}
   <div class="pointer-events-none absolute inset-x-0 top-[10%] z-20 flex justify-center px-6" aria-live="polite">
-    <p class="title-text max-w-full text-center font-display text-3xl font-bold text-mocha-text drop-shadow-[0_4px_18px_rgb(0_0_0/95%)] sm:text-4xl">
-      {formatEvent(current, $currentView)}
-    </p>
+    <div class="title-backdrop title-text rounded-2xl px-10 py-6 text-center">
+      <p class="max-w-full font-display text-3xl font-bold text-mocha-text drop-shadow-[0_4px_18px_rgb(0_0_0/95%)] sm:text-4xl">
+        {titleFor(current)}
+      </p>
+    </div>
   </div>
 {:else if compact !== null}
   <div class="pointer-events-none absolute inset-x-0 top-[3%] z-20 flex justify-center px-6">
     <p class="ticker rounded-full border border-mocha-surface1 bg-mocha-crust/85 px-4 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-mocha-subtext1 backdrop-blur-sm">
-      Last: {formatEvent(compact, $currentView)}
+      Last: {titleFor(compact)}
     </p>
   </div>
 {/if}
 
 <style>
+  /* Same gradient plinth as the reveal prompt for board separation. */
+  .title-backdrop {
+    background: linear-gradient(
+      180deg,
+      rgb(17 17 27 / 92%) 0%,
+      rgb(17 17 27 / 72%) 65%,
+      rgb(17 17 27 / 30%) 100%
+    );
+    box-shadow:
+      0 12px 48px rgb(0 0 0 / 65%),
+      inset 0 1px 0 rgb(205 214 244 / 8%);
+  }
+
   .title-text {
     animation: title-in 0.4s cubic-bezier(0.2, 1.1, 0.3, 1) both;
   }
