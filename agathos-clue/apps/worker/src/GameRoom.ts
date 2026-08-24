@@ -59,7 +59,9 @@ const ROBOT_RETRY_INITIAL_DELAY_MS = 1_000;
 const ROBOT_RETRY_MAX_DELAY_MS = 60_000;
 const ROBOT_RETRY_MAX_ATTEMPT = 6;
 /** Extra breathing room when the next robot action starts a new phase. */
-const ROBOT_PHASE_BONUS_MS = 2_100;
+const ROBOT_PHASE_BONUS_MS = 1_400;
+/** Reveal decisions around the table run at triple pace deliberately. */
+const ROBOT_REVEAL_PACE_MULTIPLIER = 3;
 
 interface RobotAlarmInfo {
   retryCount: number;
@@ -412,10 +414,15 @@ export class GameRoom extends DurableObject<Env> {
     if (this.robotAlarmScheduled) return;
 
     // Phase boundaries (roll→move→suggest→reveal→next robot) get a longer
-    // beat so spectators can keep up with what just happened.
+    // beat so spectators can keep up with what just happened. Reveal
+    // decisions around the table get triple pace on purpose.
     const nextKey = this.peekNextRobotPhaseKey();
-    const delay = this.robotPaceMs +
-      (nextKey === null || nextKey !== this.lastRobotPhaseKey ? ROBOT_PHASE_BONUS_MS : 0);
+    const isReveal = nextKey === 'reveal';
+    const base = this.robotPaceMs * (isReveal ? ROBOT_REVEAL_PACE_MULTIPLIER : 1);
+    const boundary = nextKey === null || nextKey !== this.lastRobotPhaseKey;
+    const bonus = (boundary ? ROBOT_PHASE_BONUS_MS : 0) *
+      (isReveal ? ROBOT_REVEAL_PACE_MULTIPLIER : 1);
+    const delay = base + bonus;
     try {
       await this.ctx.storage.setAlarm(Date.now() + delay);
       this.robotAlarmScheduled = true;

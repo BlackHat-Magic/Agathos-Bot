@@ -1082,7 +1082,7 @@ describe('GameRoom protocol helpers', () => {
 
   it('paces robot actions one alarm step at a time when configured', async () => {
     const { gameRoom, storage } = roomWithStorage(undefined, undefined, undefined, {
-      ROBOT_STEP_PACE_MS: '2700',
+      ROBOT_STEP_PACE_MS: '1800',
     });
     const alice = await connectJoinedPlayer(gameRoom, 'alice');
     alice.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Alice' } }));
@@ -1121,8 +1121,8 @@ describe('GameRoom protocol helpers', () => {
     expect(storage.alarm).not.toBeNull();
     // First robot action starts a new phase: base pace + phase bonus.
     const delta = (storage.alarm as number) - Date.now();
-    expect(delta).toBeGreaterThan(4_200);
-    expect(delta).toBeLessThan(5_600);
+    expect(delta).toBeGreaterThan(2_600);
+    expect(delta).toBeLessThan(4_000);
 
     // The next alarm performs the next single action (the move), no further.
     await gameRoom.alarm();
