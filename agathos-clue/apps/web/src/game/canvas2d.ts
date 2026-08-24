@@ -89,6 +89,8 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
   private highlight = new Set<BoardLocation>();
   private currentView: GameView | null = null;
   private animation: ActiveAnimation | null = null;
+  /** Suspect whose token is being animated; its static token is suppressed. */
+  private flightSuspect: Suspect | null = null;
   private lifecycle = 0;
 
   attach(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
@@ -203,6 +205,7 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
   private animate(animation: Animation, durationMs = ANIMATION_MS): Promise<void> {
     if (!this.canvas || !this.ctx || !this.layout || !isUsableLayout(this.layout)) return Promise.resolve();
     this.cancelAnimation();
+    if (animation.kind !== 'accusation') this.flightSuspect = animation.suspect;
 
     return new Promise(resolve => {
       let settled = false;
@@ -220,6 +223,8 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
       const tick = (timestamp: number): void => {
         if (this.animation !== active || active.lifecycle !== this.lifecycle ||
             !this.canvas || !this.ctx || !this.layout) {
+          this.clearFlightFor(animation);
+          this.animation = null;
           active.resolve();
           return;
         }
@@ -227,6 +232,7 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
         active.animation = { ...animation, progress };
         this.draw();
         if (progress >= 1) {
+          this.clearFlightFor(animation);
           this.animation = null;
           this.draw();
           active.resolve();
@@ -238,9 +244,17 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     });
   }
 
+  /** Stop suppressing the mover's static token once its flight ends. */
+  private clearFlightFor(animation: Animation): void {
+    if (animation.kind !== 'accusation' && this.flightSuspect === animation.suspect) {
+      this.flightSuspect = null;
+    }
+  }
+
   private cancelAnimation(): void {
     const animation = this.animation;
     if (!animation) return;
+    this.clearFlightFor(animation.animation);
     this.animation = null;
     animation.resolve();
   }
@@ -328,6 +342,9 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     const seen = new Map<BoardLocation, number>();
     for (const [index, player] of view.players.entries()) {
       if (!isSuspect(player.suspect)) continue;
+      // The animated token represents this player mid-flight; drawing the
+      // static one too would duplicate it at the destination.
+      if (player.suspect === this.flightSuspect) continue;
       const center = locationCenter(player.location, layout);
       if (!center) continue;
       const total = perLocation.get(player.location) ?? 1;

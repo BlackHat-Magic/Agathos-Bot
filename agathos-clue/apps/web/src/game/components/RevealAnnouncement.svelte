@@ -11,6 +11,7 @@
   let queued: PrivateReveal | null = null;
   let dismissed: PrivateReveal | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
 
   $: if ($privateReveal !== null &&
     $privateReveal !== active &&
@@ -18,6 +19,7 @@
     $privateReveal !== dismissed) {
     // Hold until its "revealed a card" title has played.
     queued = $privateReveal;
+    scheduleFallback();
   }
 
   $: if (queued !== null && !$titlesBusy && !$diceRolling) {
@@ -26,9 +28,19 @@
 
   function announce(reveal: PrivateReveal): void {
     if (timer !== undefined) clearTimeout(timer);
+    if (fallbackTimer !== undefined) clearTimeout(fallbackTimer);
     active = reveal;
     queued = null;
     timer = setTimeout(dismiss, TIMEOUT_MS);
+  }
+
+  /** The card must never be silently lost to a stuck gate. */
+  function scheduleFallback(): void {
+    if (fallbackTimer !== undefined) clearTimeout(fallbackTimer);
+    fallbackTimer = setTimeout(() => {
+      fallbackTimer = undefined;
+      if (queued !== null && active === null) announce(queued);
+    }, 1_500);
   }
 
   function dismiss(): void {
@@ -42,6 +54,7 @@
 
   onDestroy(() => {
     if (timer !== undefined) clearTimeout(timer);
+    if (fallbackTimer !== undefined) clearTimeout(fallbackTimer);
   });
 
   function cardLabel(card: Card): string {
