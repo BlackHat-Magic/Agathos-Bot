@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { derived, writable } from 'svelte/store';
 import type { Event, GameView } from '@agathos/game';
 import { session } from '../auth/standalone';
 import { connect, type ConnectionStatus, type Transport } from '../transport/ws';
@@ -6,6 +6,12 @@ import type { ClientIntent } from '../transport/intents';
 import type { LobbySnapshot, PrivateReveal } from '../transport/snapshots';
 
 export const currentView = writable<GameView | null>(null);
+/** Cards the viewer must choose between while a reveal is pending, else null. */
+export const revealRequest = derived(currentView, view =>
+  view !== null && view.phase === 'playing' &&
+  view.pendingReveal?.revealerIndex === view.myIndex
+    ? view.myRevealOpportunities ?? []
+    : null);
 export const events = writable<readonly Event[]>([]);
 export const privateReveal = writable<PrivateReveal | null>(null);
 export const lobby = writable<LobbySnapshot | null>(null);

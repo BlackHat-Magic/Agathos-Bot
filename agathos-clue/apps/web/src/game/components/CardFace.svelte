@@ -5,10 +5,11 @@
   export let type: CardType;
   export let label: string;
   export let selected = false;
+  export let highlight = false;
 </script>
 
 <!-- The single source of card visuals: fixed 52:71 aspect like the fan. -->
-<div class="card-face {type}" class:selected style="--accent: {accentFor(type, label)};">
+<div class="card-face {type}" class:selected class:highlight style="--accent: {accentFor(type, label)};">
   <span class="type-label">{type}</span>
   <span class="glyph"><Icon icon={glyphFor(type)} width="34" height="34" aria-hidden="true" /></span>
   <span class="name">{label}</span>
@@ -54,5 +55,24 @@
     box-shadow:
       0 0 0 2px var(--color-mocha-lavender),
       0 12px 32px rgb(0 0 0 / 55%);
+  }
+
+  .card-face.highlight {
+    border-color: var(--color-mocha-yellow);
+    box-shadow:
+      0 0 0 3px var(--color-mocha-yellow),
+      0 0 26px rgb(250 226 175 / 45%);
+    animation: reveal-pulse 1.5s ease-in-out infinite alternate;
+  }
+
+  @keyframes reveal-pulse {
+    from { transform: translateY(0); }
+    to { transform: translateY(-8px); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .card-face.highlight {
+      animation: none;
+    }
   }
 </style>

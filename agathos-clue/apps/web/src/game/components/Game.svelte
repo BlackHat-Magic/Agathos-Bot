@@ -11,7 +11,8 @@
   import EventLog from './EventLog.svelte';
   import DiceOverlay from './DiceOverlay.svelte';
   import SuggestPanel from './SuggestPanel.svelte';
-  import RevealModal from './RevealModal.svelte';
+  import RevealPrompt from './RevealPrompt.svelte';
+  import RevealAnnouncement from './RevealAnnouncement.svelte';
   import AccuseModal from './AccuseModal.svelte';
 
   let canvas: HTMLCanvasElement;
@@ -101,6 +102,8 @@
             {#if accuseOpen}
               <AccuseModal onClose={() => (accuseOpen = false)} />
             {/if}
+            <RevealPrompt />
+            <RevealAnnouncement />
           </div>
           {#if $currentView.reachableSpacesHints?.length}
             <div class="mt-3 rounded-2xl border border-mocha-mauve/30 bg-mocha-mauve/10 p-3" aria-labelledby="reachable-moves-title">
@@ -139,8 +142,4 @@
   </main>
 
   <Hand />
-
-  {#if $currentView.pendingReveal?.revealerIndex === $currentView.myIndex && $currentView.myRevealOpportunities !== undefined}
-    <RevealModal onClose={() => {}} />
-  {/if}
 {/if}
