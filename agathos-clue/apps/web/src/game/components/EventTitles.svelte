@@ -4,19 +4,20 @@
   import { formatEvent } from '../event-format';
   import type { Event } from '@agathos/game';
 
-  /** A title always stays readable for at least this long, bursts included. */
-  const MIN_VISIBLE_MS = 2_5000;
-  /** After this long without a successor, a title retires to the ticker. */
-  const HOLD_CAP_MS = 5_000;
+  /**
+   * Banners must not outlive the moment they describe: retire to the ticker
+   * quickly so the top of the board always reflects the latest event.
+   */
+  const HOLD_CAP_MS = 3_000;
   const MAX_QUEUE = 8;
 
   let current: Event | null = null;
   let compact: Event | null = null;
-  let shownAt = 0;
   let queue: Event[] = [];
   let seen = new Set<unknown>();
   let initialized = false;
-  let timers: ReturnType<typeof setTimeout>[] = [];
+  let capTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryTimers: ReturnType<typeof setTimeout>[] = [];
 
   $: ingest($events);
 
@@ -40,66 +41,6 @@
     drain();
   }
 
-  /**
-   * Advance the pipeline: a fresh title replaces the visible one once it has
-   * been readable for MIN_VISIBLE_MS; otherwise the visible title holds until
-   * its cap, then retires to the persistent ticker. There is never a stretch
-   * with neither a title nor a ticker after the first event.
-   */
-  function drain(): void {
-    if ($diceRolling) {
-      titlesBusy.set(true);
-      schedule(drain, 250);
-      return;
-    }
-    if (current !== null) {
-      const remaining = MIN_VISIBLE_MS - (Date.now() - shownAt);
-      if (remaining > 0) {
-        schedule(drain, remaining);
-        return;
-      }
-      if (queue.length > 0) {
-        advance();
-        return;
-      }
-      return; // still inside its hold window; the cap timer will retire it
-    }
-    if (queue.length > 0) {
-      advance();
-      return;
-    }
-    // Idle. A lingering ticker is ambient context, not an active
-    // announcement, so it must not keep downstream prompts waiting.
-    titlesBusy.set(false);
-  }
-
-  function advance(): void {
-    const next = queue.shift();
-    if (next === undefined) return;
-    compact = null;
-    current = next;
-    shownAt = Date.now();
-    titlesBusy.set(true);
-    schedule(() => {
-      compact = current;
-      current = null;
-      drain();
-    }, HOLD_CAP_MS);
-  }
-
-  function schedule(fn: () => void, delay: number): void {
-    timers.push(setTimeout(fn, delay));
-  }
-
-  function clearTimers(): void {
-    for (const timer of timers) clearTimeout(timer);
-    timers = [];
-  }
-
-  onDestroy(() => {
-    clearTimers();
-    titlesBusy.set(false);
-  });
   /** Turn handoffs announce who acts next, not who just finished. */
   function titleFor(event: Event): string {
     if (event.type === 'turnEnded' && $currentView !== null) {
@@ -108,6 +49,49 @@
     }
     return formatEvent(event, $currentView);
   }
+
+  function drain(): void {
+    if ($diceRolling) {
+      // Never talk over the dice; retry shortly.
+      titlesBusy.set(true);
+      scheduleRetry(drain, 250);
+      return;
+    }
+    const next = queue.shift();
+    if (next === undefined) {
+      if (current === null && compact === null) titlesBusy.set(false);
+      return;
+    }
+    show(next);
+  }
+
+  function show(next: Event): void {
+    if (capTimer !== undefined) clearTimeout(capTimer);
+    compact = null;
+    current = next;
+    titlesBusy.set(true);
+    capTimer = setTimeout(() => {
+      compact = current;
+      current = null;
+      drain();
+    }, HOLD_CAP_MS);
+  }
+
+  function scheduleRetry(fn: () => void, delay: number): void {
+    retryTimers.push(setTimeout(() => {
+      retryTimers = retryTimers.filter(timer => timer !== undefined);
+      fn();
+    }, delay));
+  }
+
+  function clearTimers(): void {
+    if (capTimer !== undefined) clearTimeout(capTimer);
+    for (const timer of retryTimers) clearTimeout(timer);
+    retryTimers = [];
+    titlesBusy.set(false);
+  }
+
+  onDestroy(clearTimers);
 </script>
 
 {#if current !== null}
