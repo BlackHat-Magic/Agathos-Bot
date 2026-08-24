@@ -10,6 +10,7 @@
   import Hand from './Hand.svelte';
   import EventLog from './EventLog.svelte';
   import DiceOverlay from './DiceOverlay.svelte';
+  import SuggestPanel from './SuggestPanel.svelte';
   import RevealModal from './RevealModal.svelte';
   import AccuseModal from './AccuseModal.svelte';
 
@@ -17,6 +18,7 @@
   let boardFrame: HTMLDivElement;
   let renderer: BoardRenderer<CanvasRenderingContext2D> | null = null;
   let accuseOpen = false;
+  let suggestOpen = false;
 
   function moveTo(destination: BoardLocation): void {
     if ($currentView !== null && canClickMove($currentView, destination)) {
@@ -93,6 +95,12 @@
           <div bind:this={boardFrame} class="relative aspect-[24/25] w-full overflow-hidden rounded-2xl bg-mocha-void">
             <canvas bind:this={canvas} width="960" height="1000" class="block h-full w-full" aria-label="Clue game board"></canvas>
             <DiceOverlay />
+            {#if suggestOpen}
+              <SuggestPanel onClose={() => (suggestOpen = false)} />
+            {/if}
+            {#if accuseOpen}
+              <AccuseModal onClose={() => (accuseOpen = false)} />
+            {/if}
           </div>
           {#if $currentView.reachableSpacesHints?.length}
             <div class="mt-3 rounded-2xl border border-mocha-mauve/30 bg-mocha-mauve/10 p-3" aria-labelledby="reachable-moves-title">
@@ -109,7 +117,7 @@
         </section>
 
         <aside class="space-y-4">
-          <IntentBar onAccuse={() => (accuseOpen = true)} />
+          <IntentBar onAccuse={() => (accuseOpen = true)} onSuggest={() => (suggestOpen = true)} />
           <EventLog />
         </aside>
       </div>
@@ -134,8 +142,5 @@
 
   {#if $currentView.pendingReveal?.revealerIndex === $currentView.myIndex && $currentView.myRevealOpportunities !== undefined}
     <RevealModal onClose={() => {}} />
-  {/if}
-  {#if accuseOpen && $currentView.phase === 'playing'}
-    <AccuseModal onClose={() => (accuseOpen = false)} />
   {/if}
 {/if}

@@ -1,126 +1,34 @@
 <script lang="ts">
-  import { onDestroy, tick } from 'svelte';
-  import {
-    SUSPECTS,
-    WEAPONS,
-    type Suspect,
-    type Weapon,
-  } from '@agathos/game';
   import { currentView, send } from '../stores';
   import { actionsFor } from '../intent-gating';
   import {
     createEndTurnIntent,
     createRollIntent,
-    createSuggestIntent,
     createUseSecretPassageIntent,
   } from '../../transport/intents';
-  import { focusDialog, trapDialogFocus } from '../modal-focus';
-  import CardPicker from './CardPicker.svelte';
 
   export let onAccuse: () => void = () => {};
+  export let onSuggest: () => void = () => {};
 
-  let suggestOpen = false;
-  let suggestDialog: HTMLDivElement;
-  let suggestRestoreFocus: HTMLElement | null = null;
-  let suggestSuspect: Suspect = SUSPECTS[0];
-  let suggestWeapon: Weapon = WEAPONS[0];
-
-  $: actions = actionsFor($currentView);
-  $: turnPlayer = $currentView?.players[$currentView.myIndex];
-  $: phaseLabel = $currentView?.phase === 'finished' ? 'Case closed' :
-    $currentView?.phase === 'playing' ? 'Investigation in progress' : 'Waiting room';
-
-  function submitSuggestion(): void {
-    if (!actions.canSuggest) return;
-    if (send(createSuggestIntent(suggestSuspect, suggestWeapon))) suggestOpen = false;
-  }
-
-  function openSuggestion(): void {
-    suggestRestoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    suggestOpen = true;
-    void tick().then(() => {
-      if (suggestDialog !== undefined) focusDialog(suggestDialog);
-    });
-  }
-
-  function closeSuggestion(): void {
-    suggestOpen = false;
-    const restoreFocus = suggestRestoreFocus;
-    suggestRestoreFocus = null;
-    restoreFocus?.focus();
-  }
-
-  function handleDialogKey(event: KeyboardEvent): void {
-    if (event.key === 'Escape') closeSuggestion();
-    trapDialogFocus(event, suggestDialog);
-  }
-
-  onDestroy(closeSuggestion);
+  $: view = $currentView;
+  $: actions = actionsFor(view);
 </script>
 
-<section class="rounded-2xl border border-mocha-surface1 bg-mocha-mantle p-4" aria-labelledby="intent-title">
-  <div class="flex flex-wrap items-start justify-between gap-3">
-    <div>
-      <p class="text-xs font-semibold uppercase tracking-[0.18em] text-mocha-mauve">{phaseLabel}</p>
-      <h2 id="intent-title" class="mt-1 font-display text-xl font-semibold">
-        {#if $currentView?.phase === 'finished'}
-          Final report
-        {:else if actions.myTurn}
-          Your turn
-        {:else}
-          {turnPlayer?.name ?? 'Another detective'}'s turn
-        {/if}
-      </h2>
-    </div>
-    {#if $currentView?.lastDieRoll !== null && $currentView?.lastDieRoll !== undefined}
-      <span class="rounded-lg bg-mocha-yellow/15 px-3 py-2 text-sm font-semibold text-mocha-yellow" role="status">Roll: {$currentView.lastDieRoll}</span>
+<section class="rounded-2xl border border-mocha-surface1 bg-mocha-mantle p-4" aria-label="Turn actions">
+  <div class="mb-3 flex items-baseline justify-between gap-2">
+    <h2 class="font-display text-lg font-semibold">Your move</h2>
+    {#if view}
+      <span class="text-xs uppercase tracking-[0.16em] text-mocha-overlay2">
+        {view.turnIndex === view.myIndex ? 'Your turn' : `${view.players[view.turnIndex]?.name ?? 'Waiting'}'s turn`}
+      </span>
     {/if}
   </div>
 
-  {#if actions.failedAccusation}
-    <p class="mt-3 rounded-xl border border-mocha-red/35 bg-mocha-red/10 px-3 py-2 text-sm text-mocha-red" role="status">
-      Your accusation failed. You may only end your turn.
-    </p>
-  {:else if $currentView?.pendingReveal}
-    <p class="mt-3 rounded-xl border border-mocha-peach/35 bg-mocha-peach/10 px-3 py-2 text-sm text-mocha-peach" role="status" aria-live="polite">
-      A card reveal is in progress.
-    </p>
-  {/if}
-
-  <div class="mt-4 flex flex-wrap gap-2">
-    <button class="game-button game-button-primary" type="button" disabled={!actions.canRoll} onclick={() => send(createRollIntent())}>Roll dice</button>
+  <div class="flex flex-wrap gap-2">
+    <button class="game-button" type="button" disabled={!actions.canRoll} onclick={() => send(createRollIntent())}>Roll dice</button>
     <button class="game-button" type="button" disabled={!actions.canUseSecretPassage} onclick={() => send(createUseSecretPassageIntent())}>Secret passage</button>
-     <button class="game-button" type="button" disabled={!actions.canSuggest} onclick={openSuggestion}>Suggest</button>
+    <button class="game-button" type="button" disabled={!actions.canSuggest} onclick={onSuggest}>Suggest</button>
     <button class="game-button" type="button" disabled={!actions.canAccuse} onclick={onAccuse}>Accuse</button>
-    <button class="game-button game-button-end" type="button" disabled={!actions.canEndTurn} onclick={() => send(createEndTurnIntent())}>End turn</button>
+    <button class="game-button" type="button" disabled={!actions.canEndTurn} onclick={() => send(createEndTurnIntent())}>End turn</button>
   </div>
 </section>
-
-{#if suggestOpen}
-  <div class="fixed inset-0 z-40 flex items-center justify-center bg-mocha-crust/75 p-4" role="presentation" onclick={closeSuggestion}>
-     <div bind:this={suggestDialog} class="w-full max-w-2xl rounded-2xl border border-mocha-surface1 bg-mocha-base p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="suggest-title" onclick={(event) => event.stopPropagation()} onkeydown={handleDialogKey} tabindex="-1">
-      <div class="flex items-start justify-between gap-4">
-        <div>
-          <p class="text-xs font-semibold uppercase tracking-[0.18em] text-mocha-mauve">Room suggestion</p>
-          <h2 id="suggest-title" class="mt-1 font-display text-2xl font-semibold">Name the suspects</h2>
-        </div>
-        <button class="text-mocha-overlay2 hover:text-mocha-text" type="button" aria-label="Close suggestion dialog" onclick={closeSuggestion}>Close</button>
-      </div>
-      <form class="mt-5 space-y-5" onsubmit={(event) => { event.preventDefault(); submitSuggestion(); }}>
-        <div>
-          <p id="suggest-suspect-label" class="mb-2 text-sm font-semibold text-mocha-subtext1">Suspect</p>
-          <CardPicker type="suspect" options={SUSPECTS} bind:value={suggestSuspect} labelledBy="suggest-suspect-label" />
-        </div>
-        <div>
-          <p id="suggest-weapon-label" class="mb-2 text-sm font-semibold text-mocha-subtext1">Weapon</p>
-          <CardPicker type="weapon" options={WEAPONS} bind:value={suggestWeapon} labelledBy="suggest-weapon-label" />
-        </div>
-        <p class="text-sm text-mocha-overlay2">The room is your current room: {$currentView?.players[$currentView.myIndex]?.location ?? 'unknown'}.</p>
-        <div class="flex justify-end gap-2">
-          <button class="game-button" type="button" onclick={closeSuggestion}>Cancel</button>
-          <button class="game-button game-button-primary" type="submit" disabled={!actions.canSuggest}>Submit suggestion</button>
-        </div>
-      </form>
-    </div>
-  </div>
-{/if}
