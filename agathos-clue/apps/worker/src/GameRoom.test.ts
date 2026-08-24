@@ -1119,9 +1119,10 @@ describe('GameRoom protocol helpers', () => {
     expect(game.hasMovedThisTurn).toBe(false);
     expect(game.pendingReveal).toBeNull();
     expect(storage.alarm).not.toBeNull();
+    // First robot action starts a new phase: base pace + phase bonus.
     const delta = (storage.alarm as number) - Date.now();
-    expect(delta).toBeGreaterThan(400);
-    expect(delta).toBeLessThan(1400);
+    expect(delta).toBeGreaterThan(1_200);
+    expect(delta).toBeLessThan(2_200);
 
     // The next alarm performs the next single action (the move), no further.
     await gameRoom.alarm();

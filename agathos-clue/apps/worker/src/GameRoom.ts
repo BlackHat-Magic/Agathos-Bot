@@ -3,6 +3,7 @@ import {
   applyIntent,
   begin,
   createGame,
+  decideRobotIntent,
   toView,
 } from '@agathos/game';
 import type { Game, Intent } from '@agathos/game';
@@ -39,7 +40,7 @@ import {
   parseIntentEnvelope,
   resolveViewerIndex,
 } from './game-room-protocol';
-import { hasRobotActionableState, runRobotScheduler } from './robots/scheduler';
+import { currentRobotIndex, hasRobotActionableState, runRobotScheduler } from './robots/scheduler';
 import type { RobotPrivateReveal } from './robots/scheduler';
 import type { ClientIntentKind, PrivateRevealFrame } from './game-room-protocol';
 export {
@@ -57,6 +58,8 @@ const ROBOT_ALARM_INFO_STORAGE_KEY = 'robot-alarm-info';
 const ROBOT_RETRY_INITIAL_DELAY_MS = 1_000;
 const ROBOT_RETRY_MAX_DELAY_MS = 60_000;
 const ROBOT_RETRY_MAX_ATTEMPT = 6;
+/** Extra breathing room when the next robot action starts a new phase. */
+const ROBOT_PHASE_BONUS_MS = 700;
 
 interface RobotAlarmInfo {
   retryCount: number;
@@ -79,6 +82,7 @@ export class GameRoom extends DurableObject<Env> {
   private robotAlarmScheduled = false;
   /** 0 disables pacing (tests); >0 spaces robot actions via alarms. */
   private readonly robotPaceMs = readPaceMs(this.env.ROBOT_STEP_PACE_MS);
+  private lastRobotPhaseKey: string | null = null;
   private readonly connections = new Map<WebSocket, Connection>();
   private gameId = '';
 
@@ -215,6 +219,7 @@ export class GameRoom extends DurableObject<Env> {
         restore: snapshot => { this.game = hydrateGame(snapshot); },
         persist: (game, privateReveal) => this.persistRobotMutation(game, privateReveal),
         broadcast: (events, privateReveal) => this.broadcast(events, privateReveal),
+        onAction: intent => { this.lastRobotPhaseKey = phaseKeyFor(intent.kind); },
         maxSteps: this.robotPaceMs > 0 ? 1 : undefined,
       });
       await this.resetRobotRetry();
@@ -405,12 +410,33 @@ export class GameRoom extends DurableObject<Env> {
     const game = this.game;
     if (game === undefined || !hasRobotActionableState(game)) return;
     if (this.robotAlarmScheduled) return;
+
+    // Phase boundaries (roll→move→suggest→reveal→next robot) get a longer
+    // beat so spectators can keep up with what just happened.
+    const nextKey = this.peekNextRobotPhaseKey();
+    const delay = this.robotPaceMs +
+      (nextKey === null || nextKey !== this.lastRobotPhaseKey ? ROBOT_PHASE_BONUS_MS : 0);
     try {
-      await this.ctx.storage.setAlarm(Date.now() + this.robotPaceMs);
+      await this.ctx.storage.setAlarm(Date.now() + delay);
       this.robotAlarmScheduled = true;
     } catch (error) {
       console.error(`robot pacing alarm failed: ${errorMessage(error)}`);
       throw error;
+    }
+  }
+
+  /** Kind-only peek at the upcoming action; never mutates game state. */
+  private peekNextRobotPhaseKey(): string | null {
+    const game = this.game;
+    if (game === undefined || game.phase !== 'playing') return null;
+    const robotIndex = currentRobotIndex(game);
+    if (robotIndex === null) return null;
+    try {
+      const intent = decideRobotIntent(game, robotIndex, () => 0.5);
+      if (intent.kind === 'wait') return null;
+      return phaseKeyFor(intent.kind);
+    } catch {
+      return null;
     }
   }
 
@@ -625,6 +651,26 @@ function isLobbyIntent(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'internal error';
+}
+
+/** Coarse phase buckets so pacing can sense transitions between them. */
+function phaseKeyFor(kind: Intent['kind']): string {
+  switch (kind) {
+    case 'roll':
+      return 'roll';
+    case 'moveTo':
+    case 'useSecretPassage':
+      return 'move';
+    case 'suggest':
+      return 'suggest';
+    case 'showCard':
+    case 'declineReveal':
+      return 'reveal';
+    case 'endTurn':
+      return 'handoff';
+    default:
+      return kind;
+  }
 }
 
 function isAlarmInvocationInfo(value: unknown): value is AlarmInvocationInfo {

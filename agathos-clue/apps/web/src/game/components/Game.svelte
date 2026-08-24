@@ -13,6 +13,7 @@
   import SuggestPanel from './SuggestPanel.svelte';
   import RevealPrompt from './RevealPrompt.svelte';
   import RevealAnnouncement from './RevealAnnouncement.svelte';
+  import EventTitles from './EventTitles.svelte';
   import AccuseModal from './AccuseModal.svelte';
 
   let canvas: HTMLCanvasElement;
@@ -124,6 +125,7 @@
             {/if}
             <RevealPrompt />
             <RevealAnnouncement />
+            <EventTitles />
           </div>
         </section>
 

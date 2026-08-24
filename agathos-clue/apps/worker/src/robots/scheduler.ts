@@ -17,6 +17,8 @@ export interface RobotSchedulerOptions<Snapshot> {
   persist: (game: Game, privateReveal?: RobotPrivateReveal) => Promise<void>;
   broadcast: (events: Event[], privateReveal?: RobotPrivateReveal) => void;
   onActionPersisted?: () => void;
+  /** Observes each applied action so callers can pace phase transitions. */
+  onAction?: (intent: Intent) => void;
   rng?: RNG;
   /**
    * Stop after this many persisted actions so callers can pace turns
@@ -32,7 +34,7 @@ export async function runRobotScheduler<Snapshot>(
   let steps = 0;
   while (options.maxSteps === undefined || steps < options.maxSteps) {
     const game = options.getGame();
-    const robotIndex = nextRobotIndex(game);
+    const robotIndex = currentRobotIndex(game);
     if (robotIndex === null) return;
 
     const intent = decideRobotIntent(game, robotIndex, options.rng);
@@ -47,6 +49,7 @@ export async function runRobotScheduler<Snapshot>(
       await options.persist(game, privateReveal);
       options.broadcast(events, privateReveal);
       options.onActionPersisted?.();
+      options.onAction?.(intent);
       steps += 1;
     } catch (error) {
       options.restore(previous);
@@ -72,10 +75,11 @@ function pendingPrivateReveal(
 }
 
 export function hasRobotActionableState(game: Game): boolean {
-  return nextRobotIndex(game) !== null;
+  return currentRobotIndex(game) !== null;
 }
 
-function nextRobotIndex(game: Game): number | null {
+/** Index of the robot that must act now (turn owner or pending revealer). */
+export function currentRobotIndex(game: Game): number | null {
   if (game.phase !== 'playing') return null;
 
   if (game.pendingReveal !== null) {
