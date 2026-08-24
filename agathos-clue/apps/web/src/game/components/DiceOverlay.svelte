@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import type { Event } from '@agathos/game';
   import { currentView, events } from '../stores';
   import { SUSPECT_COLORS } from '../canvas2d';
@@ -12,6 +13,10 @@
   } from '../dice';
 
   type Phase = 'idle' | 'tumbling' | 'settled';
+  type RolledEvent = Extract<Event, { type: 'rolled' }>;
+
+  /** Backlog guard: if many robots rolled while we were behind, keep it snappy. */
+  const MAX_QUEUE = 6;
 
   const PIPS_PER_FACE: Record<number, number[]> = Object.fromEntries(
     Object.entries(PIP_LAYOUT).map(([value, pips]) => [value, [...pips]]),
@@ -19,22 +24,41 @@
 
   let phase: Phase = 'idle';
   let rollSeq = 0;
-  let shownRoll: Extract<Event, { type: 'rolled' }> | null = null;
   let faces = { die1: 1, die2: 1 };
   let startTransforms = ['', ''];
   let rollerName = '';
   let rollerColor = 'var(--color-mocha-mauve)';
   let timers: ReturnType<typeof setTimeout>[] = [];
 
-  $: latest = latestRolled($events);
-  $: if (latest !== null && latest !== shownRoll) beginRoll(latest);
+  /**
+   * Robot actions arrive as a rapid burst of state frames, so rolls are
+   * queued and played in order — restarting on the newest roll silently
+   * dropped every other player's dice.
+   */
+  let queue: RolledEvent[] = [];
+  let seen = new Set<unknown>();
+  let initialized = false;
 
-  function latestRolled(list: readonly Event[]): Extract<Event, { type: 'rolled' }> | null {
+  $: ingest($events);
+
+  function ingest(list: readonly Event[]): void {
+    if (!initialized) {
+      // First sight of the game: existing history stays history.
+      for (const event of list) seen.add(event);
+      initialized = true;
+      return;
+    }
+    const fresh: RolledEvent[] = [];
     for (let index = list.length - 1; index >= 0; index--) {
       const event = list[index];
-      if (event.type === 'rolled') return event;
+      if (seen.has(event)) break;
+      seen.add(event);
+      if (event.type === 'rolled') fresh.unshift(event);
     }
-    return null;
+    if (fresh.length === 0) return;
+    queue.push(...fresh);
+    while (queue.length > MAX_QUEUE) queue.shift();
+    if (phase === 'idle') playNext();
   }
 
   function clearTimers(): void {
@@ -47,9 +71,9 @@
       matchMedia('(prefers-reduced-motion: reduce)').matches;
   }
 
-  function beginRoll(roll: Extract<Event, { type: 'rolled' }>): void {
-    clearTimers();
-    shownRoll = roll;
+  function playNext(): void {
+    const roll = queue.shift();
+    if (roll === undefined) return;
     rollSeq += 1;
     faces = splitRoll(roll.result);
     startTransforms = [
@@ -62,13 +86,21 @@
 
     if (prefersReducedMotion()) {
       phase = 'settled';
-      timers.push(setTimeout(() => (phase = 'idle'), DICE_SETTLE_HOLD_MS));
+      timers.push(setTimeout(() => finishRoll(), DICE_SETTLE_HOLD_MS));
       return;
     }
     phase = 'tumbling';
     timers.push(setTimeout(() => (phase = 'settled'), DICE_TUMBLE_MS));
-    timers.push(setTimeout(() => (phase = 'idle'), DICE_TUMBLE_MS + DICE_SETTLE_HOLD_MS));
+    timers.push(setTimeout(() => finishRoll(), DICE_TUMBLE_MS + DICE_SETTLE_HOLD_MS));
   }
+
+  function finishRoll(): void {
+    phase = 'idle';
+    // Skip the long victory-lap hold while a backlog of rolls is waiting.
+    if (queue.length > 0) playNext();
+  }
+
+  onDestroy(clearTimers);
 
   /** Jump to the start pose instantly, then transition into the resting face. */
   function tumble(node: HTMLDivElement, params: { start: string; end: string }): void {
