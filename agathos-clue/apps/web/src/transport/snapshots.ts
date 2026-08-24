@@ -213,7 +213,10 @@ export function validateGameView(value: unknown): GameView {
     };
   }
   if (record.reachableSpacesHints !== undefined) {
-    if (!Array.isArray(record.reachableSpacesHints) || record.reachableSpacesHints.length > 100) {
+    // A full-board roll can legitimately reach most corridor cells plus every
+    // room (worst observed: 173 from the Ballroom), so bound by board size.
+    if (!Array.isArray(record.reachableSpacesHints) ||
+      record.reachableSpacesHints.length > BOARD_WIDTH * BOARD_HEIGHT) {
       throw new Error('invalid reachable spaces hints');
     }
     view.reachableSpacesHints = record.reachableSpacesHints.map((space, index) =>

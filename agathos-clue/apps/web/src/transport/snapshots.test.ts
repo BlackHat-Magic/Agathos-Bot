@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { buildBoard, reachable } from '@agathos/game';
 import {
   isGameView,
   parseServerMessage,
@@ -70,6 +71,23 @@ describe('server snapshot validation', () => {
     expect(isGameView({ ...view(), myHand: [{ type: 'room', room: 'secret' }] })).toBe(false);
     const player = (view().players as unknown[])[0] as Record<string, unknown>;
     expect(isGameView({ ...view(), players: [{ ...player, location: { card: 'secret' } }] })).toBe(false);
+  });
+
+  it('accepts full-board reachable hint sets, such as Dining Room with a roll of 8', () => {
+    const board = buildBoard();
+    const diningRoom = board.flat().find(space => space?.room === 'Dining Room')!;
+    // Mirrors view.ts projection: rooms project by name, cells as "col,row".
+    const hints = reachable(diningRoom, 8).spaces.map(space =>
+      space.room ?? `${space.pos![0]},${space.pos![1]}`);
+    expect(hints.length).toBeGreaterThan(100);
+    // Moving into the occupied room is not offered; its doors are.
+    const parsed = validateGameView({ ...view(), reachableSpacesHints: hints });
+    expect(parsed.reachableSpacesHints).toHaveLength(hints.length);
+    expect(parsed.reachableSpacesHints).toContain('15,12');
+    expect(isGameView({
+      ...view(),
+      reachableSpacesHints: Array.from({ length: 24 * 25 + 1 }, (_, i) => `${i % 24},${i % 25}`),
+    })).toBe(false);
   });
 
   it('rejects player user identities from public views', () => {
