@@ -44,9 +44,10 @@ export async function loadStandaloneSession(
  * back to the default navigation instead of being called.
  */
 export function beginStandaloneAuth(redirect?: unknown): void {
+  const defaultRedirect = (path: string): void => window.location.assign(path);
   const navigate = typeof redirect === 'function'
     ? redirect as (path: string) => void
-    : path => window.location.assign(path);
+    : defaultRedirect;
   navigate('/auth/begin');
 }
 
