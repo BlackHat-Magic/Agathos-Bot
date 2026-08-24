@@ -32,7 +32,7 @@ const ROOM_COLORS: Record<Room, string> = {
   'Study': '#89dceb',
 };
 
-const SUSPECT_COLORS: Record<Suspect, string> = {
+export const SUSPECT_COLORS: Record<Suspect, string> = {
   'Miss Scarlett': '#f38ba8',
   'Professor Plum': '#cba6f7',
   'Mrs. Peacock': '#89b4fa',

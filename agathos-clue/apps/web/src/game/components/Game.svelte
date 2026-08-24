@@ -9,6 +9,7 @@
   import IntentBar from './IntentBar.svelte';
   import Hand from './Hand.svelte';
   import EventLog from './EventLog.svelte';
+  import DiceOverlay from './DiceOverlay.svelte';
   import RevealModal from './RevealModal.svelte';
   import AccuseModal from './AccuseModal.svelte';
 
@@ -89,8 +90,9 @@
 
       <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <section class="min-w-0 rounded-3xl border border-mocha-surface1 bg-mocha-base p-2 shadow-2xl shadow-black/20 sm:p-4" aria-label="Game board">
-          <div bind:this={boardFrame} class="aspect-[24/25] w-full overflow-hidden rounded-2xl bg-mocha-void">
+          <div bind:this={boardFrame} class="relative aspect-[24/25] w-full overflow-hidden rounded-2xl bg-mocha-void">
             <canvas bind:this={canvas} width="960" height="1000" class="block h-full w-full" aria-label="Clue game board"></canvas>
+            <DiceOverlay />
           </div>
           {#if $currentView.reachableSpacesHints?.length}
             <div class="mt-3 rounded-2xl border border-mocha-mauve/30 bg-mocha-mauve/10 p-3" aria-labelledby="reachable-moves-title">
