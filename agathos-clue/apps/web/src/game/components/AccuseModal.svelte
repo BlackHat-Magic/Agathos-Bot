@@ -17,6 +17,7 @@
   } from './accusation-reconciliation';
   import { createAccuseIntent } from '../../transport/intents';
   import { focusDialog, trapDialogFocus } from '../modal-focus';
+  import CardPicker from './CardPicker.svelte';
   import type { Event } from '@agathos/game';
 
   export let onClose: () => void = () => {};
@@ -81,7 +82,7 @@
 </script>
 
 <div class="fixed inset-0 z-50 flex items-center justify-center bg-mocha-crust/80 p-4" role="presentation" onclick={close}>
-  <div bind:this={dialog} class="w-full max-w-lg rounded-2xl border border-mocha-red/40 bg-mocha-base p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="accuse-title" aria-busy={accusationPending} onclick={(event) => event.stopPropagation()} onkeydown={handleKey} tabindex="-1">
+  <div bind:this={dialog} class="w-full max-w-3xl rounded-2xl border border-mocha-red/40 bg-mocha-base p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="accuse-title" aria-busy={accusationPending} onclick={(event) => event.stopPropagation()} onkeydown={handleKey} tabindex="-1">
     <div class="flex items-start justify-between gap-4">
       <div>
         <p class="text-xs font-semibold uppercase tracking-[0.18em] text-mocha-red">Final accusation</p>
@@ -102,22 +103,19 @@
       <p class="mt-4 rounded-xl border border-mocha-red/35 bg-mocha-red/10 px-3 py-3 text-sm text-mocha-red" role="alert">{$error}</p>
     {/if}
 
-    <form class="mt-5 space-y-4" onsubmit={(event) => { event.preventDefault(); submit(); }}>
-      <label class="block text-sm font-semibold" for="accuse-suspect">Suspect
-        <select id="accuse-suspect" bind:value={suspect} class="game-select" disabled={accusationPending}>
-          {#each SUSPECTS as value}<option value={value}>{value}</option>{/each}
-        </select>
-      </label>
-      <label class="block text-sm font-semibold" for="accuse-weapon">Weapon
-        <select id="accuse-weapon" bind:value={weapon} class="game-select" disabled={accusationPending}>
-          {#each WEAPONS as value}<option value={value}>{value}</option>{/each}
-        </select>
-      </label>
-      <label class="block text-sm font-semibold" for="accuse-room">Room
-        <select id="accuse-room" bind:value={room} class="game-select" disabled={accusationPending}>
-          {#each ROOMS as value}<option value={value}>{value}</option>{/each}
-        </select>
-      </label>
+    <form class="mt-5 space-y-5" onsubmit={(event) => { event.preventDefault(); submit(); }}>
+      <div>
+        <p id="accuse-suspect-label" class="mb-2 text-sm font-semibold text-mocha-subtext1">Suspect</p>
+        <CardPicker type="suspect" options={SUSPECTS} bind:value={suspect} labelledBy="accuse-suspect-label" />
+      </div>
+      <div>
+        <p id="accuse-weapon-label" class="mb-2 text-sm font-semibold text-mocha-subtext1">Weapon</p>
+        <CardPicker type="weapon" options={WEAPONS} bind:value={weapon} labelledBy="accuse-weapon-label" />
+      </div>
+      <div>
+        <p id="accuse-room-label" class="mb-2 text-sm font-semibold text-mocha-subtext1">Room</p>
+        <CardPicker type="room" options={ROOMS} bind:value={room} labelledBy="accuse-room-label" />
+      </div>
       <div class="flex justify-end gap-2 pt-2">
          <button class="game-button" type="button" disabled={accusationPending} onclick={close}>Cancel</button>
          <button class="game-button game-button-danger" type="submit" disabled={!actions.canAccuse || accusationPending}>Confirm accusation</button>

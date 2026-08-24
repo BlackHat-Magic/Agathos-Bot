@@ -15,6 +15,7 @@
     createUseSecretPassageIntent,
   } from '../../transport/intents';
   import { focusDialog, trapDialogFocus } from '../modal-focus';
+  import CardPicker from './CardPicker.svelte';
 
   export let onAccuse: () => void = () => {};
 
@@ -97,7 +98,7 @@
 
 {#if suggestOpen}
   <div class="fixed inset-0 z-40 flex items-center justify-center bg-mocha-crust/75 p-4" role="presentation" onclick={closeSuggestion}>
-     <div bind:this={suggestDialog} class="w-full max-w-md rounded-2xl border border-mocha-surface1 bg-mocha-base p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="suggest-title" onclick={(event) => event.stopPropagation()} onkeydown={handleDialogKey} tabindex="-1">
+     <div bind:this={suggestDialog} class="w-full max-w-2xl rounded-2xl border border-mocha-surface1 bg-mocha-base p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="suggest-title" onclick={(event) => event.stopPropagation()} onkeydown={handleDialogKey} tabindex="-1">
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="text-xs font-semibold uppercase tracking-[0.18em] text-mocha-mauve">Room suggestion</p>
@@ -105,17 +106,15 @@
         </div>
         <button class="text-mocha-overlay2 hover:text-mocha-text" type="button" aria-label="Close suggestion dialog" onclick={closeSuggestion}>Close</button>
       </div>
-      <form class="mt-5 space-y-4" onsubmit={(event) => { event.preventDefault(); submitSuggestion(); }}>
-        <label class="block text-sm font-semibold" for="suggest-suspect">Suspect
-          <select id="suggest-suspect" bind:value={suggestSuspect} class="game-select">
-            {#each SUSPECTS as suspect}<option value={suspect}>{suspect}</option>{/each}
-          </select>
-        </label>
-        <label class="block text-sm font-semibold" for="suggest-weapon">Weapon
-          <select id="suggest-weapon" bind:value={suggestWeapon} class="game-select">
-            {#each WEAPONS as weapon}<option value={weapon}>{weapon}</option>{/each}
-          </select>
-        </label>
+      <form class="mt-5 space-y-5" onsubmit={(event) => { event.preventDefault(); submitSuggestion(); }}>
+        <div>
+          <p id="suggest-suspect-label" class="mb-2 text-sm font-semibold text-mocha-subtext1">Suspect</p>
+          <CardPicker type="suspect" options={SUSPECTS} bind:value={suggestSuspect} labelledBy="suggest-suspect-label" />
+        </div>
+        <div>
+          <p id="suggest-weapon-label" class="mb-2 text-sm font-semibold text-mocha-subtext1">Weapon</p>
+          <CardPicker type="weapon" options={WEAPONS} bind:value={suggestWeapon} labelledBy="suggest-weapon-label" />
+        </div>
         <p class="text-sm text-mocha-overlay2">The room is your current room: {$currentView?.players[$currentView.myIndex]?.location ?? 'unknown'}.</p>
         <div class="flex justify-end gap-2">
           <button class="game-button" type="button" onclick={closeSuggestion}>Cancel</button>
