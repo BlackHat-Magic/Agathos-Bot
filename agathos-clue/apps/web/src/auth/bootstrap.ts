@@ -1,4 +1,4 @@
-import { loadEmbeddedSession, type EmbeddedSdkFactory } from './embedded';
+import { loadEmbeddedSession, type EmbeddedSdkFactory, type EmbeddedSession } from './embedded';
 import { loadStandaloneSession, type StandaloneSession } from './standalone';
 
 export interface AuthBootstrapOptions {
@@ -22,7 +22,7 @@ export function isEmbeddedContext(browserWindow: Window | undefined =
 
 export function bootstrapAuth(
   options: AuthBootstrapOptions = {},
-): Promise<StandaloneSession | null> {
+): Promise<EmbeddedSession | StandaloneSession | null> {
   const embedded = options.embedded ?? isEmbeddedContext(options.browserWindow);
   if (embedded) {
     return loadEmbeddedSession({

@@ -2,8 +2,19 @@ import type { StandaloneSession } from './standalone';
 
 const MAX_CLIENT_ID_LENGTH = 128;
 const MAX_ACCESS_TOKEN_LENGTH = 1_024;
+const MAX_INSTANCE_ID_LENGTH = 128;
+
+/**
+ * Discord assigns one shared `instanceId` to every participant of the same
+ * Activity instance (one voice channel), so it is the natural multiplayer
+ * room key: no manual game code entry is needed in embedded mode.
+ */
+export interface EmbeddedSession extends StandaloneSession {
+  instanceId: string;
+}
 
 export interface EmbeddedSdk {
+  readonly instanceId: string;
   ready(): Promise<void>;
   commands: {
     authorize(input: {
@@ -27,13 +38,16 @@ export interface EmbeddedSessionOptions {
 
 export async function loadEmbeddedSession(
   options: EmbeddedSessionOptions = {},
-): Promise<StandaloneSession> {
+): Promise<EmbeddedSession> {
   const clientId = options.clientId ?? import.meta.env.VITE_DISCORD_CLIENT_ID;
   if (!isBoundedString(clientId, MAX_CLIENT_ID_LENGTH)) {
     throw new Error('embedded authentication is unavailable');
   }
 
   const sdk = await (options.sdkFactory ?? createDiscordSdk)(clientId);
+  if (!isBoundedString(sdk.instanceId, MAX_INSTANCE_ID_LENGTH) || /\s/.test(sdk.instanceId)) {
+    throw new Error('embedded activity instance is invalid');
+  }
   await sdk.ready();
   const { code } = await sdk.commands.authorize({
     client_id: clientId,
@@ -65,6 +79,7 @@ export async function loadEmbeddedSession(
     authenticated: true,
     userId: value.userId,
     token: value.token,
+    instanceId: sdk.instanceId,
   };
 }
 

@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { loadEmbeddedSession, type EmbeddedSdk } from './embedded';
 
-function sdk(): EmbeddedSdk {
+function sdk(instanceId = 'activity-instance-1'): EmbeddedSdk {
   return {
+    instanceId,
     ready: vi.fn(async () => undefined),
     commands: {
       authorize: vi.fn(async input => {
@@ -47,11 +48,33 @@ describe('embedded auth adapter', () => {
     });
 
     await expect(loadEmbeddedSession({ clientId: 'client-id', fetcher, sdkFactory: factory }))
-      .resolves.toEqual({ authenticated: true, userId: '123', token: 'app-jwt' });
+      .resolves.toEqual({
+        authenticated: true,
+        userId: '123',
+        token: 'app-jwt',
+        instanceId: 'activity-instance-1',
+      });
     expect(factory).toHaveBeenCalledTimes(1);
     expect(discord.ready).toHaveBeenCalledTimes(1);
     expect(discord.commands.authorize).toHaveBeenCalledTimes(1);
     expect(discord.commands.authenticate).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a missing or malformed activity instance id before authorizing', async () => {
+    await expect(loadEmbeddedSession({
+      clientId: 'client-id',
+      sdkFactory: async () => sdk(''),
+      fetcher,
+    })).rejects.toThrow('embedded activity instance is invalid');
+    await expect(loadEmbeddedSession({
+      clientId: 'client-id',
+      sdkFactory: async () => sdk('bad instance id'),
+      fetcher,
+    })).rejects.toThrow('embedded activity instance is invalid');
+
+    function fetcher(): Promise<Response> {
+      throw new Error('exchange must not run for an invalid instance');
+    }
   });
 
   it('rejects malformed exchange responses before authenticating the SDK', async () => {

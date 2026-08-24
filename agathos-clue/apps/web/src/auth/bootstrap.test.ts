@@ -29,6 +29,7 @@ describe('auth bootstrap', () => {
       access_token: 'discord-access-token',
     }));
     const sdkFactory = vi.fn(async () => ({
+      instanceId: 'activity-instance-1',
       ready: vi.fn(async () => undefined),
       commands: {
         authorize: vi.fn(async () => ({ code: 'code' })),
@@ -41,7 +42,12 @@ describe('auth bootstrap', () => {
       clientId: 'client-id',
       fetcher,
       sdkFactory,
-    })).resolves.toEqual({ authenticated: true, userId: '123', token: 'app-jwt' });
+    })).resolves.toEqual({
+      authenticated: true,
+      userId: '123',
+      token: 'app-jwt',
+      instanceId: 'activity-instance-1',
+    });
     expect(sdkFactory).toHaveBeenCalledWith('client-id');
   });
 

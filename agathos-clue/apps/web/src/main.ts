@@ -13,7 +13,14 @@ const initialGameId = bootstrapGameFromUrl();
 if (initialGameId !== null) gameId.set(initialGameId);
 
 void bootstrapAuth()
-  .then(value => session.set(value))
+  .then(value => {
+    session.set(value);
+    // Everyone in the same voice channel shares one Discord activity instance,
+    // so its id is the shared room key when the URL did not pick a game.
+    if (initialGameId === null && value !== null && 'instanceId' in value) {
+      gameId.set(`clue-game:${value.instanceId}`);
+    }
+  })
   .catch(cause => error.set(cause instanceof Error ? cause.message : 'Unable to load session'));
 
 const app = mount(App, { target: document.getElementById('app')! });
