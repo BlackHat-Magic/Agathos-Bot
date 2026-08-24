@@ -36,6 +36,27 @@
       if (event.type !== 'rolled') fresh.unshift(event);
     }
     if (fresh.length === 0) return;
+
+    // Reveal requests are time-sensitive: whoever must respond should see
+    // the banner now, not after the preceding banner's hold elapses. Any
+    // banner it displaces falls to the ticker for context.
+    const priorityIndex = fresh.findIndex(event => event.type === 'revealRequested');
+    if (priorityIndex !== -1) {
+      const priority = fresh[priorityIndex]!;
+      if (capTimer !== undefined) clearTimeout(capTimer);
+      const displaced = fresh.filter(event => event !== priority);
+      compact = current ?? displaced[displaced.length - 1] ?? compact;
+      queue.length = 0;
+      current = priority;
+      titlesBusy.set(true);
+      capTimer = setTimeout(() => {
+        compact = current;
+        current = null;
+        drain();
+      }, HOLD_CAP_MS);
+      return;
+    }
+
     queue.push(...fresh);
     while (queue.length > MAX_QUEUE) queue.shift();
     drain();

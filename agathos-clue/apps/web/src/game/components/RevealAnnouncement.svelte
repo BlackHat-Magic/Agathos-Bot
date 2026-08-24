@@ -1,28 +1,38 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import type { Card } from '@agathos/game';
-  import { currentView, privateReveal } from '../stores';
+  import { currentView, diceRolling, privateReveal, titlesBusy } from '../stores';
   import type { PrivateReveal } from '../../transport/snapshots';
   import CardFace from './CardFace.svelte';
 
   const TIMEOUT_MS = 30_000;
 
   let active: PrivateReveal | null = null;
+  let queued: PrivateReveal | null = null;
   let dismissed: PrivateReveal | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  $: if ($privateReveal !== null && $privateReveal !== active && $privateReveal !== dismissed) {
-    announce($privateReveal);
+  $: if ($privateReveal !== null &&
+    $privateReveal !== active &&
+    $privateReveal !== queued &&
+    $privateReveal !== dismissed) {
+    // Hold until its "revealed a card" title has played.
+    queued = $privateReveal;
+  }
+
+  $: if (queued !== null && !$titlesBusy && !$diceRolling) {
+    announce(queued);
   }
 
   function announce(reveal: PrivateReveal): void {
     if (timer !== undefined) clearTimeout(timer);
     active = reveal;
+    queued = null;
     timer = setTimeout(dismiss, TIMEOUT_MS);
   }
 
   function dismiss(): void {
-    dismissed = active;
+    dismissed = active ?? dismissed;
     active = null;
     if (timer !== undefined) {
       clearTimeout(timer);
