@@ -108,7 +108,6 @@
 
         <aside class="space-y-4">
           <IntentBar onAccuse={() => (accuseOpen = true)} />
-          <Hand />
           <EventLog />
         </aside>
       </div>
@@ -128,6 +127,8 @@
       {/if}
     </div>
   </main>
+
+  <Hand />
 
   {#if $currentView.pendingReveal?.revealerIndex === $currentView.myIndex && $currentView.myRevealOpportunities !== undefined}
     <RevealModal onClose={() => {}} />
