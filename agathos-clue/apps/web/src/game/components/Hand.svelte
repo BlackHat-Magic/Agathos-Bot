@@ -16,9 +16,8 @@
   $: fanWidth = fan?.clientWidth ?? 780;
   $: centers = fanCenters(cards.length, Math.max(fanWidth, 1));
   $: placements = fanPlacements(cards.length, hoverIndex);
+  // A pending reveal splays the hand until it is resolved; it never re-tucks mid-choice.
   $: if (hasRequest) raised = true;
-  // A fresh private reveal deserves attention even while tucked.
-  $: if ($privateReveal?.card !== undefined) raised = true;
   $: if (!hasRequest) selectedCard = null;
 
   function cardLabel(card: Card): string {
@@ -75,7 +74,7 @@
   class:requesting={hasRequest}
   aria-label="Your private cards"
 >
-  {#if hasRequest}
+  {#if raised && hasRequest}
     <p
       class="reveal-note pointer-events-none mb-1 rounded-full bg-mocha-yellow/15 px-4 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-mocha-yellow"
       role="status"
@@ -84,7 +83,7 @@
     </p>
   {/if}
 
-  {#if selectedCard !== null}
+  {#if raised && selectedCard !== null}
     <div class="confirm-bar pointer-events-auto mb-2 flex items-center gap-3 rounded-full border border-mocha-lavender/50 bg-mocha-mantle/95 py-2 pl-4 pr-2 shadow-xl shadow-black/40 backdrop-blur">
       <span class="text-sm text-mocha-text">
         Show <strong class="text-mocha-lavender">{cardLabel(selectedCard)}</strong>?
@@ -97,13 +96,10 @@
   <ul
     bind:this={fan}
     class="pointer-events-auto relative h-[178px] w-[min(94vw,780px)] min-w-[300px]"
-    tabindex="0"
     aria-label="Your private hand"
     onpointerenter={raise}
     onpointermove={trackPointer}
     onpointerleave={lowerFromFan}
-    onfocusin={raise}
-    onfocusout={() => (hoverIndex = null)}
   >
     {#each cards as card, index (index)}
       {@const match = hasRequest && isRevealMatch(card)}
@@ -151,8 +147,7 @@
     transform: translateY(calc(100% - 88px));
     transition: transform 0.32s cubic-bezier(0.22, 0.9, 0.28, 1);
   }
-  .hand-dock.raised,
-  .hand-dock:focus-within {
+  .hand-dock.raised {
     transform: translateY(0);
   }
   /* While a reveal is requested the hand splays fully and never re-tucks. */
