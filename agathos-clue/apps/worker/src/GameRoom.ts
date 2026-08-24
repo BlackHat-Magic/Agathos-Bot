@@ -77,6 +77,8 @@ export class GameRoom extends DurableObject<Env> {
   private robotRun: Promise<void> | undefined;
   private robotRetryAttempt = 0;
   private robotAlarmScheduled = false;
+  /** 0 disables pacing (tests); >0 spaces robot actions via alarms. */
+  private readonly robotPaceMs = readPaceMs(this.env.ROBOT_STEP_PACE_MS);
   private readonly connections = new Map<WebSocket, Connection>();
   private gameId = '';
 
@@ -213,8 +215,10 @@ export class GameRoom extends DurableObject<Env> {
         restore: snapshot => { this.game = hydrateGame(snapshot); },
         persist: (game, privateReveal) => this.persistRobotMutation(game, privateReveal),
         broadcast: (events, privateReveal) => this.broadcast(events, privateReveal),
+        maxSteps: this.robotPaceMs > 0 ? 1 : undefined,
       });
       await this.resetRobotRetry();
+      await this.maybeArmPacingAlarm();
     } catch (error) {
       if (this.game !== undefined && hasRobotActionableState(this.game)) {
         try {
@@ -392,6 +396,20 @@ export class GameRoom extends DurableObject<Env> {
     } catch (error) {
       this.game = hydrateGame(previousPersistedGame);
       this.lobby = hydrateLobby(previousPersistedLobby);
+      throw error;
+    }
+  }
+
+  private async maybeArmPacingAlarm(): Promise<void> {
+    if (this.robotPaceMs <= 0) return;
+    const game = this.game;
+    if (game === undefined || !hasRobotActionableState(game)) return;
+    if (this.robotAlarmScheduled) return;
+    try {
+      await this.ctx.storage.setAlarm(Date.now() + this.robotPaceMs);
+      this.robotAlarmScheduled = true;
+    } catch (error) {
+      console.error(`robot pacing alarm failed: ${errorMessage(error)}`);
       throw error;
     }
   }
@@ -622,6 +640,13 @@ function readRetryCount(value: unknown): number {
   const retryCount = (value as Record<string, unknown>).retryCount;
   if (!Number.isInteger(retryCount) || (retryCount as number) < 0) return 0;
   return Math.min(retryCount as number, ROBOT_RETRY_MAX_ATTEMPT);
+}
+
+function readPaceMs(value: string | undefined): number {
+  if (value === undefined || value === '') return 0;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 10_000) return 0;
+  return parsed;
 }
 
 function privateRevealForIntent(

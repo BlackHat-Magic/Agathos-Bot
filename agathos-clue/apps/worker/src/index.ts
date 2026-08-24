@@ -10,6 +10,8 @@ export interface Env {
   DISCORD_REDIRECT_URI: string;
   DISCORD_CLIENT_SECRET: string;  // set via `wrangler secret put`
   JWT_SECRET: string;             // set via `wrangler secret put`
+  /** Milliseconds between robot actions; empty/invalid disables pacing. */
+  ROBOT_STEP_PACE_MS?: string;
 }
 
 export default {

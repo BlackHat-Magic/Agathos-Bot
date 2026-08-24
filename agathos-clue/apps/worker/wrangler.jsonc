@@ -25,6 +25,7 @@
   ],
   "vars": {
     "DISCORD_CLIENT_ID": "1152547279513845811",
-    "DISCORD_REDIRECT_URI": "https://agathos-clue.blackhatmagic.workers.dev/auth/callback"
+    "DISCORD_REDIRECT_URI": "https://agathos-clue.blackhatmagic.workers.dev/auth/callback",
+    "ROBOT_STEP_PACE_MS": "900"
   }
 }

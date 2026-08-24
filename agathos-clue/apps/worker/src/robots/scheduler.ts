@@ -18,13 +18,19 @@ export interface RobotSchedulerOptions<Snapshot> {
   broadcast: (events: Event[], privateReveal?: RobotPrivateReveal) => void;
   onActionPersisted?: () => void;
   rng?: RNG;
+  /**
+   * Stop after this many persisted actions so callers can pace turns
+   * (e.g. one action per alarm tick) instead of bursting a full sweep.
+   */
+  maxSteps?: number;
 }
 
-/** Run autonomous actions until a human or an internal wait blocks progress. */
+/** Run autonomous actions until a human, an internal wait, or maxSteps blocks progress. */
 export async function runRobotScheduler<Snapshot>(
   options: RobotSchedulerOptions<Snapshot>,
 ): Promise<void> {
-  while (true) {
+  let steps = 0;
+  while (options.maxSteps === undefined || steps < options.maxSteps) {
     const game = options.getGame();
     const robotIndex = nextRobotIndex(game);
     if (robotIndex === null) return;
@@ -41,6 +47,7 @@ export async function runRobotScheduler<Snapshot>(
       await options.persist(game, privateReveal);
       options.broadcast(events, privateReveal);
       options.onActionPersisted?.();
+      steps += 1;
     } catch (error) {
       options.restore(previous);
       throw error;

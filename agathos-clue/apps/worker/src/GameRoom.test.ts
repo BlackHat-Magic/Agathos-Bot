@@ -152,6 +152,7 @@ function roomWithStorage(
   stored?: unknown,
   storedLobby?: unknown,
   storedPrivateReveals?: unknown,
+  envOverrides: Record<string, string> = {},
 ): { gameRoom: GameRoom; storage: TestStorage } {
   const storage: TestStorage = {
     value: stored,
@@ -229,7 +230,10 @@ function roomWithStorage(
     },
     blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
   } as unknown as DurableObjectState;
-  return { gameRoom: new GameRoomClass(ctx, { JWT_SECRET } as Env), storage };
+  return {
+    gameRoom: new GameRoomClass(ctx, { JWT_SECRET, ...envOverrides } as Env),
+    storage,
+  };
 }
 
 function room(stored?: unknown): GameRoom {
@@ -1074,6 +1078,58 @@ describe('GameRoom protocol helpers', () => {
     });
     expect(storage.lobby).toEqual({ hostUserId: null, players: [] });
     connection.client.close();
+  });
+
+  it('paces robot actions one alarm step at a time when configured', async () => {
+    const { gameRoom, storage } = roomWithStorage(undefined, undefined, undefined, {
+      ROBOT_STEP_PACE_MS: '900',
+    });
+    const alice = await connectJoinedPlayer(gameRoom, 'alice');
+    alice.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Alice' } }));
+    await alice.messages.next();
+    alice.client.send(JSON.stringify({ intent: { kind: 'claimSuspect', suspect: 'Miss Scarlett' } }));
+    await alice.messages.next();
+
+    alice.client.send(JSON.stringify({ intent: { kind: 'start' } }));
+    await expect(alice.messages.next()).resolves.toMatchObject({ type: 'state', view: { myIndex: 0 } });
+
+    // Alice takes her real turn so the first robot becomes actionable.
+    alice.client.send(JSON.stringify({ intent: { kind: 'roll' } }));
+    const rolledFrame = await alice.messages.next();
+    expect(rolledFrame).toMatchObject({ type: 'state', events: [{ type: 'rolled' }] });
+    const destination =
+      (rolledFrame as { view: { reachableSpacesHints?: string[] } }).view
+        .reachableSpacesHints?.[0];
+    expect(destination).toBeDefined();
+    alice.client.send(JSON.stringify({ intent: { kind: 'moveTo', destination } }));
+    await alice.messages.next();
+    alice.client.send(JSON.stringify({ intent: { kind: 'endTurn' } }));
+    await alice.messages.next();
+
+    // The handoff performs exactly one paced robot step (the roll), then stops.
+    await vi.waitFor(() => {
+      const game = hydrateGame(storage.value);
+      expect(game.turnIndex).toBe(1);
+      expect(game.hasRolledThisTurn).toBe(true);
+    });
+    let game = hydrateGame(storage.value);
+    expect(game.phase).toBe('playing');
+    expect(game.turnIndex).toBe(1);
+    expect(game.players[1]!.isRobot).toBe(true);
+    expect(game.hasMovedThisTurn).toBe(false);
+    expect(game.pendingReveal).toBeNull();
+    expect(storage.alarm).not.toBeNull();
+    const delta = (storage.alarm as number) - Date.now();
+    expect(delta).toBeGreaterThan(400);
+    expect(delta).toBeLessThan(1400);
+
+    // The next alarm performs the next single action (the move), no further.
+    await gameRoom.alarm();
+    game = hydrateGame(storage.value);
+    expect(game.turnIndex).toBe(1);
+    expect(game.hasRolledThisTurn).toBe(true);
+    expect(game.hasMovedThisTurn).toBe(true);
+    closeConnections(gameRoom);
   });
 
   it('deduplicates concurrent robot scheduler runs', async () => {
