@@ -4,18 +4,23 @@
   import { formatEvent } from '../event-format';
   import type { Event } from '@agathos/game';
 
-  const DISPLAY_MS = 1_400;
+  /** A title always stays readable for at least this long, bursts included. */
+  const MIN_VISIBLE_MS = 5_000;
+  /** After this long without a successor, a title retires to the ticker. */
+  const HOLD_CAP_MS = 12_000;
   const MAX_QUEUE = 8;
 
+  let current: Event | null = null;
+  let compact: Event | null = null;
+  let shownAt = 0;
   let queue: Event[] = [];
   let seen = new Set<unknown>();
   let initialized = false;
-  let current: Event | null = null;
   let timers: ReturnType<typeof setTimeout>[] = [];
 
-  $: ingest($events, $diceRolling);
+  $: ingest($events);
 
-  function ingest(list: readonly Event[], rolling: boolean): void {
+  function ingest(list: readonly Event[]): void {
     if (!initialized) {
       for (const event of list) seen.add(event);
       initialized = true;
@@ -32,46 +37,79 @@
     if (fresh.length === 0) return;
     queue.push(...fresh);
     while (queue.length > MAX_QUEUE) queue.shift();
-    // Hold titles while the dice are on screen so they never talk over each other.
-    if (current === null && !rolling) playNext();
-    else if (current === null) titlesBusy.set(true);
+    drain();
   }
 
-  function playNext(): void {
+  /**
+   * Advance the pipeline: a fresh title replaces the visible one once it has
+   * been readable for MIN_VISIBLE_MS; otherwise the visible title holds until
+   * its cap, then retires to the persistent ticker. There is never a stretch
+   * with neither a title nor a ticker after the first event.
+   */
+  function drain(): void {
     if ($diceRolling) {
       titlesBusy.set(true);
-      timers.push(setTimeout(playNext, 250));
+      schedule(drain, 250);
       return;
     }
+    if (current !== null) {
+      const remaining = MIN_VISIBLE_MS - (Date.now() - shownAt);
+      if (remaining > 0) {
+        schedule(drain, remaining);
+        return;
+      }
+      if (queue.length > 0) {
+        advance();
+        return;
+      }
+      return; // still inside its hold window; the cap timer will retire it
+    }
+    if (queue.length > 0) {
+      advance();
+      return;
+    }
+    if (compact === null) titlesBusy.set(false);
+  }
+
+  function advance(): void {
     const next = queue.shift();
-    if (next === undefined) {
-      titlesBusy.set(false);
-      return;
-    }
-    titlesBusy.set(true);
+    if (next === undefined) return;
+    compact = null;
     current = next;
-    timers.push(setTimeout(() => {
+    shownAt = Date.now();
+    titlesBusy.set(true);
+    schedule(() => {
+      compact = current;
       current = null;
-      if (queue.length > 0 || $diceRolling) playNext();
-      else titlesBusy.set(false);
-    }, DISPLAY_MS));
+      drain();
+    }, HOLD_CAP_MS);
+  }
+
+  function schedule(fn: () => void, delay: number): void {
+    timers.push(setTimeout(fn, delay));
+  }
+
+  function clearTimers(): void {
+    for (const timer of timers) clearTimeout(timer);
+    timers = [];
   }
 
   onDestroy(() => {
     clearTimers();
     titlesBusy.set(false);
   });
-
-  function clearTimers(): void {
-    for (const timer of timers) clearTimeout(timer);
-    timers = [];
-  }
 </script>
 
 {#if current !== null}
-  <div class="pointer-events-none absolute inset-0 z-20 flex items-start justify-center pt-[10%]" aria-live="polite">
-    <p class="title-text max-w-[85%] text-center font-display text-3xl font-bold text-mocha-text drop-shadow-[0_4px_18px_rgb(0_0_0/95%)] sm:text-4xl">
+  <div class="pointer-events-none absolute inset-x-0 top-[10%] z-20 flex justify-center px-6" aria-live="polite">
+    <p class="title-text max-w-full text-center font-display text-3xl font-bold text-mocha-text drop-shadow-[0_4px_18px_rgb(0_0_0/95%)] sm:text-4xl">
       {formatEvent(current, $currentView)}
+    </p>
+  </div>
+{:else if compact !== null}
+  <div class="pointer-events-none absolute inset-x-0 top-[3%] z-20 flex justify-center px-6">
+    <p class="ticker rounded-full border border-mocha-surface1 bg-mocha-crust/85 px-4 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-mocha-subtext1 backdrop-blur-sm">
+      Last: {formatEvent(compact, $currentView)}
     </p>
   </div>
 {/if}
