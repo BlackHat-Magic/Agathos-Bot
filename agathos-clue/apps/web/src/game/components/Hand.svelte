@@ -93,7 +93,10 @@
     transform: translateY(0);
   }
 
+  /* Fan pivot lives far below the card so rotation draws the arc;
+     without it cards spin around their own centers and the fan collapses. */
   .hand-dock :global(li) {
+    transform-origin: 50% 240%;
     transition: transform 0.22s ease;
   }
 

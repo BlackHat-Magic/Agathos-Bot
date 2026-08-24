@@ -17,7 +17,7 @@
   } from './accusation-reconciliation';
   import { createAccuseIntent } from '../../transport/intents';
   import { trapDialogFocus } from '../modal-focus';
-  import CardFace from './CardFace.svelte';
+  import CardRow from './CardRow.svelte';
   import type { Event } from '@agathos/game';
 
   export let onClose: () => void = () => {};
@@ -85,60 +85,18 @@
 
     <div class="w-full max-w-3xl space-y-5">
       <div>
-        <p id="accuse-suspect-label" class="mb-2 text-sm font-semibold text-mocha-subtext1">Suspect</p>
-        <div class="flex flex-wrap gap-3" role="radiogroup" aria-labelledby="accuse-suspect-label">
-          {#each SUSPECTS as option (option)}
-            <button
-              class="pick"
-              type="button"
-              role="radio"
-              aria-checked={suspect === option}
-              aria-label={`Suspect ${option}`}
-              disabled={accusationPending}
-              onclick={() => (suspect = option)}
-            >
-              <CardFace type="suspect" label={option} selected={suspect === option} />
-            </button>
-          {/each}
-        </div>
+        <p id="accuse-suspect-label" class="mb-1 text-sm font-semibold text-mocha-subtext1">Suspect</p>
+        <CardRow type="suspect" options={SUSPECTS} bind:value={suspect} labelledBy="accuse-suspect-label" />
       </div>
 
       <div>
-        <p id="accuse-weapon-label" class="mb-2 text-sm font-semibold text-mocha-subtext1">Weapon</p>
-        <div class="flex flex-wrap gap-3" role="radiogroup" aria-labelledby="accuse-weapon-label">
-          {#each WEAPONS as option (option)}
-            <button
-              class="pick"
-              type="button"
-              role="radio"
-              aria-checked={weapon === option}
-              aria-label={`Weapon ${option}`}
-              disabled={accusationPending}
-              onclick={() => (weapon = option)}
-            >
-              <CardFace type="weapon" label={option} selected={weapon === option} />
-            </button>
-          {/each}
-        </div>
+        <p id="accuse-weapon-label" class="mb-1 text-sm font-semibold text-mocha-subtext1">Weapon</p>
+        <CardRow type="weapon" options={WEAPONS} bind:value={weapon} labelledBy="accuse-weapon-label" />
       </div>
 
       <div>
-        <p id="accuse-room-label" class="mb-2 text-sm font-semibold text-mocha-subtext1">Room</p>
-        <div class="flex flex-wrap gap-3" role="radiogroup" aria-labelledby="accuse-room-label">
-          {#each ROOMS as option (option)}
-            <button
-              class="pick"
-              type="button"
-              role="radio"
-              aria-checked={room === option}
-              aria-label={`Room ${option}`}
-              disabled={accusationPending}
-              onclick={() => (room = option)}
-            >
-              <CardFace type="room" label={option} selected={room === option} />
-            </button>
-          {/each}
-        </div>
+        <p id="accuse-room-label" class="mb-1 text-sm font-semibold text-mocha-subtext1">Room</p>
+        <CardRow type="room" options={ROOMS} bind:value={room} labelledBy="accuse-room-label" />
       </div>
     </div>
 
@@ -167,18 +125,7 @@
 </div>
 
 <style>
-  .pick {
-    padding: 0;
-    background: none;
-    border: none;
-    cursor: pointer;
-  }
-  .pick:focus-visible {
-    outline: 2px solid var(--color-mocha-lavender);
-    outline-offset: 3px;
-    border-radius: 0.75rem;
-  }
-  .pick:disabled {
+  .carousel :global(.pick:disabled) {
     cursor: default;
     opacity: 0.7;
   }

@@ -5,7 +5,7 @@
   import { actionsFor } from '../intent-gating';
   import { createSuggestIntent } from '../../transport/intents';
   import { trapDialogFocus } from '../modal-focus';
-  import CardFace from './CardFace.svelte';
+  import CardRow from './CardRow.svelte';
 
   export let onClose: () => void = () => {};
 
@@ -39,39 +39,13 @@
 
     <div class="w-full max-w-3xl space-y-5">
       <div>
-        <p id="suggest-suspect-label" class="mb-2 text-sm font-semibold text-mocha-subtext1">Suspect</p>
-        <div class="flex flex-wrap gap-3" role="radiogroup" aria-labelledby="suggest-suspect-label">
-          {#each SUSPECTS as option (option)}
-            <button
-              class="pick"
-              type="button"
-              role="radio"
-              aria-checked={suspect === option}
-              aria-label={`Suspect ${option}`}
-              onclick={() => (suspect = option)}
-            >
-              <CardFace type="suspect" label={option} selected={suspect === option} />
-            </button>
-          {/each}
-        </div>
+        <p id="suggest-suspect-label" class="mb-1 text-sm font-semibold text-mocha-subtext1">Suspect</p>
+        <CardRow type="suspect" options={SUSPECTS} bind:value={suspect} labelledBy="suggest-suspect-label" />
       </div>
 
       <div>
-        <p id="suggest-weapon-label" class="mb-2 text-sm font-semibold text-mocha-subtext1">Weapon</p>
-        <div class="flex flex-wrap gap-3" role="radiogroup" aria-labelledby="suggest-weapon-label">
-          {#each WEAPONS as option (option)}
-            <button
-              class="pick"
-              type="button"
-              role="radio"
-              aria-checked={weapon === option}
-              aria-label={`Weapon ${option}`}
-              onclick={() => (weapon = option)}
-            >
-              <CardFace type="weapon" label={option} selected={weapon === option} />
-            </button>
-          {/each}
-        </div>
+        <p id="suggest-weapon-label" class="mb-1 text-sm font-semibold text-mocha-subtext1">Weapon</p>
+        <CardRow type="weapon" options={WEAPONS} bind:value={weapon} labelledBy="suggest-weapon-label" />
       </div>
     </div>
   </div>
@@ -81,17 +55,3 @@
     <button class="game-button game-button-primary" type="button" disabled={!actions.canSuggest} onclick={submit}>Confirm suggestion</button>
   </div>
 </div>
-
-<style>
-  .pick {
-    padding: 0;
-    background: none;
-    border: none;
-    cursor: pointer;
-  }
-  .pick:focus-visible {
-    outline: 2px solid var(--color-mocha-lavender);
-    outline-offset: 3px;
-    border-radius: 0.75rem;
-  }
-</style>
