@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   fanAngles,
+  fanCenters,
   fanPlacements,
+  nearestCard,
 } from './hand-fan';
 
 describe('fanAngles', () => {
@@ -57,5 +59,36 @@ describe('fanPlacements', () => {
 
   it('keeps the hovered card itself unshifted', () => {
     expect(fanPlacements(5, 0)[0]!.shiftPx).toBe(0);
+  });
+});
+
+describe('fanCenters and nearestCard', () => {
+  it('places the fan symmetrically around the width center', () => {
+    const centers = fanCenters(5, 780);
+    const middle = centers[2]!;
+    expect(middle).toBeCloseTo(390, 5);
+    expect(centers[0]!).toBeCloseTo(780 - centers[4]!, 5);
+    expect(centers[1]!).toBeCloseTo(780 - centers[3]!, 5);
+  });
+
+  it('spreads outer cards outward along the arc', () => {
+    const centers = fanCenters(4, 600);
+    expect(centers[0]!).toBeLessThan(centers[1]!);
+    expect(centers[1]!).toBeLessThan(centers[2]!);
+    expect(centers[2]!).toBeLessThan(centers[3]!);
+  });
+
+  it('handles empty and single hands', () => {
+    expect(fanCenters(0, 780)).toEqual([]);
+    expect(fanCenters(1, 780)).toEqual([390]);
+  });
+
+  it('matches the cursor to the nearest rest center and tolerates junk input', () => {
+    const centers = fanCenters(3, 760);
+    expect(nearestCard(centers, centers[0]! - 50)).toBe(0);
+    expect(nearestCard(centers, centers[1]! + 10)).toBe(1);
+    expect(nearestCard(centers, centers[2]! + 200)).toBe(2);
+    expect(nearestCard([], 100)).toBeNull();
+    expect(nearestCard(centers, Number.NaN)).toBeNull();
   });
 });

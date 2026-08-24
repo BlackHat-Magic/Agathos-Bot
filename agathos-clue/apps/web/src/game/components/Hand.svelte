@@ -2,12 +2,17 @@
   import type { Card } from '@agathos/game';
   import Icon from '@iconify/svelte';
   import { currentView, privateReveal } from '../stores';
-  import { fanPlacements } from '../hand-fan';
+  import { fanCenters, fanPlacements, nearestCard } from '../hand-fan';
 
+  const FAN_MAX_WIDTH = 780;
+
+  let fan: HTMLUListElement | undefined;
   let raised = false;
   let hoverIndex: number | null = null;
 
   $: cards = $currentView?.myHand ?? [];
+  $: fanWidth = fan?.clientWidth ?? FAN_MAX_WIDTH;
+  $: centers = fanCenters(cards.length, Math.max(fanWidth, 1));
   $: placements = fanPlacements(cards.length, hoverIndex);
   // A fresh private reveal deserves attention even while tucked.
   $: if ($privateReveal?.card !== undefined) raised = true;
@@ -37,6 +42,16 @@
     hoverIndex = null;
     raised = false;
   }
+
+  /**
+   * Continuous nearest-card matching against rest-pose arc centers. Per-card
+   * pointerenter cannot work here: the hovered card's scaled hit area swallows
+   * its neighbors, so sliding sideways never leaves the first card.
+   */
+  function trackPointer(event: PointerEvent): void {
+    if (cards.length === 0 || fan === undefined || fan.clientWidth === 0) return;
+    hoverIndex = nearestCard(centers, event.clientX - fan.getBoundingClientRect().left);
+  }
 </script>
 
 <section
@@ -45,10 +60,12 @@
   aria-label="Your private cards"
 >
   <ul
+    bind:this={fan}
     class="pointer-events-auto relative h-[178px] w-[min(94vw,780px)] min-w-[300px]"
     tabindex="0"
     aria-label="Your private hand"
     onpointerenter={raise}
+    onpointermove={trackPointer}
     onpointerleave={lowerFromFan}
     onfocusin={raise}
     onfocusout={() => (hoverIndex = null)}
@@ -59,7 +76,6 @@
         class:hovered={hoverIndex === index}
         style="transform: translateX(-50%) translateX({placements[index]?.shiftPx ?? 0}px) translateY({placements[index]?.liftPx ?? 0}px) rotate({placements[index]?.angle ?? 0}deg) scale({placements[index]?.scale ?? 1}); z-index: {placements[index]?.z ?? 10};"
         aria-label={`${card.type} card: ${cardLabel(card)}`}
-        onpointerenter={() => setHover(index)}
       >
         <span class="type-label block text-[0.6rem] font-semibold uppercase tracking-[0.16em]">{card.type}</span>
         <span class="mt-3 block text-mocha-overlay1"><Icon icon={cardGlyph(card)} width="34" height="34" aria-hidden="true" /></span>
