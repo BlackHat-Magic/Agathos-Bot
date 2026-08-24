@@ -3,11 +3,13 @@ import './styles/app.css';
 import App from './App.svelte';
 import { initTheme } from './lib/theme';
 import { session } from './auth/standalone';
-import { bootstrapAuth } from './auth/bootstrap';
+import { bootstrapAuth, isEmbeddedContext } from './auth/bootstrap';
 import { bootstrapGameFromUrl } from './game/bootstrap';
-import { error, gameId } from './game/stores';
+import { authPending, embeddedMode, error, gameId } from './game/stores';
 
 initTheme();
+
+embeddedMode.set(isEmbeddedContext());
 
 const initialGameId = bootstrapGameFromUrl();
 if (initialGameId !== null) gameId.set(initialGameId);
@@ -21,7 +23,8 @@ void bootstrapAuth()
       gameId.set(`clue-game:${value.instanceId}`);
     }
   })
-  .catch(cause => error.set(cause instanceof Error ? cause.message : 'Unable to load session'));
+  .catch(cause => error.set(cause instanceof Error ? cause.message : 'Unable to load session'))
+  .finally(() => authPending.set(false));
 
 const app = mount(App, { target: document.getElementById('app')! });
 

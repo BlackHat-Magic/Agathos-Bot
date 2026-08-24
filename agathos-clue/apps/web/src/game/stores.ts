@@ -16,6 +16,10 @@ export const events = writable<readonly Event[]>([]);
 export const privateReveal = writable<PrivateReveal | null>(null);
 export const lobby = writable<LobbySnapshot | null>(null);
 export const gameId = writable<string | null>(null);
+/** True until the initial auth bootstrap resolves or rejects. */
+export const authPending = writable(true);
+/** True when running inside the Discord activity iframe. */
+export const embeddedMode = writable(false);
 export const connectionStatus = writable<ConnectionStatus | 'idle'>('idle');
 export const error = writable<string | null>(null);
 /** True while the dice overlay is animating; gates hints and roll spoilers. */

@@ -11,7 +11,9 @@
     shouldResetJoinedState,
   } from '../lobby-lifecycle';
   import {
+    authPending,
     connectionStatus,
+    embeddedMode,
     error,
     gameId,
     lobby,
@@ -106,7 +108,26 @@
         <Icon icon="hugeicons:door-01" width="30" height="30" class="text-mocha-peach" aria-hidden="true" />
       </div>
 
-      {#if !$session}
+      {#if $authPending}
+        <div class="rounded-2xl border border-mocha-surface1 bg-mocha-mantle p-5" role="status" aria-live="polite">
+          <p class="flex items-center gap-3 text-mocha-subtext0">
+            <span class="h-2 w-2 animate-pulse rounded-full bg-mocha-mauve"></span>
+            Signing in with Discord…
+          </p>
+        </div>
+      {:else if !$session && $embeddedMode}
+        <div class="rounded-2xl border border-mocha-red/35 bg-mocha-mantle p-5">
+          <p class="text-mocha-subtext0">Discord sign-in failed.</p>
+          <button
+            class="mt-5 inline-flex items-center gap-2 rounded-xl bg-mocha-mauve px-4 py-3 font-semibold text-mocha-crust transition hover:bg-mocha-pink focus:outline-2 focus:outline-offset-2 focus:outline-mocha-mauve"
+            type="button"
+            onclick={() => window.location.reload()}
+          >
+            <Icon icon="hugeicons:arrow-reload-horizontal" width="20" height="20" aria-hidden="true" />
+            Retry sign-in
+          </button>
+        </div>
+      {:else if !$session}
         <div class="rounded-2xl border border-mocha-surface1 bg-mocha-mantle p-5">
           <p class="text-mocha-subtext0">Sign in to connect to a lobby and play with your group.</p>
           <button
