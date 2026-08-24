@@ -28,7 +28,7 @@
           type="button"
           onclick={() => send(createDeclineRevealIntent())}
         >
-          Decline reveal
+          I have nothing to show
         </button>
       {/if}
     </div>
