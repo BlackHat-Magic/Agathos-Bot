@@ -20,6 +20,8 @@ export const connectionStatus = writable<ConnectionStatus | 'idle'>('idle');
 export const error = writable<string | null>(null);
 /** True while the dice overlay is animating; gates hints and roll spoilers. */
 export const diceRolling = writable(false);
+/** True while action title cards are queued or on screen. */
+export const titlesBusy = writable(false);
 
 let transport: Transport | null = null;
 let stopTransportSubscriptions: (() => void) | null = null;

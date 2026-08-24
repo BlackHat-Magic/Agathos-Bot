@@ -1,13 +1,15 @@
 <script lang="ts">
   import { createDeclineRevealIntent } from '../../transport/intents';
-  import { revealRequest, send } from '../stores';
+  import { diceRolling, revealRequest, send, titlesBusy } from '../stores';
 
   $: request = $revealRequest;
   $: pending = request !== null;
+  // Let the dice and action titles finish before asking for a card.
+  $: settled = !$diceRolling && !$titlesBusy;
   $: matches = request ?? [];
 </script>
 
-{#if pending}
+{#if pending && settled}
   <div class="pointer-events-none absolute inset-0 z-20 flex flex-col items-center pt-[4%]" aria-live="assertive">
     <div class="title-text rounded-2xl px-10 py-6 text-center title-backdrop">
       <p class="font-display text-5xl font-bold text-mocha-text drop-shadow-[0_4px_16px_rgb(0_0_0/90%)] sm:text-6xl">

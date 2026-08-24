@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { currentView, diceRolling, events } from '../stores';
+  import { currentView, diceRolling, events, titlesBusy } from '../stores';
   import { formatEvent } from '../event-format';
   import type { Event } from '@agathos/game';
 
@@ -34,24 +34,33 @@
     while (queue.length > MAX_QUEUE) queue.shift();
     // Hold titles while the dice are on screen so they never talk over each other.
     if (current === null && !rolling) playNext();
+    else if (current === null) titlesBusy.set(true);
   }
 
   function playNext(): void {
     if ($diceRolling) {
+      titlesBusy.set(true);
       timers.push(setTimeout(playNext, 250));
       return;
     }
     const next = queue.shift();
-    if (next === undefined) return;
+    if (next === undefined) {
+      titlesBusy.set(false);
+      return;
+    }
+    titlesBusy.set(true);
     current = next;
     timers.push(setTimeout(() => {
       current = null;
-      if (queue.length > 0 && !$diceRolling) playNext();
-      else if (queue.length > 0) playNext();
+      if (queue.length > 0 || $diceRolling) playNext();
+      else titlesBusy.set(false);
     }, DISPLAY_MS));
   }
 
-  onDestroy(clearTimers);
+  onDestroy(() => {
+    clearTimers();
+    titlesBusy.set(false);
+  });
 
   function clearTimers(): void {
     for (const timer of timers) clearTimeout(timer);

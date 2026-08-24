@@ -59,7 +59,7 @@ const ROBOT_RETRY_INITIAL_DELAY_MS = 1_000;
 const ROBOT_RETRY_MAX_DELAY_MS = 60_000;
 const ROBOT_RETRY_MAX_ATTEMPT = 6;
 /** Extra breathing room when the next robot action starts a new phase. */
-const ROBOT_PHASE_BONUS_MS = 700;
+const ROBOT_PHASE_BONUS_MS = 2_100;
 
 interface RobotAlarmInfo {
   retryCount: number;
