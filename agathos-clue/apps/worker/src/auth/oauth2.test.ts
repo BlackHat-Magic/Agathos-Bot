@@ -68,11 +68,13 @@ describe('standalone Discord OAuth', () => {
     expect(location.searchParams.get('redirect_uri')).toBe('https://example.test/auth/callback');
     expect(location.searchParams.get('response_type')).toBe('code');
     expect(location.searchParams.get('scope')).toBe('identify');
-    expect(stateCookie(response)).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(location.searchParams.get('state')).toBe(stateCookie(response));
+    expect(location.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(setCookies(response)[0]).toMatch(/HttpOnly/);
     expect(setCookies(response)[0]).toMatch(/SameSite=Lax/);
     expect(setCookies(response)[0]).toMatch(/Secure/);
     expect(setCookies(response)[0]).toMatch(/Max-Age=300/);
+    expect(setCookies(response)[0]).toMatch(/Path=\//);
   });
 
   it.each([

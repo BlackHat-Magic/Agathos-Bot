@@ -15,6 +15,8 @@ import {
 const DISCORD_AUTHORIZE_ENDPOINT = 'https://discord.com/oauth2/authorize';
 const STATE_COOKIE = 'clue-oauth-state';
 const SESSION_COOKIE = 'clue-session';
+const STATE_COOKIE_PATH = '/';
+const LEGACY_STATE_COOKIE_PATH = '/auth';
 const STATE_TTL_SECONDS = 300;
 const SESSION_TTL_SECONDS = 3_600;
 const MAX_COOKIE_BYTES = 8_192;
@@ -43,6 +45,7 @@ function begin(req: Request, env: Env): Response {
   authorizeUrl.searchParams.set('redirect_uri', env.DISCORD_REDIRECT_URI);
   authorizeUrl.searchParams.set('response_type', 'code');
   authorizeUrl.searchParams.set('scope', 'identify');
+  authorizeUrl.searchParams.set('state', state);
   const response = new Response(null, {
     status: 302,
     headers: {
@@ -54,8 +57,9 @@ function begin(req: Request, env: Env): Response {
     STATE_COOKIE,
     state,
     STATE_TTL_SECONDS,
-    '/auth',
+    STATE_COOKIE_PATH,
   ));
+  response.headers.append('Set-Cookie', clearCookie(STATE_COOKIE, LEGACY_STATE_COOKIE_PATH));
   return response;
 }
 
@@ -65,12 +69,16 @@ async function callback(req: Request, env: Env): Promise<Response> {
   const stateCookie = readCookie(req.headers.get('Cookie'), STATE_COOKIE);
   const queryState = boundedParam(url.searchParams.get('state'), MAX_STATE_LENGTH);
   const code = boundedParam(url.searchParams.get('code'), MAX_CODE_LENGTH);
-  const clearState = clearCookie(STATE_COOKIE, '/auth');
+  const clearState = clearCookie(STATE_COOKIE, STATE_COOKIE_PATH);
 
   if (stateCookie.value === null || queryState === null || !constantTimeEqual(stateCookie.value, queryState)) {
+    console.warn('standalone OAuth state validation failed');
     return failure(clearState);
   }
-  if (code === null) return failure(clearState);
+  if (code === null) {
+    console.warn('standalone OAuth callback did not contain a code');
+    return failure(clearState);
+  }
   if (!isBoundedString(env.DISCORD_CLIENT_ID, MAX_CLIENT_ID_LENGTH) ||
       !isBoundedString(env.DISCORD_REDIRECT_URI, MAX_REDIRECT_URI_LENGTH) ||
       !isBoundedString(env.DISCORD_CLIENT_SECRET, MAX_DISCORD_TOKEN_LENGTH) ||
@@ -92,6 +100,7 @@ async function callback(req: Request, env: Env): Promise<Response> {
       },
     });
     response.headers.append('Set-Cookie', clearState);
+    response.headers.append('Set-Cookie', clearCookie(STATE_COOKIE, LEGACY_STATE_COOKIE_PATH));
     response.headers.append('Set-Cookie', serializeCookie(
       SESSION_COOKIE,
       jwt,
@@ -99,7 +108,11 @@ async function callback(req: Request, env: Env): Promise<Response> {
       '/',
     ));
     return response;
-  } catch {
+  } catch (error) {
+    console.error(
+      'standalone OAuth callback exchange failed',
+      error instanceof Error ? error.message : 'unknown error',
+    );
     return failure(clearState, 502);
   }
 }
@@ -169,6 +182,7 @@ function clearCookie(name: string, path: string): string {
 function failure(clearState: string, status = 400): Response {
   const response = text('authentication failed', status);
   response.headers.append('Set-Cookie', clearState);
+  response.headers.append('Set-Cookie', clearCookie(STATE_COOKIE, LEGACY_STATE_COOKIE_PATH));
   return response;
 }
 
