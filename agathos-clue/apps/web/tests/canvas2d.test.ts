@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GameView } from '@agathos/game';
 import { Canvas2DRenderer } from '../src/game/canvas2d';
 import { cellAtPoint, cellCenter, layoutFor } from '../src/game/board-layout';
+import { hopPath } from '../src/game/movement-path';
 
 describe('board layout', () => {
   it('preserves the canonical 24 x 25 aspect ratio', () => {
@@ -149,6 +150,119 @@ describe('Canvas2DRenderer', () => {
     expect(canvas.context.strokeStyles).toContain('#f9e2af');
   });
 
+  it('clears reachable highlights when movement starts', async () => {
+    const frames: Array<(timestamp: number) => void> = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: (timestamp: number) => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const canvas = new FakeCanvas(240, 250, 240, 250);
+    const renderer = new Canvas2DRenderer();
+    renderer.attach(canvas as unknown as HTMLCanvasElement);
+    renderer.render(view());
+    renderer.highlightReachable(['Ballroom', '12,12']);
+
+    const highlightedStrokeRects = canvas.context.calls.filter(call => call === 'strokeRect').length;
+    const pending = renderer.animateMove('12,12', '13,12', 'Miss Scarlett');
+    const internals = renderer as unknown as { highlight: Set<unknown> };
+    const strokeRectsAfterStart = canvas.context.calls.filter(call => call === 'strokeRect').length;
+
+    expect(internals.highlight.size).toBe(0);
+    expect(strokeRectsAfterStart).toBeGreaterThan(highlightedStrokeRects);
+    await runNextFrame(frames, Number.MAX_VALUE);
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it('clears preloaded flight when an unusable layout prevents animation', async () => {
+    const canvas = new FakeCanvas(23, 24, 23, 24);
+    const renderer = new Canvas2DRenderer();
+    renderer.attach(canvas as unknown as HTMLCanvasElement);
+    renderer.render(view());
+
+    const pending = renderer.animateMove('12,12', '13,12', 'Miss Scarlett');
+    await expect(pending).resolves.toBeUndefined();
+
+    renderer.resize(240, 250);
+    expect(canvas.context.arcRadii).toContain(10 * 0.34);
+  });
+
+  it('cancels animation before drawing an unusable resized layout', async () => {
+    const frames: FrameCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const canvas = new FakeCanvas(240, 250, 240, 250);
+    const renderer = new Canvas2DRenderer();
+    renderer.attach(canvas as unknown as HTMLCanvasElement);
+    renderer.render(view());
+
+    const pending = renderer.animateMove('12,12', '13,12', 'Miss Scarlett');
+    const staleFrame = await takeNextFrame(frames);
+    renderer.resize(23, 24);
+    await expect(pending).resolves.toBeUndefined();
+
+    renderer.resize(240, 250);
+    const callsAfterRecovery = canvas.context.calls.length;
+    staleFrame(Number.MAX_VALUE);
+    expect(canvas.context.calls.length).toBe(callsAfterRecovery);
+  });
+
+  it('suppresses the static token between multi-hop segments', async () => {
+    const frames: Array<(timestamp: number) => void> = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: (timestamp: number) => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const canvas = new FakeCanvas(240, 250, 240, 250);
+    const renderer = new Canvas2DRenderer();
+    renderer.attach(canvas as unknown as HTMLCanvasElement);
+    renderer.render({
+      ...view(),
+      myIndex: 0,
+      players: [
+        { ...view().players[0], suspect: 'Mrs. Peacock', location: '15,12' },
+        { ...view().players[0], name: 'Bob', suspect: 'Miss Scarlett', location: '15,12' },
+      ],
+    });
+
+    const pending = renderer.animateMove('12,12', '15,12', 'Miss Scarlett');
+    expect(canvas.context.lastDrawArcRadii).toEqual([10 * 0.34, 10 * 0.34 + 2]);
+    await runNextFrame(frames, Number.MAX_VALUE);
+
+    expect(canvas.context.lastDrawArcRadii).toEqual([10 * 0.34, 10 * 0.34 + 2]);
+    await runNextFrame(frames, Number.MAX_VALUE);
+    expect(canvas.context.lastDrawArcRadii).toEqual([10 * 0.34, 10 * 0.34 + 2]);
+    await runNextFrame(frames, Number.MAX_VALUE);
+    expect(canvas.context.lastDrawArcRadii).toEqual([10 * 0.34, 10 * 0.34 + 2, 10 * 0.28]);
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it('stops a canceled hop chain from replacing a newer animation', async () => {
+    const frames: Array<(timestamp: number) => void> = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: (timestamp: number) => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const canvas = new FakeCanvas(240, 250, 240, 250);
+    const renderer = new Canvas2DRenderer();
+    renderer.attach(canvas as unknown as HTMLCanvasElement);
+    renderer.render(view());
+
+    const oldMove = renderer.animateMove('12,12', '15,12', 'Miss Scarlett');
+    await runNextFrame(frames, Number.MAX_VALUE);
+    const newer = renderer.animateSuggestion('Miss Scarlett', '12,12', '13,12');
+
+    await expect(oldMove).resolves.toBeUndefined();
+    expect(frames).toHaveLength(1);
+
+    canvas.context.arcRadii.length = 0;
+    await runNextFrame(frames, 0);
+    expect(canvas.context.arcRadii).toEqual([3]);
+    await runNextFrame(frames, Number.MAX_VALUE);
+    await expect(newer).resolves.toBeUndefined();
+  });
+
   it('resolves a replaced animation and ignores its stale frame', async () => {
     const frames: Array<(timestamp: number) => void> = [];
     vi.stubGlobal('requestAnimationFrame', (callback: (timestamp: number) => void) => {
@@ -161,15 +275,84 @@ describe('Canvas2DRenderer', () => {
     renderer.render(view());
 
     const first = renderer.animateSuggestion('Miss Scarlett', '12,12', '13,12');
+    const oldFrame = await takeNextFrame(frames);
     const second = renderer.animateSuggestion('Mrs. Peacock', '12,12', '13,12');
     await expect(first).resolves.toBeUndefined();
 
     const callsBeforeStaleFrame = canvas.context.calls.length;
-    frames[0]!(Number.MAX_VALUE);
+    oldFrame(Number.MAX_VALUE);
     expect(canvas.context.calls.length).toBe(callsBeforeStaleFrame);
 
-    frames[1]!(Number.MAX_VALUE);
+    await runNextFrame(frames, Number.MAX_VALUE);
     await expect(second).resolves.toBeUndefined();
+  });
+
+  it('clears flight state when detached between hop segments', async () => {
+    const frames: Array<(timestamp: number) => void> = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: (timestamp: number) => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const canvas = new FakeCanvas(240, 250, 240, 250);
+    const renderer = new Canvas2DRenderer();
+    renderer.attach(canvas as unknown as HTMLCanvasElement);
+    renderer.render(view());
+
+    const pending = renderer.animateMove('12,12', '15,12', 'Miss Scarlett');
+    await runNextFrame(frames, Number.MAX_VALUE);
+    renderer.detach();
+    await expect(pending).resolves.toBeUndefined();
+
+    const replacementCanvas = new FakeCanvas(240, 250, 240, 250);
+    renderer.attach(replacementCanvas as unknown as HTMLCanvasElement);
+    expect(replacementCanvas.context.arcRadii).toContain(10 * 0.34);
+  });
+
+  it('does not let a same-suspect stale frame clear its replacement', async () => {
+    const frames: Array<(timestamp: number) => void> = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: (timestamp: number) => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const canvas = new FakeCanvas(240, 250, 240, 250);
+    const renderer = new Canvas2DRenderer();
+    renderer.attach(canvas as unknown as HTMLCanvasElement);
+    renderer.render(view());
+
+    const first = renderer.animateSuggestion('Miss Scarlett', '12,12', '13,12');
+    const oldFrame = await takeNextFrame(frames);
+    const second = renderer.animateSuggestion('Miss Scarlett', '12,12', '13,12');
+    await expect(first).resolves.toBeUndefined();
+    canvas.context.arcRadii.length = 0;
+
+    oldFrame(Number.MAX_VALUE);
+    await runNextFrame(frames, 0);
+
+    expect(canvas.context.arcRadii).toEqual([3]);
+    await runNextFrame(frames, Number.MAX_VALUE);
+    await expect(second).resolves.toBeUndefined();
+  });
+
+  it('caps oversized hop paths and clears flight state at completion', async () => {
+    const frames: Array<(timestamp: number) => void> = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: (timestamp: number) => void) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const canvas = new FakeCanvas(240, 250, 240, 250);
+    const renderer = new Canvas2DRenderer();
+    renderer.attach(canvas as unknown as HTMLCanvasElement);
+    renderer.render(view());
+
+    const path = hopPath('12,12', '0,6');
+    expect(path.length).toBeGreaterThan(12);
+    const pending = renderer.animateMove('12,12', '0,6', 'Miss Scarlett');
+    canvas.context.arcRadii.length = 0;
+
+    await runNextFrame(frames, Number.MAX_VALUE);
+
+    expect(canvas.context.arcRadii).toEqual([3, 3, 10 * 0.34, 10 * 0.34 + 2]);
+    await expect(pending).resolves.toBeUndefined();
   });
 
   it('settles the active animation when detached', async () => {
@@ -186,13 +369,32 @@ describe('Canvas2DRenderer', () => {
     const pending = renderer.animateSuggestion('Miss Scarlett', '12,12', '13,12');
     renderer.detach();
     await expect(pending).resolves.toBeUndefined();
-    frames[0]!(Number.MAX_VALUE);
+    await runNextFrame(frames, Number.MAX_VALUE);
   });
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+type FrameCallback = (timestamp: number) => void;
+const FRAME_WAIT_TIMEOUT_MS = 1_000;
+
+async function takeNextFrame(frames: FrameCallback[]): Promise<FrameCallback> {
+  const deadline = Date.now() + FRAME_WAIT_TIMEOUT_MS;
+  while (frames.length === 0) {
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for animation frame');
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+  }
+  const callback = frames.shift();
+  if (!callback) throw new Error('Expected a queued animation frame');
+  return callback;
+}
+
+async function runNextFrame(frames: FrameCallback[], timestamp: number): Promise<void> {
+  const callback = await takeNextFrame(frames);
+  callback(timestamp);
+}
 
 function view(): GameView {
   return {
@@ -222,6 +424,7 @@ function view(): GameView {
 class FakeContext {
   readonly calls: string[] = [];
   readonly arcRadii: number[] = [];
+  readonly lastDrawArcRadii: number[] = [];
   readonly strokeStyles: string[] = [];
   fillStyle = '';
   strokeStyle = '';
@@ -229,7 +432,7 @@ class FakeContext {
   font = '';
   textAlign = 'left';
   textBaseline = 'alphabetic';
-  clearRect(): void { this.calls.push('clearRect'); }
+  clearRect(): void { this.calls.push('clearRect'); this.lastDrawArcRadii.length = 0; }
   fillRect(): void { this.calls.push('fillRect'); }
   strokeRect(): void { this.calls.push('strokeRect'); }
    fillText(): void { this.calls.push('fillText'); }
@@ -238,7 +441,11 @@ class FakeContext {
      return { width: text.length * 7 };
    }
   beginPath(): void { this.calls.push('beginPath'); }
-  arc(_x: number, _y: number, radius: number): void { this.calls.push('arc'); this.arcRadii.push(radius); }
+  arc(_x: number, _y: number, radius: number): void {
+    this.calls.push('arc');
+    this.arcRadii.push(radius);
+    this.lastDrawArcRadii.push(radius);
+  }
   fill(): void { this.calls.push('fill'); }
   moveTo(): void { this.calls.push('moveTo'); }
   lineTo(): void { this.calls.push('lineTo'); }

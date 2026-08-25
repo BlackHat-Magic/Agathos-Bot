@@ -83,8 +83,9 @@
     for (let index = 0; index < next.length; index += 1) {
       const from = previousLocations[index];
       const to = next[index];
-      if (from === undefined || to === undefined || from === to) continue;
-      void renderer.animateMove(from, to);
+      const player = view.players[index];
+      if (player === undefined || from === undefined || to === undefined || from === to) continue;
+      void renderer.animateMove(from, to, player.suspect);
     }
     previousLocations = next;
   }

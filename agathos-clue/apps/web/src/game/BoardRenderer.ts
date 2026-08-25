@@ -7,7 +7,7 @@ export interface BoardRenderer<Ctx> {
   detach(): void;
   render(view: GameView): void;
   highlightReachable(spaces: BoardLocation[]): void;
-  animateMove(from: BoardLocation, to: BoardLocation): Promise<void>;
+  animateMove(from: BoardLocation, to: BoardLocation, suspect: Suspect): Promise<void>;
   animateSuggestion(suspect: Suspect, from: BoardLocation, to: BoardLocation): Promise<void>;
   animateAccusation(suspect: Suspect, weapon: Weapon, room: Room): Promise<void>;
   onUserClickCell(cb: (cell: BoardLocation) => void): void;

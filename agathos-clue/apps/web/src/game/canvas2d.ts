@@ -8,7 +8,7 @@ import {
   isSuspect,
   isWeapon,
 } from '@agathos/game';
-import type { CellId, GameView, Room, Suspect, Weapon } from '@agathos/game';
+import type { GameView, Room, Suspect, Weapon } from '@agathos/game';
 import type { BoardRenderer, BoardLocation } from './BoardRenderer';
 import { hopPath, roomSpread } from './movement-path';
 import {
@@ -78,7 +78,11 @@ interface CanvasLike {
 interface ActiveAnimation {
   lifecycle: number;
   animation: Animation;
-  resolve: () => void;
+  resolve: (completed: boolean) => void;
+}
+
+interface MovementRun {
+  cancelled: boolean;
 }
 
 export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D> {
@@ -89,6 +93,7 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
   private highlight = new Set<BoardLocation>();
   private currentView: GameView | null = null;
   private animation: ActiveAnimation | null = null;
+  private movementRun: MovementRun | null = null;
   /** Suspect whose token is being animated; its static token is suppressed. */
   private flightSuspect: Suspect | null = null;
   private lifecycle = 0;
@@ -125,10 +130,11 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     this.draw();
   }
 
-  animateMove(from: BoardLocation, to: BoardLocation): Promise<void> {
-    const suspect = this.currentView?.players.find(player => player.location === to)?.suspect ??
-      this.currentView?.players.find(player => player.location === from)?.suspect;
-    if (!suspect || !isCanonicalLocation(from) || !isCanonicalLocation(to)) return Promise.resolve();
+  animateMove(from: BoardLocation, to: BoardLocation, suspect: Suspect): Promise<void> {
+    if (!isSuspect(suspect) || !isCanonicalLocation(from) || !isCanonicalLocation(to)) {
+      return Promise.resolve();
+    }
+    this.highlight.clear();
     return this.animateHopPath(suspect, hopPath(from, to));
   }
 
@@ -138,29 +144,55 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     waypoints: BoardLocation[],
     segmentMs = HOP_MS,
   ): Promise<void> {
-    let chain: Promise<void> = Promise.resolve();
-    for (let index = 1; index < waypoints.length; index += 1) {
-      const from = waypoints[index - 1]!;
-      const to = waypoints[index]!;
-      chain = chain.then(() => this.animate(
-        { kind: 'move', suspect, from, to, progress: 0 },
-        segmentMs,
-      ));
-      if (waypoints.length > 12) break; // absurd paths still finish quickly
+    // Keep absurd paths short, but make the truncated segment the final one.
+    const path = waypoints.length > 12 ? waypoints.slice(0, 2) : waypoints;
+    if (path.length < 2) {
+      this.cancelAnimation();
+      this.draw();
+      return Promise.resolve();
     }
-    return chain;
+    this.cancelAnimation();
+    this.flightSuspect = suspect;
+    this.draw();
+    const run: MovementRun = { cancelled: false };
+    this.movementRun = run;
+    let chain: Promise<void> = Promise.resolve();
+    for (let index = 1; index < path.length; index += 1) {
+      const from = path[index - 1]!;
+      const to = path[index]!;
+      const isFinal = index === path.length - 1;
+      chain = chain.then(async () => {
+        if (run.cancelled || this.movementRun !== run) return;
+        const completed = await this.animate(
+          { kind: 'move', suspect, from, to, progress: 0 },
+          segmentMs,
+          !isFinal,
+          run,
+        );
+        if (!completed) {
+          run.cancelled = true;
+          if (this.movementRun === run) {
+            this.flightSuspect = null;
+            if (this.canvas && this.ctx && this.layout) this.draw();
+          }
+        }
+      });
+    }
+    return chain.then(() => {
+      if (this.movementRun === run) this.movementRun = null;
+    });
   }
 
   animateSuggestion(suspect: Suspect, from: BoardLocation, to: BoardLocation): Promise<void> {
     if (!isSuspect(suspect) || !isCanonicalLocation(from) || !isCanonicalLocation(to)) {
       return Promise.resolve();
     }
-    return this.animate({ kind: 'suggestion', suspect, from, to, progress: 0 });
+    return this.animate({ kind: 'suggestion', suspect, from, to, progress: 0 }).then(() => undefined);
   }
 
   animateAccusation(suspect: Suspect, weapon: Weapon, room: Room): Promise<void> {
     if (!isSuspect(suspect) || !isWeapon(weapon) || !isRoom(room)) return Promise.resolve();
-    return this.animate({ kind: 'accusation', suspect, weapon, room, progress: 0 });
+    return this.animate({ kind: 'accusation', suspect, weapon, room, progress: 0 }).then(() => undefined);
   }
 
   onUserClickCell(cb: (location: BoardLocation) => void): void {
@@ -176,6 +208,9 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
       this.canvas.height = height;
     }
     this.layout = layoutFor(width, height);
+    if (!isUsableLayout(this.layout) && (this.animation !== null || this.movementRun !== null)) {
+      this.cancelAnimation();
+    }
     this.draw();
   }
 
@@ -202,9 +237,14 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     this.clickCb(space.room ?? `${point.col},${point.row}`);
   };
 
-  private animate(animation: Animation, durationMs = ANIMATION_MS): Promise<void> {
-    if (!this.canvas || !this.ctx || !this.layout || !isUsableLayout(this.layout)) return Promise.resolve();
-    this.cancelAnimation();
+  private animate(
+    animation: Animation,
+    durationMs = ANIMATION_MS,
+    preserveFlight = false,
+    movementRun: MovementRun | null = null,
+  ): Promise<boolean> {
+    if (!this.canvas || !this.ctx || !this.layout || !isUsableLayout(this.layout)) return Promise.resolve(false);
+    this.cancelAnimation(movementRun);
     if (animation.kind !== 'accusation') this.flightSuspect = animation.suspect;
 
     return new Promise(resolve => {
@@ -212,30 +252,33 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
       const active: ActiveAnimation = {
         lifecycle: this.lifecycle,
         animation,
-        resolve: () => {
+        resolve: (completed: boolean) => {
           if (settled) return;
           settled = true;
-          resolve();
+          resolve(completed);
         },
       };
       this.animation = active;
+      this.draw();
       const start = now();
       const tick = (timestamp: number): void => {
         if (this.animation !== active || active.lifecycle !== this.lifecycle ||
             !this.canvas || !this.ctx || !this.layout) {
-          this.clearFlightFor(animation);
-          this.animation = null;
-          active.resolve();
+          if (this.animation === active) {
+            this.clearFlightFor(animation, preserveFlight);
+            this.animation = null;
+          }
+          active.resolve(false);
           return;
         }
         const progress = Math.min(1, Math.max(0, (timestamp - start) / durationMs));
         active.animation = { ...animation, progress };
         this.draw();
         if (progress >= 1) {
-          this.clearFlightFor(animation);
+          this.clearFlightFor(animation, preserveFlight);
           this.animation = null;
           this.draw();
-          active.resolve();
+          active.resolve(true);
           return;
         }
         requestFrame(tick);
@@ -245,18 +288,24 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
   }
 
   /** Stop suppressing the mover's static token once its flight ends. */
-  private clearFlightFor(animation: Animation): void {
-    if (animation.kind !== 'accusation' && this.flightSuspect === animation.suspect) {
+  private clearFlightFor(animation: Animation, preserveFlight = false): void {
+    if (!preserveFlight && animation.kind !== 'accusation' && this.flightSuspect === animation.suspect) {
       this.flightSuspect = null;
     }
   }
 
-  private cancelAnimation(): void {
+  private cancelAnimation(movementRun: MovementRun | null = null): void {
+    const ownsMovementRun = movementRun !== null && this.movementRun === movementRun;
+    if (this.movementRun !== movementRun) {
+      const activeRun = this.movementRun;
+      if (activeRun) activeRun.cancelled = true;
+      this.movementRun = null;
+    }
     const animation = this.animation;
-    if (!animation) return;
-    this.clearFlightFor(animation.animation);
+    if (!ownsMovementRun) this.flightSuspect = null;
     this.animation = null;
-    animation.resolve();
+    if (!animation) return;
+    animation.resolve(false);
   }
 
   private draw(): void {

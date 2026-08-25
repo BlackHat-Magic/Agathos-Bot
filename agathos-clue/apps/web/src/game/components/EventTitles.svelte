@@ -18,6 +18,7 @@
   let initialized = false;
   let capTimer: ReturnType<typeof setTimeout> | undefined;
   let retryTimers: ReturnType<typeof setTimeout>[] = [];
+  let titleGeneration = 0;
 
   $: ingest($events);
 
@@ -43,17 +44,12 @@
     const priorityIndex = fresh.findIndex(event => event.type === 'revealRequested');
     if (priorityIndex !== -1) {
       const priority = fresh[priorityIndex]!;
-      if (capTimer !== undefined) clearTimeout(capTimer);
       const displaced = fresh.filter(event => event !== priority);
       compact = current ?? displaced[displaced.length - 1] ?? compact;
       queue.length = 0;
       current = priority;
       titlesBusy.set(true);
-      capTimer = setTimeout(() => {
-        compact = current;
-        current = null;
-        drain();
-      }, HOLD_CAP_MS);
+      scheduleCap();
       return;
     }
 
@@ -80,33 +76,45 @@
     }
     const next = queue.shift();
     if (next === undefined) {
-      if (current === null && compact === null) titlesBusy.set(false);
+      if (current === null) titlesBusy.set(false);
       return;
     }
     show(next);
   }
 
   function show(next: Event): void {
-    if (capTimer !== undefined) clearTimeout(capTimer);
     compact = null;
     current = next;
     titlesBusy.set(true);
-    capTimer = setTimeout(() => {
+    scheduleCap();
+  }
+
+  function scheduleCap(): void {
+    const generation = ++titleGeneration;
+    if (capTimer !== undefined) clearTimeout(capTimer);
+    const timer = setTimeout(() => {
+      if (generation !== titleGeneration) return;
+      capTimer = undefined;
       compact = current;
       current = null;
       drain();
     }, HOLD_CAP_MS);
+    capTimer = timer;
   }
 
   function scheduleRetry(fn: () => void, delay: number): void {
-    retryTimers.push(setTimeout(() => {
-      retryTimers = retryTimers.filter(timer => timer !== undefined);
-      fn();
-    }, delay));
+    const generation = titleGeneration;
+    const timer = setTimeout(() => {
+      retryTimers = retryTimers.filter(candidate => candidate !== timer);
+      if (generation === titleGeneration) fn();
+    }, delay);
+    retryTimers.push(timer);
   }
 
   function clearTimers(): void {
+    titleGeneration += 1;
     if (capTimer !== undefined) clearTimeout(capTimer);
+    capTimer = undefined;
     for (const timer of retryTimers) clearTimeout(timer);
     retryTimers = [];
     titlesBusy.set(false);

@@ -3,6 +3,7 @@
   import type { Card } from '@agathos/game';
   import { currentView, diceRolling, privateReveal, titlesBusy } from '../stores';
   import type { PrivateReveal } from '../../transport/snapshots';
+  import { activateReveal, type RevealAnnouncementState } from '../reveal-announcement-state';
   import CardFace from './CardFace.svelte';
 
   const TIMEOUT_MS = 30_000;
@@ -12,38 +13,69 @@
   let dismissed: PrivateReveal | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+  let fallbackGeneration = 0;
+  let activeTimerGeneration = 0;
+  const consumedReveals = new WeakSet<object>();
 
   $: if ($privateReveal !== null &&
+    !consumedReveals.has($privateReveal) &&
     $privateReveal !== active &&
     $privateReveal !== queued &&
     $privateReveal !== dismissed) {
     // Hold until its "revealed a card" title has played.
     queued = $privateReveal;
-    scheduleFallback();
+    scheduleFallback(queued);
   }
 
   $: if (queued !== null && !$titlesBusy && !$diceRolling) {
     announce(queued);
   }
 
-  function announce(reveal: PrivateReveal): void {
-    if (timer !== undefined) clearTimeout(timer);
-    if (fallbackTimer !== undefined) clearTimeout(fallbackTimer);
-    active = reveal;
-    queued = null;
-    timer = setTimeout(dismiss, TIMEOUT_MS);
+  function announce(reveal: PrivateReveal, expectedGeneration = fallbackGeneration): void {
+    if (expectedGeneration !== fallbackGeneration || queued !== reveal) return;
+    if (fallbackTimer !== undefined) {
+      clearTimeout(fallbackTimer);
+      fallbackTimer = undefined;
+    }
+    const current: RevealAnnouncementState = { active, queued, dismissed };
+    const next = activateReveal(current, reveal);
+    if (active?.card !== undefined && active !== reveal) consumedReveals.add(active);
+    active = next.active;
+    queued = next.queued;
+    dismissed = next.dismissed;
+    if (reveal.card === undefined) {
+      consumedReveals.add(reveal);
+      return;
+    }
+    consumedReveals.add(reveal);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+    const timerGeneration = ++activeTimerGeneration;
+    const activeTimer = setTimeout(() => {
+      if (timerGeneration !== activeTimerGeneration) return;
+      timer = undefined;
+      dismiss();
+    }, TIMEOUT_MS);
+    timer = activeTimer;
   }
 
   /** The card must never be silently lost to a stuck gate. */
-  function scheduleFallback(): void {
+  function scheduleFallback(reveal: PrivateReveal): void {
+    const generation = ++fallbackGeneration;
     if (fallbackTimer !== undefined) clearTimeout(fallbackTimer);
-    fallbackTimer = setTimeout(() => {
+    const retry = setTimeout(() => {
+      if (generation !== fallbackGeneration || queued !== reveal) return;
       fallbackTimer = undefined;
-      if (queued !== null && active === null) announce(queued);
+      announce(reveal, generation);
     }, 1_500);
+    fallbackTimer = retry;
   }
 
   function dismiss(): void {
+    activeTimerGeneration += 1;
+    if (active?.card !== undefined) consumedReveals.add(active);
     dismissed = active ?? dismissed;
     active = null;
     if (timer !== undefined) {
@@ -53,6 +85,8 @@
   }
 
   onDestroy(() => {
+    fallbackGeneration += 1;
+    activeTimerGeneration += 1;
     if (timer !== undefined) clearTimeout(timer);
     if (fallbackTimer !== undefined) clearTimeout(fallbackTimer);
   });
