@@ -85,6 +85,7 @@ export class GameRoom extends DurableObject<Env> {
   /** 0 disables pacing (tests); >0 spaces robot actions via alarms. */
   private readonly robotPaceMs = readPaceMs(this.env.ROBOT_STEP_PACE_MS);
   private lastRobotPhaseKey: string | null = null;
+  private lastRobotIntentKind: Intent['kind'] | null = null;
   private readonly connections = new Map<WebSocket, Connection>();
   private gameId = '';
 
@@ -221,7 +222,10 @@ export class GameRoom extends DurableObject<Env> {
         restore: snapshot => { this.game = hydrateGame(snapshot); },
         persist: (game, privateReveal) => this.persistRobotMutation(game, privateReveal),
         broadcast: (events, privateReveal) => this.broadcast(events, privateReveal),
-        onAction: intent => { this.lastRobotPhaseKey = phaseKeyFor(intent.kind); },
+        onAction: intent => {
+          this.lastRobotPhaseKey = phaseKeyFor(intent.kind);
+          this.lastRobotIntentKind = intent.kind;
+        },
         maxSteps: this.robotPaceMs > 0 ? 1 : undefined,
       });
       await this.resetRobotRetry();
@@ -414,15 +418,17 @@ export class GameRoom extends DurableObject<Env> {
     if (this.robotAlarmScheduled) return;
 
     // Phase boundaries (roll→move→suggest→reveal→next robot) get a longer
-    // beat so spectators can keep up with what just happened. Reveal
-    // decisions around the table get triple pace on purpose.
+    // beat so spectators can keep up with what just happened. The suspense
+    // before an unknown reveal decision gets triple pace — but once a player
+    // has shown they have nothing, passing to the next query is brisk.
     const nextKey = this.peekNextRobotPhaseKey();
-    const isReveal = nextKey === 'reveal';
-    const base = this.robotPaceMs * (isReveal ? ROBOT_REVEAL_PACE_MULTIPLIER : 1);
+    const declinedLast = this.lastRobotIntentKind === 'declineReveal';
+    const multiplier = !declinedLast && nextKey === 'reveal'
+      ? ROBOT_REVEAL_PACE_MULTIPLIER
+      : 1;
     const boundary = nextKey === null || nextKey !== this.lastRobotPhaseKey;
-    const bonus = (boundary ? ROBOT_PHASE_BONUS_MS : 0) *
-      (isReveal ? ROBOT_REVEAL_PACE_MULTIPLIER : 1);
-    const delay = base + bonus;
+    const delay = this.robotPaceMs * multiplier +
+      (boundary ? ROBOT_PHASE_BONUS_MS * multiplier : 0);
     try {
       await this.ctx.storage.setAlarm(Date.now() + delay);
       this.robotAlarmScheduled = true;
