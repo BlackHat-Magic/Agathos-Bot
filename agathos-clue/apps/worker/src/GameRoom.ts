@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import {
   applyIntent,
+  cardMatchesSuggestion,
   begin,
   createGame,
   decideRobotIntent,
@@ -43,6 +44,8 @@ import {
 import { currentRobotIndex, hasRobotActionableState, runRobotScheduler } from './robots/scheduler';
 import type { RobotPrivateReveal } from './robots/scheduler';
 import type { ClientIntentKind, PrivateRevealFrame } from './game-room-protocol';
+import { isValidGameId } from './game-id';
+import { isValidUserId } from './auth/jwt';
 export {
   assertIntentAuthority,
   authenticateJwtProtocol,
@@ -55,6 +58,8 @@ export {
 const STORAGE_KEY = 'game';
 const PRIVATE_REVEALS_STORAGE_KEY = 'lastShownCard';
 const ROBOT_ALARM_INFO_STORAGE_KEY = 'robot-alarm-info';
+const DEADLINE_STORAGE_KEY = 'action-deadline';
+const DEFAULT_TURN_TIMEOUT_MS = 60_000;
 const ROBOT_RETRY_INITIAL_DELAY_MS = 1_000;
 const ROBOT_RETRY_MAX_DELAY_MS = 60_000;
 const ROBOT_RETRY_MAX_ATTEMPT = 6;
@@ -65,6 +70,12 @@ const ROBOT_REVEAL_PACE_MULTIPLIER = 3;
 
 interface RobotAlarmInfo {
   retryCount: number;
+}
+
+interface ActionDeadline {
+  at: number;
+  playerIndex: number;
+  kind: 'turn' | 'reveal';
 }
 
 interface Connection {
@@ -82,6 +93,7 @@ export class GameRoom extends DurableObject<Env> {
   private robotRun: Promise<void> | undefined;
   private robotRetryAttempt = 0;
   private robotAlarmScheduled = false;
+  private deadline: ActionDeadline | null = null;
   /** 0 disables pacing (tests); >0 spaces robot actions via alarms. */
   private readonly robotPaceMs = readPaceMs(this.env.ROBOT_STEP_PACE_MS);
   private lastRobotPhaseKey: string | null = null;
@@ -91,11 +103,43 @@ export class GameRoom extends DurableObject<Env> {
 
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
-    if (url.pathname !== '/ws') return new Response('Not found', { status: 404 });
-    if (url.searchParams.get('gameId') === null || url.searchParams.get('gameId') === '') {
-      return new Response('gameId is required', { status: 400 });
+    const internalGameId = url.searchParams.get('gameId');
+    if (internalGameId !== null && isValidGameId(internalGameId)) this.gameId = internalGameId;
+    if (url.pathname === '/internal/lobby/refresh') {
+      if (!isValidGameId(internalGameId)) return new Response('invalid gameId', { status: 400 });
+      this.gameId = internalGameId;
+      await this.loadGame();
+      if (this.lobby === undefined) return new Response('room not loaded', { status: 500 });
+      const lobby = await this.loadLobbyFromD1();
+      if (lobby !== null && this.game?.phase === 'lobby') {
+        this.lobby = lobby;
+        await this.ctx.storage.put(LOBBY_STORAGE_KEY, serializeLobby(lobby));
+        this.broadcastLobby();
+      }
+      return Response.json({ ok: true });
     }
-    this.gameId = url.searchParams.get('gameId')!;
+    if (url.pathname === '/internal/lobby/start') {
+      const userId = req.headers.get('X-User-ID');
+      if (!isValidGameId(internalGameId)) return new Response('invalid gameId', { status: 400 });
+      if (!isValidUserId(userId)) return new Response('unauthorized', { status: 401 });
+      this.gameId = internalGameId;
+      await this.loadGame();
+      if (this.game?.phase !== 'lobby' || this.lobby === undefined) return new Response('not in lobby', { status: 409 });
+      requireLobbyHost(this.lobby, userId);
+      const nextGame = createGame(createStartPlayers(this.lobby));
+      begin(nextGame);
+      const nextLobby = createLobby(this.lobby.botCount);
+      await this.persistStartedGame(this.game, this.lobby, nextGame, nextLobby);
+      this.game = nextGame;
+      this.lobby = nextLobby;
+      this.broadcast([]);
+      await this.maybeRunRobot(true);
+      return Response.json({ ok: true });
+    }
+    if (url.pathname !== '/ws') return new Response('Not found', { status: 404 });
+    const requestedGameId = url.searchParams.get('gameId');
+    if (!isValidGameId(requestedGameId)) return new Response('invalid gameId', { status: 400 });
+    this.gameId = requestedGameId;
     if (req.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return new Response('Expected WebSocket upgrade', { status: 426 });
     }
@@ -132,6 +176,11 @@ export class GameRoom extends DurableObject<Env> {
       serverSocket.accept();
       serverSocket.addEventListener('message', event => {
         const data = event.data;
+        if ((typeof data === 'string' && new TextEncoder().encode(data).byteLength > 16_384) ||
+            (data instanceof ArrayBuffer && data.byteLength > 16_384)) {
+          this.enqueueMessage(connection, null);
+          return;
+        }
         if (typeof data !== 'string' && !(data instanceof ArrayBuffer)) {
           this.enqueueMessage(connection, null);
           return;
@@ -143,6 +192,10 @@ export class GameRoom extends DurableObject<Env> {
 
       this.sendJson(connection, initialPayload);
       if (connection.viewerIndex !== null) this.sendPrivateReveal(connection);
+      if (this.deadline === null) {
+        await this.persistDeadline(deadlineForGame(game));
+      }
+      await this.maybeArmPacingAlarm();
 
       return new Response(null, {
         status: 101,
@@ -171,8 +224,18 @@ export class GameRoom extends DurableObject<Env> {
       await this.enqueueRoomTask(async () => {
         await this.loadGame();
         await this.applyAlarmRetryCount(alarmInfo);
-        if (this.game === undefined || !hasRobotActionableState(this.game)) {
+        if (this.game === undefined) return;
+        if (this.deadline === null) {
+          const nextDeadline = deadlineForGame(this.game);
+          if (nextDeadline !== null) await this.persistDeadline(nextDeadline);
+        }
+        if (this.deadline !== null && this.deadline.at <= Date.now()) {
+          await this.resolveExpiredDeadline();
+          return;
+        }
+        if (!hasRobotActionableState(this.game)) {
           await this.resetRobotRetry();
+          await this.armNextAlarm();
           return;
         }
         await this.runRobotIfNeededWithFailurePolicy(true);
@@ -256,11 +319,70 @@ export class GameRoom extends DurableObject<Env> {
         ROBOT_ALARM_INFO_STORAGE_KEY,
       );
       this.robotRetryAttempt = readRetryCount(storedRobotAlarmInfo);
-      const storedLobby = await this.ctx.storage.get<unknown>(LOBBY_STORAGE_KEY);
-      this.lobby = storedLobby === undefined ? createLobby() : await this.loadLobby(storedLobby);
+      this.deadline = hydrateDeadline(await this.ctx.storage.get<unknown>(DEADLINE_STORAGE_KEY), this.game.players.length);
+        const storedLobby = await this.ctx.storage.get<unknown>(LOBBY_STORAGE_KEY);
+      this.lobby = storedLobby === undefined
+        ? await this.loadLobbyFromD1() ?? createLobby()
+        : await this.loadLobby(storedLobby);
       return this.game;
     });
+    this.gameLoad = this.gameLoad.catch(error => {
+      // A transient storage or D1 failure must not poison this DO instance.
+      // The next request should retry hydration from durable state.
+      this.gameLoad = undefined;
+      throw error;
+    });
     return this.gameLoad;
+  }
+
+  private async loadLobbyFromD1(): Promise<LobbyState | null> {
+    const db = this.env.LOBBY_DB;
+    if (typeof db?.prepare !== 'function' || this.gameId === '') return null;
+    const gameResult = await db.prepare(
+      'SELECT host_user_id, bot_count, state FROM games WHERE id = ? LIMIT 1',
+    ).bind(this.gameId).all<unknown>();
+    const gameRow = gameResult.results[0] as Record<string, unknown> | undefined;
+    if (gameRow === undefined || gameRow.state !== 'lobby' || typeof gameRow.host_user_id !== 'string') return null;
+    const playersResult = await db.prepare(
+      'SELECT user_id, suspect FROM game_players WHERE game_id = ? AND is_bot = 0 ORDER BY player_index',
+    ).bind(this.gameId).all<unknown>();
+    const players = playersResult.results.map(value => {
+      const row = value as Record<string, unknown>;
+      return {
+        userId: String(row.user_id ?? ''),
+        name: String(row.user_id ?? ''),
+        suspect: row.suspect === null || row.suspect === undefined ? null : row.suspect as LobbyState['players'][number]['suspect'],
+      };
+    });
+    return {
+      hostUserId: gameRow.host_user_id,
+      players,
+      botCount: typeof gameRow.bot_count === 'number' ? gameRow.bot_count : undefined,
+    };
+  }
+
+  private async syncLobbyToD1(
+    lobby: LobbyState,
+    state: 'lobby' | 'playing' = 'lobby',
+    hostUserId?: string | null,
+    playerCount = lobby.players.length,
+    botCount = lobby.botCount ?? 0,
+  ): Promise<void> {
+    const db = this.env.LOBBY_DB;
+    if (typeof db?.batch !== 'function' || typeof db?.prepare !== 'function' || this.gameId === '') return;
+    const host = hostUserId ?? lobby.hostUserId ?? lobby.players[0]?.userId;
+    if (host === undefined || host === null) return;
+    const statements = [
+      db.prepare('INSERT OR IGNORE INTO games (id, created_at, state, player_count, bot_count, host_user_id, config_json) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(this.gameId, Date.now(), state, playerCount, botCount, host, '{}'),
+      db.prepare('UPDATE games SET state = ?, host_user_id = ?, player_count = ?, bot_count = ? WHERE id = ?')
+        .bind(state, host, playerCount, botCount, this.gameId),
+      db.prepare('DELETE FROM game_players WHERE game_id = ?').bind(this.gameId),
+      ...lobby.players.map((player, index) => db.prepare(
+        'INSERT INTO game_players (game_id, player_index, user_id, suspect, is_bot) VALUES (?, ?, ?, ?, 0)',
+      ).bind(this.gameId, index, player.userId, player.suspect)),
+    ];
+    await db.batch(statements);
   }
 
   private async loadLobby(storedLobby: unknown): Promise<LobbyState> {
@@ -311,9 +433,11 @@ export class GameRoom extends DurableObject<Env> {
 
     const previous = serializeGame(game);
     const previousPrivateReveals = serializePrivateReveals(this.privateReveals);
+    const previousDeadline = this.deadline;
     const pendingReveal = game.pendingReveal;
     const events = applyIntent(game, connection.viewerIndex!, intent);
     if (intent.kind === 'wait') return;
+    this.deadline = deadlineForGame(game);
     const privateReveal = privateRevealForIntent(pendingReveal, connection.viewerIndex!, intent);
     const nextPrivateReveals = this.nextPrivateReveals(
       connection.userId,
@@ -328,9 +452,13 @@ export class GameRoom extends DurableObject<Env> {
     } catch (error) {
       this.game = hydrateGame(previous);
       this.privateReveals = previousPrivateReveals;
+      this.deadline = previousDeadline;
       throw error;
     }
     this.privateReveals = nextPrivateReveals;
+    // A mutation can replace a human deadline with a robot turn (or vice versa).
+    // Allow the next scheduler pass to overwrite any alarm for the prior state.
+    this.robotAlarmScheduled = false;
     this.broadcast(events, privateReveal);
     await this.maybeRunRobot(true);
   }
@@ -372,7 +500,7 @@ export class GameRoom extends DurableObject<Env> {
         requireLobbyHost(lobby, connection.userId);
         const nextGame = createGame(createStartPlayers(lobby));
         begin(nextGame);
-        const nextLobby = createLobby();
+        const nextLobby = createLobby(lobby.botCount);
         await this.persistStartedGame(game, lobby, nextGame, nextLobby);
         this.game = nextGame;
         this.lobby = nextLobby;
@@ -384,9 +512,15 @@ export class GameRoom extends DurableObject<Env> {
   }
 
   private async persistLobby(nextLobby: LobbyState): Promise<void> {
-    const persisted = serializeLobby(nextLobby);
-    await this.ctx.storage.put(LOBBY_STORAGE_KEY, persisted);
-    this.lobby = nextLobby;
+    const previousLobby = serializeLobby(this.lobby ?? createLobby());
+    try {
+      await this.ctx.storage.put(LOBBY_STORAGE_KEY, serializeLobby(nextLobby));
+      await this.syncLobbyToD1(nextLobby, 'lobby', nextLobby.hostUserId);
+      this.lobby = nextLobby;
+    } catch (error) {
+      await this.ctx.storage.put(LOBBY_STORAGE_KEY, previousLobby);
+      throw error;
+    }
   }
 
   private async persistStartedGame(
@@ -397,25 +531,119 @@ export class GameRoom extends DurableObject<Env> {
   ): Promise<void> {
     const previousPersistedGame = serializeGame(previousGame);
     const previousPersistedLobby = serializeLobby(previousLobby);
+    const previousDeadline = this.deadline;
+    const nextDeadline = deadlineForGame(nextGame);
+    let durableCommitted = false;
     try {
       await this.ctx.storage.transaction(async transaction => {
         await transaction.put({
           [STORAGE_KEY]: serializeGame(nextGame),
           [LOBBY_STORAGE_KEY]: serializeLobby(nextLobby),
+          [DEADLINE_STORAGE_KEY]: nextDeadline,
         });
       });
+      durableCommitted = true;
+      const humanCount = nextGame.players.filter(player => !player.isRobot).length;
+      const robotCount = nextGame.players.filter(player => player.isRobot).length;
+      await this.syncLobbyToD1(
+        previousLobby,
+        'playing',
+        previousLobby.hostUserId,
+        humanCount,
+        robotCount,
+      );
+      this.deadline = nextDeadline;
     } catch (error) {
+      if (durableCommitted) {
+        try {
+          await this.ctx.storage.transaction(async transaction => {
+            await transaction.put({
+              [STORAGE_KEY]: previousPersistedGame,
+              [LOBBY_STORAGE_KEY]: previousPersistedLobby,
+              [DEADLINE_STORAGE_KEY]: previousDeadline,
+            });
+          });
+        } catch (rollbackError) {
+          console.error(`start rollback failed: ${errorMessage(rollbackError)}`);
+        }
+      }
+      this.deadline = previousDeadline;
       this.game = hydrateGame(previousPersistedGame);
       this.lobby = hydrateLobby(previousPersistedLobby);
       throw error;
     }
   }
 
-  private async maybeArmPacingAlarm(): Promise<void> {
-    if (this.robotPaceMs <= 0) return;
+  private async resolveExpiredDeadline(): Promise<void> {
     const game = this.game;
-    if (game === undefined || !hasRobotActionableState(game)) return;
+    const deadline = this.deadline;
+    if (game === undefined || deadline === null) return;
+    if (deadline.kind === 'turn' && game.turnIndex !== deadline.playerIndex) {
+      await this.persistDeadline(deadlineForGame(game));
+      await this.armNextAlarm();
+      return;
+    }
+    if (deadline.kind === 'reveal' && game.pendingReveal?.revealerIndex !== deadline.playerIndex) {
+      await this.persistDeadline(deadlineForGame(game));
+      await this.armNextAlarm();
+      return;
+    }
+    const pending = game.pendingReveal;
+    let intent: Intent;
+    if (deadline.kind === 'reveal' && pending !== null) {
+      const revealer = game.players[deadline.playerIndex];
+      const matching = revealer?.cards.find(card => cardMatchesSuggestion(card, pending));
+      intent = matching === undefined ? { kind: 'declineReveal' } : { kind: 'showCard', card: matching };
+    } else {
+      intent = { kind: 'endTurn' };
+    }
+    const previous = serializeGame(game);
+    const previousPrivate = serializePrivateReveals(this.privateReveals);
+    const previousDeadline = this.deadline;
+    const events = applyIntent(game, deadline.playerIndex, intent);
+    events.push({ type: 'timedOut', playerIndex: deadline.playerIndex, action: deadline.kind });
+    const privateReveal = privateRevealForIntent(pending, deadline.playerIndex, intent);
+    const nextPrivate = this.nextPrivateReveals(
+      game.players[pending?.suggesterIndex ?? deadline.playerIndex]?.userId ?? '',
+      privateReveal,
+      false,
+    );
+    this.deadline = deadlineForGame(game);
+    try {
+      await this.persistGameMutation(game, nextPrivate, !samePrivateReveals(this.privateReveals, nextPrivate));
+    } catch (error) {
+      this.game = hydrateGame(previous);
+      this.privateReveals = previousPrivate;
+      this.deadline = previousDeadline;
+      throw error;
+    }
+    this.privateReveals = nextPrivate;
+    this.broadcast(events, privateReveal);
+    await this.maybeRunRobot(true);
+  }
+
+  private async armNextAlarm(): Promise<void> {
     if (this.robotAlarmScheduled) return;
+    const candidates: number[] = [];
+    if (this.deadline !== null) candidates.push(this.deadline.at);
+    if (this.game !== undefined && hasRobotActionableState(this.game) && this.robotPaceMs > 0) {
+      candidates.push(Date.now() + this.robotPaceMs);
+    }
+    const next = candidates.length === 0 ? null : Math.min(...candidates);
+    if (next === null) return;
+    await this.ctx.storage.setAlarm(next);
+    this.robotAlarmScheduled = true;
+  }
+
+  private async maybeArmPacingAlarm(): Promise<void> {
+    if (this.robotPaceMs <= 0 && this.deadline === null) return;
+    const game = this.game;
+    if (game === undefined || (!hasRobotActionableState(game) && this.deadline === null)) return;
+    if (this.robotAlarmScheduled) return;
+    if (!hasRobotActionableState(game) && this.deadline !== null) {
+      await this.armNextAlarm();
+      return;
+    }
 
     // Phase boundaries (roll→move→suggest→reveal→next robot) get a longer
     // beat so spectators can keep up with what just happened. The suspense
@@ -595,11 +823,29 @@ export class GameRoom extends DurableObject<Env> {
       privateReveal,
       false,
     );
-    await this.persistGameMutation(game, nextPrivateReveals, !samePrivateReveals(
-      this.privateReveals,
-      nextPrivateReveals,
-    ));
-    this.privateReveals = nextPrivateReveals;
+    const previousDeadline = this.deadline;
+    this.deadline = deadlineForGame(game);
+    try {
+      await this.persistGameMutation(game, nextPrivateReveals, !samePrivateReveals(
+        this.privateReveals,
+        nextPrivateReveals,
+      ));
+      this.privateReveals = nextPrivateReveals;
+    } catch (error) {
+      this.deadline = previousDeadline;
+      throw error;
+    }
+  }
+
+  private async persistDeadline(nextDeadline: ActionDeadline | null): Promise<void> {
+    const previousDeadline = this.deadline;
+    this.deadline = nextDeadline;
+    try {
+      await this.ctx.storage.put(DEADLINE_STORAGE_KEY, nextDeadline);
+    } catch (error) {
+      this.deadline = previousDeadline;
+      throw error;
+    }
   }
 
   private async persistGameMutation(
@@ -608,16 +854,12 @@ export class GameRoom extends DurableObject<Env> {
     privateRevealsChanged: boolean,
   ): Promise<void> {
     const serializedGame = serializeGame(game);
-    if (!privateRevealsChanged) {
-      await this.ctx.storage.put(STORAGE_KEY, serializedGame);
-      return;
-    }
-    await this.ctx.storage.transaction(async transaction => {
-      await transaction.put({
-        [STORAGE_KEY]: serializedGame,
-        [PRIVATE_REVEALS_STORAGE_KEY]: serializePrivateReveals(privateReveals),
-      });
-    });
+    const entries: Record<string, unknown> = {
+      [STORAGE_KEY]: serializedGame,
+      [DEADLINE_STORAGE_KEY]: this.deadline,
+    };
+    if (privateRevealsChanged) entries[PRIVATE_REVEALS_STORAGE_KEY] = serializePrivateReveals(privateReveals);
+    await this.ctx.storage.transaction(async transaction => transaction.put(entries));
   }
 
   private sendError(
@@ -699,6 +941,35 @@ function readRetryCount(value: unknown): number {
   const retryCount = (value as Record<string, unknown>).retryCount;
   if (!Number.isInteger(retryCount) || (retryCount as number) < 0) return 0;
   return Math.min(retryCount as number, ROBOT_RETRY_MAX_ATTEMPT);
+}
+
+function deadlineForGame(game: Game): ActionDeadline | null {
+  if (game.phase !== 'playing') return null;
+  if (game.pendingReveal !== null) {
+    const revealer = game.players[game.pendingReveal.revealerIndex];
+    return revealer?.isRobot === false
+      ? { at: Date.now() + DEFAULT_TURN_TIMEOUT_MS, playerIndex: game.pendingReveal.revealerIndex, kind: 'reveal' }
+      : null;
+  }
+  const player = game.players[game.turnIndex];
+  return player?.isRobot === false
+    ? { at: Date.now() + DEFAULT_TURN_TIMEOUT_MS, playerIndex: game.turnIndex, kind: 'turn' }
+    : null;
+}
+
+function hydrateDeadline(value: unknown, playerCount: number): ActionDeadline | null {
+  if (value === null || value === undefined) return null;
+  // A malformed or legacy alarm record must not make the room unavailable.
+  // The current game state remains authoritative and will install a fresh
+  // deadline when the room next serves a request or alarm.
+  if (typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.at !== 'number' || !Number.isFinite(record.at) || record.at < 0 ||
+      !Number.isInteger(record.playerIndex) || (record.playerIndex as number) < 0 ||
+      (record.playerIndex as number) >= playerCount || (record.kind !== 'turn' && record.kind !== 'reveal')) {
+    return null;
+  }
+  return { at: record.at, playerIndex: record.playerIndex as number, kind: record.kind };
 }
 
 function readPaceMs(value: string | undefined): number {

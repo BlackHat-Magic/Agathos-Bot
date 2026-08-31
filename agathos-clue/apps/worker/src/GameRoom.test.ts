@@ -79,6 +79,29 @@ class BunWebSocketFallback {
   }
 }
 
+class D1Spy {
+  readonly batches: Array<Array<{ query: string; args: unknown[] }>> = [];
+
+  prepare(query: string) {
+    const statement = {
+      query,
+      args: [] as unknown[],
+      bind: (...args: unknown[]) => {
+        statement.args = args;
+        return statement;
+      },
+    };
+    return statement;
+  }
+
+  async batch(statements: Array<{ query: string; args: unknown[] }>): Promise<void> {
+    this.batches.push(statements.map(statement => ({
+      query: statement.query,
+      args: [...statement.args],
+    })));
+  }
+}
+
 class BunWebSocketPairFallback {
   0 = new BunWebSocketFallback();
   1 = new BunWebSocketFallback();
@@ -135,7 +158,9 @@ interface TestStorage {
   privateReveals: unknown;
   lobby: unknown;
   robotAlarmInfo: unknown;
+  deadline: unknown;
   failPuts: boolean;
+  remainingGetFailures: number;
   remainingPutFailures: number;
   remainingGamePutFailures: number;
   failTransactions: boolean;
@@ -152,14 +177,16 @@ function roomWithStorage(
   stored?: unknown,
   storedLobby?: unknown,
   storedPrivateReveals?: unknown,
-  envOverrides: Record<string, string> = {},
+  envOverrides: Record<string, unknown> = {},
 ): { gameRoom: GameRoom; storage: TestStorage } {
   const storage: TestStorage = {
     value: stored,
     privateReveals: storedPrivateReveals,
     lobby: storedLobby,
     robotAlarmInfo: undefined,
+    deadline: undefined,
     failPuts: false,
+    remainingGetFailures: 0,
     remainingPutFailures: 0,
     remainingGamePutFailures: 0,
     failTransactions: false,
@@ -173,14 +200,21 @@ function roomWithStorage(
   };
   const ctx = {
     storage: {
-      get: async <T>(key: string) =>
-        (key === 'lobby'
+      get: async <T>(key: string) => {
+        if (storage.remainingGetFailures > 0) {
+          storage.remainingGetFailures -= 1;
+          throw new Error('storage unavailable');
+        }
+        return (key === 'lobby'
           ? storage.lobby
           : key === 'robot-alarm-info'
             ? storage.robotAlarmInfo
-            : key === 'lastShownCard' ? storage.privateReveals : storage.value) as T | undefined,
+            : key === 'lastShownCard'
+              ? storage.privateReveals
+              : key === 'action-deadline' ? storage.deadline : storage.value) as T | undefined;
+      },
       put: async (key: string, value: unknown) => {
-        storage.putCount += 1;
+        if (key !== 'action-deadline') storage.putCount += 1;
         if (storage.failPuts ||
           (key === 'game' && storage.remainingGamePutFailures > 0) ||
           storage.remainingPutFailures > 0) {
@@ -192,6 +226,7 @@ function roomWithStorage(
         }
         if (key === 'lobby') storage.lobby = value;
         else if (key === 'robot-alarm-info') storage.robotAlarmInfo = value;
+        else if (key === 'action-deadline') storage.deadline = value;
         else if (key === 'lastShownCard') storage.privateReveals = value;
         else storage.value = value;
       },
@@ -216,12 +251,20 @@ function roomWithStorage(
         const pending = new Map<string, unknown>();
         const result = await callback({
           put: async entries => {
+            if (Object.hasOwn(entries, 'game')) {
+              storage.putCount += 1;
+              if (storage.failPuts || storage.remainingGamePutFailures > 0) {
+                if (storage.remainingGamePutFailures > 0) storage.remainingGamePutFailures -= 1;
+                throw new Error('storage unavailable');
+              }
+            }
             for (const [key, value] of Object.entries(entries)) pending.set(key, value);
           },
         });
         if (storage.failTransactions) throw new Error('storage unavailable');
         for (const [key, value] of pending) {
           if (key === 'lobby') storage.lobby = value;
+          else if (key === 'action-deadline') storage.deadline = value;
           else if (key === 'lastShownCard') storage.privateReveals = value;
           else storage.value = value;
         }
@@ -241,7 +284,7 @@ function room(stored?: unknown): GameRoom {
 }
 
 async function upgradeRequest(protocol: string): Promise<Request> {
-  return new Request('https://example.test/ws?gameId=game-1', {
+  return new Request('https://example.test/ws?gameId=clue-game:game-1', {
     headers: {
       Upgrade: 'websocket',
       'Sec-WebSocket-Protocol': protocol,
@@ -343,6 +386,23 @@ function pendingRevealGame(revealerIsRobot: boolean, revealerCards: Card[]): Ret
 }
 
 describe('GameRoom protocol helpers', () => {
+  it('retries room hydration after a transient storage failure', async () => {
+    const { gameRoom, storage } = roomWithStorage();
+    storage.remainingGetFailures = 1;
+    const token = await mintJwt({ userId: 'user' }, JWT_SECRET, 60);
+    const first = await gameRoom.fetch(await upgradeRequest(`bearer.${token}`));
+    expect(first.status).toBe(500);
+
+    const connection = await connectJoinedPlayer(gameRoom, 'user');
+    expect(connection.initial).toEqual({
+      type: 'lobby',
+      gameId: 'clue-game:game-1',
+      isHost: false,
+      players: [],
+    });
+    connection.client.close();
+  });
+
   it('accepts only a verified bearer JWT protocol', async () => {
     const token = await mintJwt({ userId: 'alice', scope: 'game' }, JWT_SECRET, 60);
     await expect(authenticateJwtProtocol(`bearer.${token}`, JWT_SECRET)).resolves.toMatchObject({
@@ -466,7 +526,7 @@ describe('GameRoom protocol helpers', () => {
     await expect(received).resolves.toEqual([
         {
           type: 'lobby',
-          gameId: 'game-1',
+          gameId: 'clue-game:game-1',
           isHost: false,
           players: [],
         },
@@ -525,6 +585,33 @@ describe('GameRoom protocol helpers', () => {
     expect(hydrateGame(storage.value).turnIndex).toBe(1);
 
     closeConnections(gameRoom);
+  });
+
+  it('persists deadlines across room reloads and times out the current turn', async () => {
+    const first = roomWithStorage(joinedGame());
+    await connectJoinedPlayer(first.gameRoom, 'alice');
+    const persisted = first.storage.deadline as {
+      at: number;
+      playerIndex: number;
+      kind: string;
+    };
+    expect(persisted).toMatchObject({ playerIndex: 0, kind: 'turn' });
+    expect(persisted.at).toBeGreaterThan(Date.now());
+    closeConnections(first.gameRoom);
+
+    const reloaded = roomWithStorage(first.storage.value, first.storage.lobby);
+    reloaded.storage.deadline = { ...persisted, at: Date.now() - 1 };
+    const connection = await connectJoinedPlayer(reloaded.gameRoom, 'alice');
+    await reloaded.gameRoom.alarm();
+
+    await expect(connection.messages.next()).resolves.toMatchObject({
+      type: 'state',
+      view: { turnIndex: 1 },
+      events: [{ type: 'turnEnded', playerIndex: 0 }, { type: 'timedOut', playerIndex: 0, action: 'turn' }],
+    });
+    expect(reloaded.storage.deadline).toMatchObject({ playerIndex: 1, kind: 'turn' });
+    expect(reloaded.storage.alarm).toBeGreaterThan(Date.now());
+    closeConnections(reloaded.gameRoom);
   });
 
   it('sends a human show privately after persistence without putting the card in state', async () => {
@@ -761,7 +848,7 @@ describe('GameRoom protocol helpers', () => {
     const alice = await connectJoinedPlayer(gameRoom, 'alice');
     expect(alice.initial).toEqual({
       type: 'lobby',
-      gameId: 'game-1',
+      gameId: 'clue-game:game-1',
       isHost: false,
       players: [],
     });
@@ -771,7 +858,7 @@ describe('GameRoom protocol helpers', () => {
     }));
     await expect(alice.messages.next()).resolves.toEqual({
       type: 'lobby',
-      gameId: 'game-1',
+      gameId: 'clue-game:game-1',
       isHost: true,
       players: [{ name: 'Alice', suspect: null, isHost: true }],
     });
@@ -796,7 +883,7 @@ describe('GameRoom protocol helpers', () => {
     alice.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Alice replay' } }));
     await expect(alice.messages.next()).resolves.toEqual({
       type: 'lobby',
-      gameId: 'game-1',
+      gameId: 'clue-game:game-1',
       isHost: true,
       players: [
         { name: 'Alice', suspect: null, isHost: true },
@@ -817,6 +904,32 @@ describe('GameRoom protocol helpers', () => {
     expect(JSON.stringify(alice.messages.received)).not.toContain('cards');
 
     closeConnections(gameRoom);
+  });
+
+  it('persists lobby host changes to D1 when the host leaves', async () => {
+    const db = new D1Spy();
+    const first = roomWithStorage(
+      undefined,
+      { hostUserId: null, players: [] },
+      undefined,
+      { LOBBY_DB: db },
+    );
+    const alice = await connectJoinedPlayer(first.gameRoom, 'alice');
+    alice.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Alice' } }));
+    await alice.messages.next();
+    const bob = await connectJoinedPlayer(first.gameRoom, 'bob');
+    bob.client.send(JSON.stringify({ intent: { kind: 'join', name: 'Bob' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+    alice.client.send(JSON.stringify({ intent: { kind: 'leave' } }));
+    await alice.messages.next();
+    await bob.messages.next();
+
+    expect(first.storage.lobby).toMatchObject({ hostUserId: 'bob' });
+    const latestBatch = db.batches.at(-1) ?? [];
+    const update = latestBatch.find(statement => statement.query.startsWith('UPDATE games SET state'));
+    expect(update?.args).toEqual(['lobby', 'bob', 1, 0, 'clue-game:game-1']);
+    closeConnections(first.gameRoom);
   });
 
   it('persists and reloads the lobby snapshot, reassigning its host when the host leaves', async () => {
@@ -843,7 +956,7 @@ describe('GameRoom protocol helpers', () => {
     const aliceReloaded = await connectJoinedPlayer(reloaded.gameRoom, 'alice');
     expect(aliceReloaded.initial).toEqual({
       type: 'lobby',
-      gameId: 'game-1',
+      gameId: 'clue-game:game-1',
       isHost: true,
       players: [
         { name: 'Alice', suspect: null, isHost: true },
@@ -853,13 +966,13 @@ describe('GameRoom protocol helpers', () => {
     aliceReloaded.client.send(JSON.stringify({ intent: { kind: 'leave' } }));
     await expect(aliceReloaded.messages.next()).resolves.toEqual({
       type: 'lobby',
-      gameId: 'game-1',
+      gameId: 'clue-game:game-1',
       isHost: false,
       players: [{ name: 'Bob', suspect: null, isHost: true }],
     });
     await expect(bobReloaded.messages.next()).resolves.toEqual({
       type: 'lobby',
-      gameId: 'game-1',
+      gameId: 'clue-game:game-1',
       isHost: true,
       players: [{ name: 'Bob', suspect: null, isHost: true }],
     });
@@ -889,7 +1002,7 @@ describe('GameRoom protocol helpers', () => {
     }));
     await expect(alice.messages.next()).resolves.toEqual({
       type: 'lobby',
-      gameId: 'game-1',
+      gameId: 'clue-game:game-1',
       isHost: true,
       players: [
         { name: 'Bob', suspect: 'Miss Scarlett', isHost: false },
@@ -898,7 +1011,7 @@ describe('GameRoom protocol helpers', () => {
     });
     await expect(bob.messages.next()).resolves.toEqual({
       type: 'lobby',
-      gameId: 'game-1',
+      gameId: 'clue-game:game-1',
       isHost: false,
       players: [
         { name: 'Bob', suspect: 'Miss Scarlett', isHost: false },
@@ -913,7 +1026,7 @@ describe('GameRoom protocol helpers', () => {
     const aliceReloaded = await connectJoinedPlayer(reloaded.gameRoom, 'alice');
     expect(bobReloaded.initial).toEqual({
       type: 'lobby',
-      gameId: 'game-1',
+      gameId: 'clue-game:game-1',
       isHost: false,
       players: [
         { name: 'Bob', suspect: 'Miss Scarlett', isHost: false },
@@ -1072,7 +1185,7 @@ describe('GameRoom protocol helpers', () => {
 
     expect(connection.initial).toEqual({
       type: 'lobby',
-      gameId: 'game-1',
+      gameId: 'clue-game:game-1',
       isHost: false,
       players: [],
     });
@@ -1206,8 +1319,9 @@ describe('GameRoom protocol helpers', () => {
 
       expect(hydrateGame(storage.value).turnIndex).toBe(1);
       await expect(bob.messages.next()).resolves.toMatchObject({ type: 'state' });
-      expect(storage.alarm).toBeNull();
-      expect(storage.setAlarmCount).toBe(2);
+      expect(storage.alarm).not.toBeNull();
+      expect(storage.alarm).toBeGreaterThan(Date.now());
+      expect(storage.setAlarmCount).toBe(3);
     } finally {
       log.mockRestore();
       closeConnections(gameRoom);

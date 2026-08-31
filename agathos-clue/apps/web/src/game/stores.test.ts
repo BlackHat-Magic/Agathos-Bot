@@ -1,5 +1,5 @@
 import { get } from 'svelte/store';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { session } from '../auth/standalone';
 import { createJoinIntent } from '../transport/intents';
 import { error, events, gameId, privateReveal, send, lobby, connectionStatus } from './stores';
@@ -45,6 +45,14 @@ class FakeSocket implements WebSocketLike {
 
 const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
 const originalWebSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
+const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+
+beforeEach(() => {
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: async () => Response.json({ authenticated: true, userId: 'alice', token: 'refreshed-jwt' }),
+  });
+});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -52,10 +60,11 @@ afterEach(() => {
   session.set(null);
   restoreGlobal('location', originalLocation);
   restoreGlobal('WebSocket', originalWebSocket);
+  restoreGlobal('fetch', originalFetch);
 });
 
 describe('global game stores', () => {
-  it('clears a mirrored transport error after the next successful frame', () => {
+  it('clears a mirrored transport error after the next successful frame', async () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
     Object.defineProperty(globalThis, 'location', {
@@ -70,17 +79,17 @@ describe('global game stores', () => {
       }
     } });
 
-    gameId.set('game');
+    gameId.set('clue-game:test');
     session.set({ authenticated: true, userId: 'alice', token: 'jwt' });
     sockets[0]!.fail();
     expect(get(error)).toBe('WebSocket connection error');
-    vi.advanceTimersByTime(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
     sockets[1]!.open();
     expect(get(error)).toBeNull();
     sockets[1]!.message(JSON.stringify({ type: 'error', message: 'game is full' }));
     expect(get(error)).toBe('game is full');
     sockets[1]!.message(JSON.stringify({
-      type: 'lobby', gameId: 'game', isHost: false, players: [],
+      type: 'lobby', gameId: 'clue-game:test', isHost: false, players: [],
     }));
     expect(get(error)).toBeNull();
   });
@@ -97,7 +106,7 @@ describe('global game stores', () => {
       }
     } });
 
-    gameId.set('game');
+    gameId.set('clue-game:test');
     session.set({ authenticated: true, userId: 'alice', token: 'jwt' });
     socket.open();
     socket.message(JSON.stringify({
@@ -119,13 +128,13 @@ describe('global game stores', () => {
       fromIndex: 0, card: { type: 'room', room: 'Study' },
     });
     socket.message(JSON.stringify({
-      type: 'lobby', gameId: 'game', isHost: false, players: [],
+      type: 'lobby', gameId: 'clue-game:test', isHost: false, players: [],
     }));
     expect(get(events)).toEqual([]);
     expect(get(privateReveal)).toBeNull();
   });
 
-  it('retains the lobby snapshot during reconnect and replays the join on the replacement socket', () => {
+  it('retains the lobby snapshot during reconnect and replays the join on the replacement socket', async () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
     Object.defineProperty(globalThis, 'location', {
@@ -140,17 +149,17 @@ describe('global game stores', () => {
       }
     } });
 
-    gameId.set('game');
+    gameId.set('clue-game:test');
     session.set({ authenticated: true, userId: 'alice', token: 'jwt' });
     sockets[0]!.open();
-    const lobbyFrame = { type: 'lobby', gameId: 'game', isHost: true, players: [] } as const;
+    const lobbyFrame = { type: 'lobby', gameId: 'clue-game:test', isHost: true, players: [] } as const;
     sockets[0]!.message(JSON.stringify(lobbyFrame));
     expect(send(createJoinIntent('Alice'))).toBe(true);
     sockets[0]!.close();
     expect(get(connectionStatus)).toBe('reconnecting');
     expect(get(lobby)).toEqual(lobbyFrame);
 
-    vi.advanceTimersByTime(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
     sockets[1]!.open();
     expect(sockets[1]!.sent).toEqual(['{"intent":{"kind":"join","name":"Alice"}}']);
     expect(get(lobby)).toEqual(lobbyFrame);
@@ -170,13 +179,13 @@ describe('global game stores', () => {
       }
     } });
 
-    gameId.set('game');
+    gameId.set('clue-game:test');
     session.set({ authenticated: true, userId: 'alice', token: 'jwt' });
     sockets[0]!.open();
     expect(send(createJoinIntent('Alice'))).toBe(true);
     sockets[0]!.close();
 
-    gameId.set('other-game');
+    gameId.set('clue-game:other');
     session.set({ authenticated: true, userId: 'alice', token: 'new-jwt' });
     sockets[2]!.open();
     expect(sockets[2]!.sent).toEqual([]);
@@ -185,7 +194,7 @@ describe('global game stores', () => {
 });
 
 function restoreGlobal(
-  name: 'location' | 'WebSocket',
+  name: 'location' | 'WebSocket' | 'fetch',
   descriptor: PropertyDescriptor | undefined,
 ): void {
   if (descriptor === undefined) Reflect.deleteProperty(globalThis, name);

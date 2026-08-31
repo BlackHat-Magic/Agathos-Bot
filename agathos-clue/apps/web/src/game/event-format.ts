@@ -13,6 +13,7 @@ export function formatEvent(event: Event, view: GameView | null): string {
     case 'accused': return `${playerName(event.playerIndex)} made a ${event.correct ? 'correct' : 'failed'} accusation`;
     case 'turnEnded': return `${playerName(event.playerIndex)} ended their turn`;
     case 'gameWon': return `${playerName(event.playerIndex)} solved the case`;
+    case 'timedOut': return `${playerName(event.playerIndex)} timed out while ${event.action === 'turn' ? 'taking a turn' : 'revealing a card'}`;
   }
 }
 

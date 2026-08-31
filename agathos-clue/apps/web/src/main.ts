@@ -5,6 +5,7 @@ import { initTheme } from './lib/theme';
 import { session } from './auth/standalone';
 import { bootstrapAuth, isEmbeddedContext } from './auth/bootstrap';
 import { bootstrapGameFromUrl } from './game/bootstrap';
+import { isValidGameId } from './transport/game-id';
 import { authPending, embeddedMode, error, gameId } from './game/stores';
 
 initTheme();
@@ -20,7 +21,8 @@ void bootstrapAuth()
     // Everyone in the same voice channel shares one Discord activity instance,
     // so its id is the shared room key when the URL did not pick a game.
     if (initialGameId === null && value !== null && 'instanceId' in value) {
-      gameId.set(`clue-game:${value.instanceId}`);
+      const embeddedGameId = `clue-game:${value.instanceId}`;
+      if (isValidGameId(embeddedGameId)) gameId.set(embeddedGameId);
     }
   })
   .catch(cause => error.set(cause instanceof Error ? cause.message : 'Unable to load session'))

@@ -18,7 +18,10 @@ const SESSION_COOKIE = 'clue-session';
 const STATE_COOKIE_PATH = '/';
 const LEGACY_STATE_COOKIE_PATH = '/auth';
 const STATE_TTL_SECONDS = 300;
-const SESSION_TTL_SECONDS = 3_600;
+const ACCESS_TOKEN_TTL_SECONDS = 3_600;
+// The HttpOnly cookie is a bounded refresh credential. The JSON token remains
+// short-lived and is the only value used for WebSocket authentication.
+const SESSION_TTL_SECONDS = 86_400;
 const MAX_COOKIE_BYTES = 8_192;
 const MAX_STATE_LENGTH = 256;
 const MAX_SESSION_COOKIE_VALUE_BYTES = 4_096;
@@ -72,8 +75,10 @@ async function callback(req: Request, env: Env): Promise<Response> {
   const clearState = clearCookie(STATE_COOKIE, STATE_COOKIE_PATH);
 
   if (stateCookie.value === null || queryState === null || !constantTimeEqual(stateCookie.value, queryState)) {
+    // Do not clear the current state cookie: another tab may own it and still
+    // need to complete its valid callback.
     console.warn('standalone OAuth state validation failed');
-    return failure(clearState);
+    return failure();
   }
   if (code === null) {
     console.warn('standalone OAuth callback did not contain a code');
@@ -128,7 +133,11 @@ async function session(req: Request, env: Env): Promise<Response> {
   if (claims === null || !isValidUserId(claims.userId)) {
     return unauthenticated(clearCookie(SESSION_COOKIE, '/'));
   }
-  return json({ authenticated: true, userId: claims.userId, token });
+  // Mint a fresh short-lived app token on each session check so reconnects do
+  // not keep retrying an expired JWT. Keep the longer-lived HttpOnly cookie as
+  // the refresh credential rather than replacing it with the access token.
+  const refreshed = await mintJwt({ userId: claims.userId }, env.JWT_SECRET, ACCESS_TOKEN_TTL_SECONDS);
+  return json({ authenticated: true, userId: claims.userId, token: refreshed });
 }
 
 function randomState(): string {
@@ -179,9 +188,9 @@ function clearCookie(name: string, path: string): string {
   return `${name}=; Max-Age=0; Path=${path}; HttpOnly; SameSite=Lax; Secure`;
 }
 
-function failure(clearState: string, status = 400): Response {
+function failure(clearState?: string, status = 400): Response {
   const response = text('authentication failed', status);
-  response.headers.append('Set-Cookie', clearState);
+  if (clearState !== undefined) response.headers.append('Set-Cookie', clearState);
   response.headers.append('Set-Cookie', clearCookie(STATE_COOKIE, LEGACY_STATE_COOKIE_PATH));
   return response;
 }

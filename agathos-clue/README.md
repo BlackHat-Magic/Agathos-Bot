@@ -15,15 +15,17 @@ Networked Clue/Cluedo Discord Activity.
 - `bun run build` — Build web and worker
 - `bun run test` — Run tests across the workspace
 - `bun run typecheck` — Typecheck across the workspace
+- `bun --cwd apps/worker run verify:migration` — Verify fresh and legacy D1 migrations
+- `bun --cwd apps/worker run migrate:local` / `migrate:remote` — Apply D1 migrations explicitly before deployment
 
 ## Standalone authentication
 
 The Worker owns Discord OAuth at `/auth/begin` and `/auth/callback`, then
-stores the session JWT in the Secure, HttpOnly `clue-session` cookie. The SPA
-calls `/auth/session` with same-origin credentials; an authenticated response
-is `{ authenticated: true, userId, token }`. The helper does not render or
-persist that token. Task 20 can offer the returned token as the
-`bearer.<token>` WebSocket subprotocol.
+stores a bounded refresh credential in the Secure, HttpOnly `clue-session`
+cookie. The SPA calls `/auth/session` with same-origin credentials; an
+authenticated response is `{ authenticated: true, userId, token }`, where the
+short-lived token is used immediately as the `bearer.<token>` WebSocket
+subprotocol. The helper does not render or persist that token.
 
 When the SPA runs as a Discord Activity, it detects the embedded iframe, lazily
 loads `@discord/embedded-app-sdk`, authorizes the `identify` scope, and posts the
@@ -56,6 +58,12 @@ URL in that Discord application's OAuth2 redirect settings:
   "DISCORD_CLIENT_ID": "<non-production Discord client ID>",
   "DISCORD_REDIRECT_URI": "http://localhost:8787/auth/callback"
 }
+```
+
+Apply the local D1 migrations before starting the Worker:
+
+```sh
+bun --cwd apps/worker run migrate:local
 ```
 
 The local Worker also needs its secrets configured from

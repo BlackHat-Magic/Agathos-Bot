@@ -1,9 +1,9 @@
 import { writable } from 'svelte/store';
 
 /**
- * The token is intentionally returned only from an explicit same-origin
- * session fetch. Task 20 can offer it as the `bearer.<token>` WebSocket
- * subprotocol; this helper does not put it in markup or persistent storage.
+ * The short-lived app token is intentionally returned only from an explicit
+ * same-origin session fetch and is used as the WebSocket bearer subprotocol.
+ * This helper does not put it in markup or persistent storage.
  */
 export interface StandaloneSession {
   authenticated: true;
@@ -36,6 +36,19 @@ export async function loadStandaloneSession(
   }
   if (!isStandaloneSession(value)) throw new Error('session response was invalid');
   return value;
+}
+
+/** Refresh only the app JWT; Discord access tokens never enter this path. */
+export async function refreshStandaloneToken(fetcher: typeof fetch = fetch): Promise<string | null> {
+  const response = await fetcher('/auth/session', {
+    method: 'GET',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) return null;
+  let value: unknown;
+  try { value = await response.json(); } catch { return null; }
+  return isStandaloneSession(value) ? value.token : null;
 }
 
 /**

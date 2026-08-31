@@ -19,6 +19,8 @@ export interface LobbyPlayer {
 export interface LobbyState {
   hostUserId: string | null;
   players: LobbyPlayer[];
+  /** Maximum number of robots added when the host starts (legacy rooms fill all slots). */
+  botCount?: number;
 }
 
 export interface LobbyViewPlayer {
@@ -34,8 +36,12 @@ export interface LobbyView {
   players: LobbyViewPlayer[];
 }
 
-export function createLobby(): LobbyState {
-  return { hostUserId: null, players: [] };
+export function createLobby(botCount?: number): LobbyState {
+  return {
+    hostUserId: null,
+    players: [],
+    ...(botCount === undefined ? {} : { botCount }),
+  };
 }
 
 export function serializeLobby(lobby: LobbyState): LobbyState {
@@ -43,6 +49,7 @@ export function serializeLobby(lobby: LobbyState): LobbyState {
   return {
     hostUserId: lobby.hostUserId,
     players: lobby.players.map(player => ({ ...player })),
+    ...(lobby.botCount === undefined ? {} : { botCount: lobby.botCount }),
   };
 }
 
@@ -51,7 +58,10 @@ export function hydrateLobby(value: unknown): LobbyState {
     throw new Error('invalid persisted lobby: expected an object');
   }
   const isLegacy = Object.hasOwn(value, 'players') && !Object.hasOwn(value, 'hostUserId');
-  requireExactKeys(value, isLegacy ? ['players'] : ['hostUserId', 'players'], 'lobby');
+  const hasBotCount = Object.hasOwn(value, 'botCount');
+  requireExactKeys(value, isLegacy
+    ? (hasBotCount ? ['players', 'botCount'] : ['players'])
+    : (hasBotCount ? ['hostUserId', 'players', 'botCount'] : ['hostUserId', 'players']), 'lobby');
   if (!Array.isArray(value.players)) {
     throw new Error('invalid persisted lobby players: expected an array');
   }
@@ -71,7 +81,8 @@ export function hydrateLobby(value: unknown): LobbyState {
   const hostUserId = isLegacy
     ? players[0]?.userId ?? null
     : validateHostUserId(value.hostUserId);
-  const lobby = { hostUserId, players };
+  const botCount = hasBotCount ? validateBotCount(value.botCount) : undefined;
+  const lobby = { hostUserId, players, ...(botCount === undefined ? {} : { botCount }) };
   validateLobby(lobby);
   return lobby;
 }
@@ -84,8 +95,11 @@ export function joinLobby(lobby: LobbyState, userId: string, rawName: unknown): 
   }
   const name = validateName(rawName);
   return {
-    hostUserId: lobby.hostUserId ?? userId,
+    // An empty lobby may retain a database host for schema compatibility, but
+    // the next member must become the live host.
+    hostUserId: lobby.players.length === 0 ? userId : lobby.hostUserId ?? userId,
     players: [...lobby.players.map(player => ({ ...player })), { userId, name, suspect: null }],
+    ...(lobby.botCount === undefined ? {} : { botCount: lobby.botCount }),
   };
 }
 
@@ -103,6 +117,7 @@ export function claimLobbySuspect(
     hostUserId: lobby.hostUserId,
     players: lobby.players.map(player =>
       player.userId === userId ? { ...player, suspect } : { ...player }),
+    ...(lobby.botCount === undefined ? {} : { botCount: lobby.botCount }),
   };
 }
 
@@ -132,7 +147,11 @@ export function setLobbyOrder(
   const unclaimed = lobby.players
     .filter(player => player.suspect === null)
     .map(player => ({ ...player }));
-  return { hostUserId: lobby.hostUserId, players: [...orderedClaimed, ...unclaimed] };
+  return {
+    hostUserId: lobby.hostUserId,
+    players: [...orderedClaimed, ...unclaimed],
+    ...(lobby.botCount === undefined ? {} : { botCount: lobby.botCount }),
+  };
 }
 
 export function requireLobbyHost(lobby: LobbyState, userId: string): void {
@@ -147,6 +166,7 @@ export function leaveLobby(lobby: LobbyState, userId: string): LobbyState {
   return {
     hostUserId: lobby.hostUserId === userId ? players[0]?.userId ?? null : lobby.hostUserId,
     players,
+    ...(lobby.botCount === undefined ? {} : { botCount: lobby.botCount }),
   };
 }
 
@@ -170,6 +190,7 @@ export function createStartPlayers(lobby: LobbyState): Player[] {
 
   const robots = SUSPECTS
     .filter(suspect => !claimed.has(suspect))
+    .slice(0, Math.min(lobby.botCount ?? MAX_LOBBY_PLAYERS, MAX_LOBBY_PLAYERS - humans.length))
     .map((suspect, index) => makePlayer(suspect, suspect, humans.length + index, true, undefined, board));
   return [...humans, ...robots];
 }
@@ -220,6 +241,7 @@ function validateLobby(lobby: LobbyState): void {
     throw new Error('invalid lobby host: empty lobby must not have a host');
   }
   if (lobby.players.length > MAX_LOBBY_PLAYERS) throw new Error('lobby is full');
+  if (lobby.botCount !== undefined) validateBotCount(lobby.botCount);
   const seenUsers = new Set<string>();
   const seenSuspects = new Set<Suspect>();
   for (const player of lobby.players) {
@@ -264,6 +286,13 @@ function validateHostUserId(value: unknown): string | null {
     throw new Error('invalid persisted lobby hostUserId');
   }
   return value;
+}
+
+function validateBotCount(value: unknown): number {
+  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > MAX_LOBBY_PLAYERS) {
+    throw new Error('invalid lobby botCount');
+  }
+  return value as number;
 }
 
 function validateSuspect(value: unknown): Suspect {

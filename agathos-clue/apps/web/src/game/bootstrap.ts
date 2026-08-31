@@ -1,3 +1,5 @@
+import { isValidGameId } from '../transport/game-id';
+
 export type ReplaceGameUrl = (url: URL) => void;
 
 export function bootstrapGameFromUrl(
@@ -16,5 +18,5 @@ export function bootstrapGameFromUrl(
 
 function usableGameId(value: string | null): string | null {
   const trimmed = value?.trim() ?? '';
-  return trimmed.length === 0 ? null : trimmed;
+  return isValidGameId(trimmed) ? trimmed : null;
 }

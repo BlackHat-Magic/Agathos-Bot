@@ -25,7 +25,7 @@
   let suspect: Suspect = SUSPECTS[0];
   let weapon: Weapon = WEAPONS[0];
   let room: Room = ROOMS[0];
-  let panel: HTMLDivElement;
+  let dialog: HTMLDivElement;
   let accusationPending = false;
   let eventsBeforeAccusation: readonly Event[] = [];
   let accusationBaseline: AccusationBaseline | null = null;
@@ -48,7 +48,7 @@
 
   onMount(() => {
     const restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    void tick().then(() => panel?.focus());
+    void tick().then(() => dialog?.focus());
     return () => restoreFocus?.focus();
   });
 
@@ -75,12 +75,12 @@
 
   function handleKey(event: KeyboardEvent): void {
     if (event.key === 'Escape' && !accusationPending) close();
-    trapDialogFocus(event, panel);
+    trapDialogFocus(event, dialog);
   }
 </script>
 
-<div class="absolute inset-0 z-30 flex flex-col bg-mocha-crust/85 p-4 backdrop-blur-[2px]" role="region" aria-label="Make an accusation" aria-busy={accusationPending} onkeydown={handleKey}>
-  <div bind:this={panel} class="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 overflow-y-auto" tabindex="-1">
+<div bind:this={dialog} class="absolute inset-0 z-30 flex flex-col bg-mocha-crust/85 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label="Make an accusation" aria-busy={accusationPending} tabindex="-1" onkeydown={handleKey}>
+  <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 overflow-y-auto">
     <p class="text-xs font-semibold uppercase tracking-[0.2em] text-mocha-red">Final accusation</p>
 
     <div class="w-full max-w-3xl space-y-5">
@@ -123,10 +123,3 @@
     <button class="game-button game-button-danger" type="button" disabled={!actions.canAccuse || accusationPending} onclick={submit}>Confirm accusation</button>
   </div>
 </div>
-
-<style>
-  .carousel :global(.pick:disabled) {
-    cursor: default;
-    opacity: 0.7;
-  }
-</style>

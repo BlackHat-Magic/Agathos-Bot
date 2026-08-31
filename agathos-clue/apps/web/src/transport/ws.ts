@@ -10,6 +10,7 @@ import type {
   PrivateReveal,
   ServerFrame,
 } from './snapshots';
+import { isValidGameId } from './game-id';
 
 const OPEN = 1;
 const MAX_RECONNECT_DELAY_MS = 15_000;
@@ -39,6 +40,8 @@ export interface TransportOptions {
   reconnectDelayMs?: number;
   setTimeout?: (callback: () => void, delay: number) => TimerHandle;
   clearTimeout?: (timer: TimerHandle) => void;
+  /** Obtain a fresh app JWT before reconnecting. */
+  refreshToken?: () => Promise<string | null>;
 }
 
 export interface Transport {
@@ -53,7 +56,7 @@ export interface Transport {
 }
 
 export function buildWebSocketUrl(gameId: string, origin = currentPageOrigin()): string {
-  if (gameId.length === 0) throw new TypeError('gameId must not be empty');
+  if (!isValidGameId(gameId)) throw new TypeError('gameId is invalid');
   const page = new URL(origin);
   page.protocol = page.protocol === 'https:' ? 'wss:' : 'ws:';
   page.pathname = '/ws';
@@ -63,7 +66,7 @@ export function buildWebSocketUrl(gameId: string, origin = currentPageOrigin()):
 }
 
 export function connect(gameId: string, token: string, options: TransportOptions = {}): Transport {
-  if (gameId.length === 0) throw new TypeError('gameId must not be empty');
+  if (!isValidGameId(gameId)) throw new TypeError('gameId is invalid');
   if (token.length === 0) throw new TypeError('token must not be empty');
 
   const viewStore = writable<GameView | null>(null);
@@ -79,8 +82,7 @@ export function connect(gameId: string, token: string, options: TransportOptions
   const setTimer = options.setTimeout ?? globalThis.setTimeout.bind(globalThis);
   const clearTimer = options.clearTimeout ?? globalThis.clearTimeout.bind(globalThis);
   const url = buildWebSocketUrl(gameId, options.origin ?? currentPageOrigin());
-  const protocol = `bearer.${token}`;
-
+  let currentToken = token;
   let socket: WebSocketLike | undefined;
   let reconnectTimer: TimerHandle | undefined;
   let reconnectAttempt = 0;
@@ -91,6 +93,11 @@ export function connect(gameId: string, token: string, options: TransportOptions
   let currentView: GameView | null = null;
   let currentPrivateReveal: PrivateReveal | null = null;
   let currentEvents: Event[] = [];
+  let baselineReady = false;
+  // Only reconnects require a fresh authoritative frame before gameplay can
+  // be sent. Initial intents may queue while the first socket opens.
+  let requireReconnectBaseline = false;
+  let refreshInFlight: Promise<boolean> | undefined;
 
   const transport: Transport = {
     view: viewStore,
@@ -106,10 +113,23 @@ export function connect(gameId: string, token: string, options: TransportOptions
   openSocket();
   return transport;
 
-  function openSocket(): void {
+  async function openSocket(): Promise<void> {
     if (isClosed || socket !== undefined) return;
+    if (reconnectAttempt > 0 && options.refreshToken !== undefined) {
+      refreshInFlight ??= options.refreshToken().then(nextToken => {
+        if (nextToken === null || nextToken.length === 0) return false;
+        currentToken = nextToken;
+        return true;
+      }).catch(() => false).finally(() => { refreshInFlight = undefined; });
+      if (!await refreshInFlight) {
+        setTransportError('session expired; please sign in again');
+        statusStore.set('closed');
+        isClosed = true;
+        return;
+      }
+    }
     try {
-      const nextSocket = socketFactory(url, [protocol]);
+      const nextSocket = socketFactory(url, [`bearer.${currentToken}`]);
       socket = nextSocket;
       nextSocket.addEventListener('open', () => handleOpen(nextSocket));
       nextSocket.addEventListener('message', event => handleMessage(nextSocket, event));
@@ -124,6 +144,7 @@ export function connect(gameId: string, token: string, options: TransportOptions
   function handleOpen(openedSocket: WebSocketLike): void {
     if (isClosed || socket !== openedSocket) return;
     reconnectAttempt = 0;
+    baselineReady = false;
     isOpen = true;
     statusStore.set('open');
     errorStore.set(null);
@@ -150,7 +171,9 @@ export function connect(gameId: string, token: string, options: TransportOptions
     const wasOpen = isOpen;
     socket = undefined;
     isOpen = false;
+    baselineReady = false;
     if (isClosed) return;
+    if (wasOpen) requireReconnectBaseline = true;
     replayJoinOnOpen = (wasOpen || replayJoinOnOpen) && lastJoinIntent !== undefined;
     statusStore.set('reconnecting');
     scheduleReconnect();
@@ -158,9 +181,11 @@ export function connect(gameId: string, token: string, options: TransportOptions
 
   function handleSocketError(errorSocket: WebSocketLike): void {
     if (isClosed || socket !== errorSocket) return;
+    if (isOpen) requireReconnectBaseline = true;
     replayJoinOnOpen = (isOpen || replayJoinOnOpen) && lastJoinIntent !== undefined;
     socket = undefined;
     isOpen = false;
+    baselineReady = false;
     statusStore.set('reconnecting');
     setTransportError('WebSocket connection error');
     scheduleReconnect();
@@ -174,6 +199,7 @@ export function connect(gameId: string, token: string, options: TransportOptions
   function handleUnexpectedSocketFailure(): void {
     socket = undefined;
     isOpen = false;
+    baselineReady = false;
     if (isClosed) return;
     statusStore.set('reconnecting');
     scheduleReconnect();
@@ -216,16 +242,18 @@ export function connect(gameId: string, token: string, options: TransportOptions
       return false;
     }
     const acceptedIntent = intent.kind === 'join' ? createJoinIntent(intent.name) : intent;
-    if (socket?.readyState === OPEN && isOpen) {
+    if (socket?.readyState === OPEN && isOpen &&
+        (!requireReconnectBaseline || baselineReady || acceptedIntent.kind === 'join')) {
       if (!sendImmediately(socket, acceptedIntent)) return false;
       rememberAcceptedIntent(acceptedIntent);
       return true;
     }
-    if (acceptedIntent.kind === 'join' && replaceQueuedJoin(acceptedIntent)) return true;
-    if (acceptedIntent.kind === 'leave') {
-      removeQueuedJoinIntents();
-      replayJoinOnOpen = false;
+    // Only a join is safe to replay against a newly received authoritative baseline.
+    if (acceptedIntent.kind !== 'join' && requireReconnectBaseline) {
+      setTransportError('waiting for a current game state');
+      return false;
     }
+    if (replaceQueuedJoin(acceptedIntent)) return true;
     if (queue.length >= maxQueueSize) {
       setTransportError(`send queue is full (${maxQueueSize} intents)`);
       return false;
@@ -247,6 +275,7 @@ export function connect(gameId: string, token: string, options: TransportOptions
     const closingSocket = socket;
     socket = undefined;
     isOpen = false;
+    baselineReady = false;
     statusStore.set('closed');
     if (closingSocket !== undefined) {
       try {
@@ -260,6 +289,8 @@ export function connect(gameId: string, token: string, options: TransportOptions
   function applyFrame(frame: ServerFrame): void {
     switch (frame.type) {
       case 'state':
+        baselineReady = true;
+        requireReconnectBaseline = false;
         // A state frame is the public baseline. A following private frame is
         // the only authority that may add a local reveal to this baseline.
         clearRememberedJoin();
@@ -277,6 +308,8 @@ export function connect(gameId: string, token: string, options: TransportOptions
         if (currentView !== null) setView(applyPrivateReveal(currentView));
         return;
       case 'lobby':
+        baselineReady = true;
+        requireReconnectBaseline = false;
         currentPrivateReveal = null;
         privateRevealStore.set(null);
         setView(null);
@@ -286,6 +319,8 @@ export function connect(gameId: string, token: string, options: TransportOptions
         errorStore.set(null);
         return;
       case 'ready':
+        baselineReady = true;
+        requireReconnectBaseline = false;
         clearRememberedJoin();
         currentPrivateReveal = null;
         privateRevealStore.set(null);

@@ -47,6 +47,22 @@ class FakeD1 {
 
 class FakeGameRoomNamespace {
   fetchCalls = 0;
+
+  constructor(private readonly response?: Response) {}
+
+  idFromName(name: string): string {
+    return name;
+  }
+
+  get(): { fetch: (request: Request) => Promise<Response> } | undefined {
+    if (this.response === undefined) return undefined;
+    return {
+      fetch: async () => {
+        this.fetchCalls += 1;
+        return this.response!.clone();
+      },
+    };
+  }
 }
 
 class FakeStatement {
@@ -450,7 +466,9 @@ describe('D1 lobby HTTP registry', () => {
       is_bot: 0,
     });
     const before = JSON.stringify(row);
-    const gameRoom = new FakeGameRoomNamespace();
+    const gameRoom = new FakeGameRoomNamespace(
+      new Response('D1 state is unchanged', { status: 409 }),
+    );
     const response = await handleLobby(
       await request(`/api/games/${gameId}/start`, 'POST', undefined, 'alice'),
       environment(db, gameRoom),
@@ -458,7 +476,7 @@ describe('D1 lobby HTTP registry', () => {
     expect(response.status).toBe(409);
     expect((await responseBody(response)).error).toContain('D1 state is unchanged');
     expect(JSON.stringify(db.games.get(gameId))).toBe(before);
-    expect(gameRoom.fetchCalls).toBe(0);
+    expect(gameRoom.fetchCalls).toBe(1);
 
     const notHost = await handleLobby(await request(`/api/games/${gameId}/start`, 'POST', undefined, 'bob'), environment(db));
     expect(notHost.status).toBe(403);

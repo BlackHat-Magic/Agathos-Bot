@@ -383,7 +383,7 @@ describe('applyIntent', () => {
     };
     expect(applyIntent(game, 0, {
       kind: 'accuse', suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library',
-    })).toEqual([{ type: 'accused', playerIndex: 0, correct: false }]);
+    })).toEqual([{ type: 'accused', playerIndex: 0, correct: false, suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' }]);
     expect(applyIntent(game, 0, { kind: 'endTurn' })).toEqual([
       { type: 'turnEnded', playerIndex: 0 },
     ]);
@@ -721,14 +721,14 @@ describe('applyIntent', () => {
     };
 
     expect(applyIntent(game, 0, { kind: 'accuse', suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' })).toEqual([
-      { type: 'accused', playerIndex: 0, correct: false },
+      { type: 'accused', playerIndex: 0, correct: false, suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' },
     ]);
     expect(players[0]!.failedAccusation).toBe(true);
     expect(game.phase).toBe('playing');
 
     game.turnIndex = 1;
     expect(applyIntent(game, 1, { kind: 'accuse', suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' })).toEqual([
-      { type: 'accused', playerIndex: 1, correct: false },
+      { type: 'accused', playerIndex: 1, correct: false, suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' },
     ]);
     expect(game.phase).toBe('finished');
 
@@ -739,7 +739,7 @@ describe('applyIntent', () => {
       room: { type: 'room', room: 'Library' },
     };
     expect(applyIntent(winner, 0, { kind: 'accuse', suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' })).toEqual([
-      { type: 'accused', playerIndex: 0, correct: true },
+      { type: 'accused', playerIndex: 0, correct: true, suspect: 'Miss Scarlett', weapon: 'Rope', room: 'Library' },
       { type: 'gameWon', playerIndex: 0 },
     ]);
     expect(winner.winnerIndex).toBe(0);

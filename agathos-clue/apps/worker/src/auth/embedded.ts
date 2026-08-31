@@ -13,7 +13,9 @@ import {
   readJsonRequest,
 } from './discord';
 
-const SESSION_TTL_SECONDS = 3_600;
+const ACCESS_TOKEN_TTL_SECONDS = 3_600;
+const SESSION_TTL_SECONDS = 86_400;
+const SESSION_COOKIE = 'clue-session';
 
 export async function handleEmbedded(req: Request, env: Env): Promise<Response> {
   if (req.method !== 'POST') return methodNotAllowed();
@@ -38,13 +40,16 @@ export async function handleEmbedded(req: Request, env: Env): Promise<Response> 
     const discordUser = await fetchDiscordUser(token.accessToken);
     if (!isDiscordUserId(discordUser.id)) return authenticationFailure(502);
 
-    const jwt = await mintJwt({ userId: discordUser.id }, env.JWT_SECRET, SESSION_TTL_SECONDS);
-    return json({
+    const sessionToken = await mintJwt({ userId: discordUser.id }, env.JWT_SECRET, SESSION_TTL_SECONDS);
+    const accessToken = await mintJwt({ userId: discordUser.id }, env.JWT_SECRET, ACCESS_TOKEN_TTL_SECONDS);
+    const response = json({
       authenticated: true,
       userId: discordUser.id,
-      token: jwt,
+      token: accessToken,
       access_token: token.accessToken,
     });
+    response.headers.append('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(sessionToken)}; Max-Age=${SESSION_TTL_SECONDS}; Path=/; HttpOnly; SameSite=Lax; Secure`);
+    return response;
   } catch {
     return authenticationFailure(502);
   }

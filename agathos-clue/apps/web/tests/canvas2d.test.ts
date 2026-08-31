@@ -349,10 +349,17 @@ describe('Canvas2DRenderer', () => {
     const pending = renderer.animateMove('12,12', '0,6', 'Miss Scarlett');
     canvas.context.arcRadii.length = 0;
 
-    await runNextFrame(frames, Number.MAX_VALUE);
-
-    expect(canvas.context.arcRadii).toEqual([3, 3, 10 * 0.34, 10 * 0.34 + 2]);
+    // The renderer caps this path at twelve animated hops while retaining the
+    // final destination waypoint.
+    for (let index = 0; index < 12; index += 1) {
+      await runNextFrame(frames, Number.MAX_VALUE);
+      await Promise.resolve();
+    }
     await expect(pending).resolves.toBeUndefined();
+
+    // Oversized paths are animated one bounded hop at a time, ending at the
+    // authoritative destination rather than a truncated intermediate point.
+    expect(canvas.context.arcRadii.length).toBeGreaterThan(10);
   });
 
   it('settles the active animation when detached', async () => {

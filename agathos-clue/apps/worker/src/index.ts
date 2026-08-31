@@ -1,6 +1,7 @@
 import { handleLobby } from './Lobby';
 import { handleEmbedded } from './auth/embedded';
 import { handleOAuth } from './auth/oauth2';
+import { isValidGameId } from './game-id';
 
 export interface Env {
   ASSETS: Fetcher;
@@ -23,9 +24,7 @@ export default {
     if (url.pathname.startsWith('/api/')) return handleLobby(req, env);
     if (url.pathname === '/ws') {
       const gameId = url.searchParams.get('gameId');
-      if (gameId === null || gameId === '') {
-        return new Response('gameId is required', { status: 400 });
-      }
+      if (!isValidGameId(gameId)) return new Response('invalid gameId', { status: 400 });
       const id = env.GAME_ROOM.idFromName(gameId);
       return env.GAME_ROOM.get(id).fetch(req);
     }

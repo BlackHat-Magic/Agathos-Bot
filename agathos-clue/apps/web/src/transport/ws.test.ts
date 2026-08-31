@@ -74,7 +74,7 @@ describe('typed WebSocket transport', () => {
 
   it('queues intents until open and enforces a bounded FIFO policy', () => {
     const sockets: FakeSocket[] = [];
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -96,7 +96,7 @@ describe('typed WebSocket transport', () => {
   it('reconnects with exponential backoff, resets after open, and caps at 15 seconds', () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -137,7 +137,7 @@ describe('typed WebSocket transport', () => {
   it('prevents duplicate reconnects and never reconnects after close', () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -156,7 +156,7 @@ describe('typed WebSocket transport', () => {
   it('replays the accepted normalized join once before queued intents after reconnect', () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -169,14 +169,13 @@ describe('typed WebSocket transport', () => {
     expect(transport.send({ kind: 'join', name: '  Alice  ' })).toBe(true);
     expect(sockets[0]!.sent).toEqual(['{"intent":{"kind":"join","name":"Alice"}}']);
     sockets[0]!.close();
-    expect(transport.send(createRollIntent())).toBe(true);
+    expect(transport.send(createRollIntent())).toBe(false);
     vi.advanceTimersByTime(1_000);
     sockets[1]!.open();
     sockets[1]!.open();
 
     expect(sockets[1]!.sent).toEqual([
       '{"intent":{"kind":"join","name":"Alice"}}',
-      '{"intent":{"kind":"roll"}}',
     ]);
     expect(JSON.stringify(sockets[1]!.sent)).not.toContain('jwt');
     transport.close();
@@ -185,7 +184,7 @@ describe('typed WebSocket transport', () => {
   it('reconnects after a socket error without waiting for an external close', () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -198,12 +197,11 @@ describe('typed WebSocket transport', () => {
     sockets[0]!.fail();
     expect(get(transport.status)).toBe('reconnecting');
     expect(get(transport.error)).toBe('WebSocket connection error');
-    expect(transport.send(createRollIntent())).toBe(true);
+    expect(transport.send(createRollIntent())).toBe(false);
     vi.advanceTimersByTime(1_000);
     sockets[1]!.open();
     expect(sockets[1]!.sent).toEqual([
       '{"intent":{"kind":"join","name":"Alice"}}',
-      '{"intent":{"kind":"roll"}}',
     ]);
     transport.close();
   });
@@ -211,7 +209,7 @@ describe('typed WebSocket transport', () => {
   it('does not replay a lobby join after an authoritative state frame', () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -223,7 +221,7 @@ describe('typed WebSocket transport', () => {
     sockets[0]!.open();
     transport.send(createJoinIntent('Alice'));
     sockets[0]!.message(JSON.stringify({
-      type: 'lobby', gameId: 'game', isHost: false, players: [],
+      type: 'lobby', gameId: 'clue-game:test', isHost: false, players: [],
     }));
     sockets[0]!.message(JSON.stringify({
       type: 'state',
@@ -247,7 +245,7 @@ describe('typed WebSocket transport', () => {
   it('schedules only one reconnect when an error is followed by close', () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -270,7 +268,7 @@ describe('typed WebSocket transport', () => {
   it('does not replay after an explicit close or an accepted leave', () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -285,7 +283,7 @@ describe('typed WebSocket transport', () => {
     expect(sockets).toHaveLength(1);
 
     const nextSockets: FakeSocket[] = [];
-    const nextTransport = connect('game', 'jwt', {
+    const nextTransport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -296,17 +294,17 @@ describe('typed WebSocket transport', () => {
     nextSockets[0]!.open();
     nextTransport.send(createJoinIntent('Alice'));
     nextSockets[0]!.close();
-    expect(nextTransport.send(createLeaveIntent())).toBe(true);
+    expect(nextTransport.send(createLeaveIntent())).toBe(false);
     vi.advanceTimersByTime(1_000);
     nextSockets[1]!.open();
-    expect(nextSockets[1]!.sent).toEqual(['{"intent":{"kind":"leave"}}']);
+    expect(nextSockets[1]!.sent).toEqual(['{"intent":{"kind":"join","name":"Alice"}}']);
     nextTransport.close();
   });
 
   it('clears replay state after a rejected join and ignores stale callbacks', () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -332,7 +330,7 @@ describe('typed WebSocket transport', () => {
   it('preserves replay after claim and start errors', () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -348,11 +346,11 @@ describe('typed WebSocket transport', () => {
     sockets[1]!.open();
     expect(sockets[1]!.sent).toEqual(['{"intent":{"kind":"join","name":"Alice"}}']);
 
-    expect(transport.send({ kind: 'claimSuspect', suspect: 'Miss Scarlett' })).toBe(true);
+    expect(transport.send({ kind: 'claimSuspect', suspect: 'Miss Scarlett' })).toBe(false);
     sockets[1]!.message(JSON.stringify({
       type: 'error', message: 'claim rejected', intentKind: 'claimSuspect',
     }));
-    expect(transport.send({ kind: 'start' })).toBe(true);
+    expect(transport.send({ kind: 'start' })).toBe(false);
     sockets[1]!.message(JSON.stringify({
       type: 'error', message: 'start rejected', intentKind: 'start',
     }));
@@ -367,7 +365,7 @@ describe('typed WebSocket transport', () => {
   it('preserves replay after malformed and uncorrelated errors', () => {
     vi.useFakeTimers();
     const sockets: FakeSocket[] = [];
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => {
         const socket = new FakeSocket();
@@ -393,7 +391,7 @@ describe('typed WebSocket transport', () => {
 
   it('isolates private reveal cards in the local view and rejects malformed frames', () => {
     const socket = new FakeSocket();
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => socket,
     });
@@ -447,7 +445,7 @@ describe('typed WebSocket transport', () => {
 
   it('clears a transport error after a successful frame', () => {
     const socket = new FakeSocket();
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => socket,
     });
@@ -455,7 +453,7 @@ describe('typed WebSocket transport', () => {
     socket.message(JSON.stringify({ type: 'error', message: 'game is full' }));
     expect(get(transport.error)).toBe('game is full');
     socket.message(JSON.stringify({
-      type: 'lobby', gameId: 'game', isHost: false, players: [],
+      type: 'lobby', gameId: 'clue-game:test', isHost: false, players: [],
     }));
     expect(get(transport.error)).toBeNull();
     transport.close();
@@ -463,7 +461,7 @@ describe('typed WebSocket transport', () => {
 
   it('appends event deltas, caps the log, and keeps it across ready frames', () => {
     const socket = new FakeSocket();
-    const transport = connect('game', 'jwt', {
+    const transport = connect('clue-game:test', 'jwt', {
       origin: 'https://example.test',
       socketFactory: () => socket,
     });
@@ -494,7 +492,7 @@ describe('typed WebSocket transport', () => {
     socket.message(JSON.stringify({ type: 'ready' }));
     expect(get(transport.events)).toHaveLength(64);
     socket.message(JSON.stringify({
-      type: 'lobby', gameId: 'game', isHost: false, players: [],
+      type: 'lobby', gameId: 'clue-game:test', isHost: false, players: [],
     }));
     expect(get(transport.events)).toEqual([]);
     transport.close();

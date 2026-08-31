@@ -182,7 +182,10 @@ describe('standalone Discord OAuth', () => {
     const body = await response.json() as Record<string, unknown>;
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ authenticated: true, userId: '123456789012345678', token: decodeURIComponent(cookie) });
+    expect(body.authenticated).toBe(true);
+    expect(body.userId).toBe('123456789012345678');
+    expect(typeof body.token).toBe('string');
+    expect(body.token).not.toBe(decodeURIComponent(cookie));
     expect(oauth).toHaveBeenCalledTimes(2);
     expect(response.headers.get('Set-Cookie')).toBeNull();
   });

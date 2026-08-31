@@ -7,6 +7,8 @@
     "build": "wrangler deploy --dry-run",
     "test": "vitest run --config vitest.config.ts",
     "verify:migration": "bun scripts/verify-schema-migration.ts",
+    "migrate:local": "wrangler d1 migrations apply agathos-clue-lobby --local",
+    "migrate:remote": "wrangler d1 migrations apply agathos-clue-lobby --remote",
     "typecheck": "wrangler types && tsc --noEmit",
     "cf-typegen": "wrangler types"
   },

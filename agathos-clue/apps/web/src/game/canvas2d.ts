@@ -144,8 +144,10 @@ export class Canvas2DRenderer implements BoardRenderer<CanvasRenderingContext2D>
     waypoints: BoardLocation[],
     segmentMs = HOP_MS,
   ): Promise<void> {
-    // Keep absurd paths short, but make the truncated segment the final one.
-    const path = waypoints.length > 12 ? waypoints.slice(0, 2) : waypoints;
+    // Keep pathological paths bounded without dropping the authoritative destination.
+    const path = waypoints.length > 13
+      ? [waypoints[0]!, ...waypoints.slice(1, 12), waypoints[waypoints.length - 1]!]
+      : waypoints;
     if (path.length < 2) {
       this.cancelAnimation();
       this.draw();

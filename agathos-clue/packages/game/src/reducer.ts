@@ -14,9 +14,10 @@ export type Event =
   | { type: 'revealRequested'; revealerIndex: number }
   | { type: 'revealed'; revealerIndex: number; cardHint: 'private' }
   | { type: 'declinedReveal'; revealerIndex: number }
-  | { type: 'accused'; playerIndex: number; correct: boolean }
+  | { type: 'accused'; playerIndex: number; correct: boolean; suspect: Suspect; weapon: Weapon; room: Room }
   | { type: 'turnEnded'; playerIndex: number }
-  | { type: 'gameWon'; playerIndex: number };
+  | { type: 'gameWon'; playerIndex: number }
+  | { type: 'timedOut'; playerIndex: number; action: 'turn' | 'reveal' };
 
 export type RNG = () => number;
 
@@ -302,7 +303,10 @@ export function applyIntent(
         weapon: intent.weapon,
         room: intent.room,
       });
-      const events: Event[] = [{ type: 'accused', playerIndex, correct }];
+      const events: Event[] = [{
+        type: 'accused', playerIndex, correct,
+        suspect: intent.suspect, weapon: intent.weapon, room: intent.room,
+      }];
       if (correct) events.push({ type: 'gameWon', playerIndex });
       return events;
     }

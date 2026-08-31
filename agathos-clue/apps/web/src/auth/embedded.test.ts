@@ -71,6 +71,11 @@ describe('embedded auth adapter', () => {
       sdkFactory: async () => sdk('bad instance id'),
       fetcher,
     })).rejects.toThrow('embedded activity instance is invalid');
+    await expect(loadEmbeddedSession({
+      clientId: 'client-id',
+      sdkFactory: async () => sdk('a'.repeat(65)),
+      fetcher,
+    })).rejects.toThrow('embedded activity instance is invalid');
 
     function fetcher(): Promise<Response> {
       throw new Error('exchange must not run for an invalid instance');

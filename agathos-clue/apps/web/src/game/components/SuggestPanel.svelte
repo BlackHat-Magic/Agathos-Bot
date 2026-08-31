@@ -11,7 +11,7 @@
 
   let suspect: Suspect = SUSPECTS[0];
   let weapon: Weapon = WEAPONS[0];
-  let panel: HTMLDivElement;
+  let dialog: HTMLDivElement;
 
   $: actions = actionsFor($currentView);
   $: room = $currentView?.players[$currentView.myIndex]?.location ?? 'unknown room';
@@ -23,18 +23,18 @@
 
   function handleKey(event: KeyboardEvent): void {
     if (event.key === 'Escape') onClose();
-    trapDialogFocus(event, panel);
+    trapDialogFocus(event, dialog);
   }
 
   onMount(() => {
     const restoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    void tick().then(() => panel?.focus());
+    void tick().then(() => dialog?.focus());
     return () => restoreFocus?.focus();
   });
 </script>
 
-<div class="absolute inset-0 z-30 flex flex-col bg-mocha-crust/85 p-4 backdrop-blur-[2px]" role="region" aria-label="Make a suggestion" onkeydown={handleKey}>
-  <div bind:this={panel} class="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 overflow-y-auto" tabindex="-1">
+<div bind:this={dialog} class="absolute inset-0 z-30 flex flex-col bg-mocha-crust/85 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label="Make a suggestion" tabindex="-1" onkeydown={handleKey}>
+  <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 overflow-y-auto">
     <p class="text-xs font-semibold uppercase tracking-[0.2em] text-mocha-mauve">Suggestion · {room}</p>
 
     <div class="w-full max-w-3xl space-y-5">

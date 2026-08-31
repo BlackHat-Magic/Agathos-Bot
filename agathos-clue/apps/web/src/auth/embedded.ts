@@ -1,8 +1,9 @@
 import type { StandaloneSession } from './standalone';
+import { isValidGameId } from '../transport/game-id';
 
 const MAX_CLIENT_ID_LENGTH = 128;
 const MAX_ACCESS_TOKEN_LENGTH = 1_024;
-const MAX_INSTANCE_ID_LENGTH = 128;
+const MAX_INSTANCE_ID_LENGTH = 64;
 
 /**
  * Discord assigns one shared `instanceId` to every participant of the same
@@ -45,7 +46,8 @@ export async function loadEmbeddedSession(
   }
 
   const sdk = await (options.sdkFactory ?? createDiscordSdk)(clientId);
-  if (!isBoundedString(sdk.instanceId, MAX_INSTANCE_ID_LENGTH) || /\s/.test(sdk.instanceId)) {
+  if (!isBoundedString(sdk.instanceId, MAX_INSTANCE_ID_LENGTH) ||
+      !isValidGameId(`clue-game:${sdk.instanceId}`)) {
     throw new Error('embedded activity instance is invalid');
   }
   await sdk.ready();

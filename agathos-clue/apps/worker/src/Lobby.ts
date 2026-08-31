@@ -1,12 +1,11 @@
 import { isSuspect } from '@agathos/game';
 import type { Env } from './index';
 import { isValidUserId, verifyJwt } from './auth/jwt';
-
-const MAX_GAME_ID_LENGTH = 80;
+import { GAME_ID_PATTERN, MAX_GAME_ID_LENGTH, parseGameId } from './game-id';
+export { GAME_ID_PATTERN, MAX_GAME_ID_LENGTH, parseGameId } from './game-id';
 const MAX_CONFIG_BYTES = 4_096;
 const MAX_BOT_COUNT = 5;
 const MAX_PLAYERS = 6;
-const GAME_ID_PATTERN = /^clue-game:[A-Za-z0-9_-]{1,64}$/;
 const LOBBY_STATE = 'lobby';
 
 interface GameRow {
@@ -60,7 +59,7 @@ export async function handleLobby(req: Request, env: Env): Promise<Response> {
     }
     if (gamePath !== null && isMutation) {
       const userId = await requireIdentity(req, env);
-      const gameId = parseGameId(gamePath[1]);
+      const gameId = parseRequestedGameId(gamePath[1]);
       if (gamePath[2] === 'join') return await joinGame(req, env, gameId, userId);
       return await startGame(env, gameId, userId);
     }
@@ -131,12 +130,26 @@ async function joinGame(
   }
 
   const playerIndex = existing?.player_index ?? findPlayerIndex(players, game.bot_count);
-  await env.LOBBY_DB.batch([
-    env.LOBBY_DB.prepare(
-      'INSERT INTO game_players (game_id, player_index, user_id, suspect, is_bot) VALUES (?, ?, ?, ?, 0) ON CONFLICT(game_id, user_id) DO UPDATE SET suspect = excluded.suspect',
-    ).bind(gameId, playerIndex, userId, suspect),
-    countPlayersStatement(env, gameId),
-  ]);
+  try {
+    const statements = [
+      env.LOBBY_DB.prepare(
+        'INSERT INTO game_players (game_id, player_index, user_id, suspect, is_bot) VALUES (?, ?, ?, ?, 0) ON CONFLICT(game_id, user_id) DO UPDATE SET suspect = excluded.suspect',
+      ).bind(gameId, playerIndex, userId, suspect),
+      countPlayersStatement(env, gameId),
+    ];
+    if (players.length === 0) {
+      statements.push(env.LOBBY_DB.prepare(
+        'UPDATE games SET host_user_id = ? WHERE id = ? AND player_count = 0',
+      ).bind(userId, gameId));
+    }
+    await env.LOBBY_DB.batch(statements);
+  } catch (error) {
+    if (error instanceof Error && /unique|constraint|full/i.test(error.message)) {
+      throw new LobbyHttpError(409, 'game membership conflicts with another player');
+    }
+    throw error;
+  }
+  await refreshRoom(env, gameId);
   return json({ ok: true });
 }
 
@@ -144,15 +157,30 @@ async function startGame(env: Env, gameId: string, userId: string): Promise<Resp
   const game = await findGame(env, gameId);
   if (game === null) throw new LobbyHttpError(404, 'game not found');
   if (game.state !== LOBBY_STATE) throw new LobbyHttpError(409, 'game is not in the lobby');
+  if (game.player_count === 0) throw new LobbyHttpError(409, 'cannot start an empty game');
   if (game.host_user_id !== userId) throw new LobbyHttpError(403, 'only the host can start the game');
+  const namespace = env.GAME_ROOM;
+  const room = namespace !== undefined &&
+    typeof namespace.get === 'function' && typeof namespace.idFromName === 'function'
+    ? namespace.get(namespace.idFromName(gameId))
+    : undefined;
+  if (room === undefined) throw new LobbyHttpError(503, 'game room is unavailable');
+  const response = await room.fetch(new Request(`https://internal.invalid/internal/lobby/start?gameId=${encodeURIComponent(gameId)}`, {
+    method: 'POST', headers: { 'X-User-ID': userId },
+  }));
+  if (!response.ok) throw new LobbyHttpError(response.status, await response.text());
+  return json({ ok: true });
+}
 
-  // GameRoom owns lifecycle and game state. This Worker path cannot synchronously
-  // establish a WebSocket start, so D1 must remain lobby until that authoritative
-  // transition exists rather than pretending the index started the game.
-  throw new LobbyHttpError(
-    409,
-    'authoritative GameRoom start requires the WebSocket lifecycle; D1 state is unchanged',
-  );
+async function refreshRoom(env: Env, gameId: string): Promise<void> {
+  const namespace = env.GAME_ROOM;
+  const room = namespace !== undefined &&
+    typeof namespace.get === 'function' && typeof namespace.idFromName === 'function'
+    ? namespace.get(namespace.idFromName(gameId))
+    : undefined;
+  if (room === undefined) return;
+  const response = await room.fetch(new Request(`https://internal.invalid/internal/lobby/refresh?gameId=${encodeURIComponent(gameId)}`));
+  if (!response.ok) throw new LobbyHttpError(503, 'game room is unavailable');
 }
 
 async function findGame(env: Env, gameId: string): Promise<GameRow | null> {
@@ -174,28 +202,28 @@ async function requireIdentity(req: Request, env: Env): Promise<string> {
   return userId;
 }
 
+const MAX_JSON_BODY_BYTES = 16_384;
+
 async function readObject(req: Request): Promise<Record<string, unknown>> {
+  const declaredLength = req.headers.get('Content-Length');
+  if (declaredLength !== null && (!/^\d+$/.test(declaredLength) || Number(declaredLength) > MAX_JSON_BODY_BYTES)) {
+    throw new LobbyHttpError(413, 'request body is too large');
+  }
   let value: unknown;
   try {
-    value = await req.json();
-  } catch {
+    const bytes = await req.arrayBuffer();
+    if (bytes.byteLength > MAX_JSON_BODY_BYTES) throw new LobbyHttpError(413, 'request body is too large');
+    value = JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes));
+  } catch (error) {
+    if (error instanceof LobbyHttpError) throw error;
     throw new LobbyHttpError(400, 'request body must be valid JSON');
   }
   if (!isPlainObject(value)) throw new LobbyHttpError(400, 'request body must be a JSON object');
   return value;
 }
 
-function parseGameId(raw: string): string {
-  let gameId: string;
-  try {
-    gameId = decodeURIComponent(raw);
-  } catch {
-    throw new LobbyHttpError(400, 'invalid game id');
-  }
-  if (gameId.length > MAX_GAME_ID_LENGTH || !GAME_ID_PATTERN.test(gameId)) {
-    throw new LobbyHttpError(400, 'invalid game id');
-  }
-  return gameId;
+function parseRequestedGameId(raw: string): string {
+  try { return parseGameId(raw); } catch { throw new LobbyHttpError(400, 'invalid game id'); }
 }
 
 function parseBotCount(value: unknown): number {

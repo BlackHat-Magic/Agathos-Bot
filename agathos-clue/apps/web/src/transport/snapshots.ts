@@ -1,6 +1,7 @@
 import {
   BOARD_HEIGHT,
   BOARD_WIDTH,
+  buildBoard,
   isCard,
   isRoom,
   isSolution,
@@ -15,7 +16,8 @@ const MAX_PLAYERS = 6;
 const MAX_CARDS = 18;
 const MAX_EVENTS = 64;
 const MAX_MESSAGE_LENGTH = 4_096;
-const CELL_ID = /^\d+,\d+$/;
+const CELL_ID = /^(0|[1-9]\d*),(0|[1-9]\d*)$/;
+const CANONICAL_BOARD = buildBoard();
 
 export interface StateFrame {
   type: 'state';
@@ -377,22 +379,40 @@ function validateEvent(value: unknown, index: number, playerCount: number): Even
       requireKeys(event, ['type', 'revealerIndex']);
       return { type: 'declinedReveal', revealerIndex: requireIndex(event.revealerIndex, playerCount, 'event revealer index') };
     case 'accused':
-      requireKeys(event, ['type', 'playerIndex', 'correct']);
-      if (typeof event.correct !== 'boolean') throw new Error(`invalid accused event at index ${index}`);
-      return { type: 'accused', playerIndex: requireIndex(event.playerIndex, playerCount, 'event player index'), correct: event.correct };
+      requireKeys(event, ['type', 'playerIndex', 'correct', 'suspect', 'weapon', 'room']);
+      if (typeof event.correct !== 'boolean' || !isSuspect(event.suspect) ||
+          !isWeapon(event.weapon) || !isRoom(event.room)) {
+        throw new Error(`invalid accused event at index ${index}`);
+      }
+      return { type: 'accused', playerIndex: requireIndex(event.playerIndex, playerCount, 'event player index'), correct: event.correct, suspect: event.suspect, weapon: event.weapon, room: event.room };
     case 'turnEnded':
       requireKeys(event, ['type', 'playerIndex']);
       return { type: 'turnEnded', playerIndex: requireIndex(event.playerIndex, playerCount, 'event player index') };
     case 'gameWon':
       requireKeys(event, ['type', 'playerIndex']);
       return { type: 'gameWon', playerIndex: requireIndex(event.playerIndex, playerCount, 'event player index') };
+    case 'timedOut':
+      requireKeys(event, ['type', 'playerIndex', 'action']);
+      if (event.action !== 'turn' && event.action !== 'reveal') {
+        throw new Error(`invalid timeout event at index ${index}`);
+      }
+      return { type: 'timedOut', playerIndex: requireIndex(event.playerIndex, playerCount, 'event player index'), action: event.action };
     default:
       throw new Error(`unknown event type: ${event.type}`);
   }
 }
 
 function validateLocation(value: unknown, label: string): Room | CellId {
-  if (isRoom(value) || (typeof value === 'string' && CELL_ID.test(value))) return value as Room | CellId;
+  if (isRoom(value)) return value;
+  if (typeof value === 'string') {
+    const match = CELL_ID.exec(value);
+    if (match !== null) {
+      const col = Number(match[1]);
+      const row = Number(match[2]);
+      if (col < BOARD_WIDTH && row < BOARD_HEIGHT && CANONICAL_BOARD[col]?.[row] !== null &&
+          CANONICAL_BOARD[col]?.[row] !== undefined) return value as CellId;
+    }
+  }
   throw new Error(`invalid ${label}`);
 }
 

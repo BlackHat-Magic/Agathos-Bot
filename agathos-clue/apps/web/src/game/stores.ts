@@ -1,6 +1,6 @@
 import { derived, writable } from 'svelte/store';
 import type { Event, GameView } from '@agathos/game';
-import { session } from '../auth/standalone';
+import { refreshStandaloneToken, session } from '../auth/standalone';
 import { connect, type ConnectionStatus, type Transport } from '../transport/ws';
 import type { ClientIntent } from '../transport/intents';
 import type { LobbySnapshot, PrivateReveal } from '../transport/snapshots';
@@ -68,7 +68,9 @@ function syncTransport(): void {
   lobby.set(null);
   error.set(null);
   try {
-    transport = connect(selectedGameId, selectedToken);
+    transport = connect(selectedGameId, selectedToken, {
+      refreshToken: () => refreshStandaloneToken(),
+    });
     connectedGameId = selectedGameId;
     connectedToken = selectedToken;
     stopTransportSubscriptions = subscribeToTransport(transport);
